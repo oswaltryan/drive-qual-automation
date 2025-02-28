@@ -1,6 +1,9 @@
 #digi.py 
 
-import asyncio import shutil import time from tektronix import scpi_command, recall_setup, stop_run_and_capture_pdf, stop_run
+import asyncio 
+import shutil 
+import time 
+from tektronix import scpi_command, recall_setup, stop_run_and_capture_pdf, stop_run
 
 # Ensure disktester is available on PATH.
 DISKTESTER_TOOL = shutil.which("disktester")
