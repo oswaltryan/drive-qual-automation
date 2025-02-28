@@ -1,5 +1,6 @@
+#tektronix.py
 import socket
-
+import time
 # CONFIG
 #################################################
 HOST = "169.254.8.130"  # Instrument IP
@@ -39,9 +40,66 @@ def recall_setup(setup_type="Max IO"):
     print(f'Recalled setup from "{path}"')
 
 def stop_run():
+    scpi_command("ACQUIRE:STATE STOP")
+    print("Acquisition stopped.")
+
+
+def stop_run_and_capture_pdf(pdf_filename):
     """
-    Sends the command to stop the instrument's run.
+    Attempts to stop the Tektronix instrument run and capture its screen as a PDF.
+
+    The commands below are examples:
+      - 'ACQUIRE:STATE STOP' is used to freeze acquisition.
+      - 'HARDCOPY:FORMAT PDF' sets the capture format.
+      - 'HARDCOPY:DESTINATION INTERNAL' directs the file to be stored locally.
+      - 'HARDCOPY:START' initiates the capture.
+
+    Adjust these commands as per your instrument's SCPI reference.
     """
-    scpi_command("STOP")
-    print("STOP command sent.")
+    # Stop the instrument's acquisition (alternative to RSTOP)
+    scpi_command("ACQUIRE:STATE STOP")
+    print("Acquisition stopped.")
+
+    # Configure hardcopy capture to PDF and local destination.
+    scpi_command("HARDCOPY:FORMAT PDF")
+    scpi_command("HARDCOPY:DESTINATION INTERNAL")
+
+    # Initiate the capture.
+    scpi_command("HARDCOPY:START")
+    print("Hardcopy capture initiated.")
+
+    # Allow time for the capture to complete.
+    time.sleep(5)
+
+    print(f"Report captured and saved locally as {pdf_filename}")
+
+
+def stop_cap_pdf(pdf_filename):
+    """
+    Stops the instrument run/acquisition and saves a screenshot as a PDF file
+    on the scope's local or removable storage.
+    
+    Adjust these commands to match your Tektronix model's SCPI reference.
+    """
+    # 1) Stop acquisition
+    scpi_command("ACQUIRE:STATE STOP")
+    print("Acquisition stopped.")
+
+    # 2) Set the port to file output (optional if the scope always defaults to file)
+    scpi_command("HARDCOPY:PORT FILE")
+    
+    # 3) Configure hardcopy format (PDF if supported)
+    scpi_command("HARDCOPY:FORMAT PDF")
+
+    # 4) Specify filename + path on the scope (e.g., USB, internal disk)
+    scpi_command(f'HARDCOPY:FILENAME "{pdf_filename}"')
+
+    # 5) Start the hardcopy process
+    scpi_command("HARDCOPY:START")
+    print("Hardcopy capture initiated...")
+
+    # If needed, wait for the scope to finish writing the file
+    import time
+    time.sleep(3)
+    print(f"Screenshot saved as: {pdf_filename}")
 

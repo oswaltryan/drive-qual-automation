@@ -1,7 +1,6 @@
-import asyncio
-import shutil
-import time
-from tektronix import scpi_command, recall_setup
+#digi.py 
+
+import asyncio import shutil import time from tektronix import scpi_command, recall_setup, stop_run_and_capture_pdf
 
 # Ensure disktester is available on PATH.
 DISKTESTER_TOOL = shutil.which("disktester")
@@ -33,34 +32,6 @@ async def run_disktester_sequential_suite(target_volume):
         print(stderr.decode().strip())
     return process.returncode
 
-def stop_run_and_capture_pdf(pdf_filename):
-    """
-    Attempts to stop the Tektronix instrument run and capture its screen as a PDF.
-    
-    The commands below are examples:
-      - 'ACQUIRE:STATE STOP' is used to freeze acquisition.
-      - 'HARDCOPY:FORMAT PDF' sets the capture format.
-      - 'HARDCOPY:DESTINATION INTERNAL' directs the file to be stored locally.
-      - 'HARDCOPY:START' initiates the capture.
-    
-    Adjust these commands as per your instrument's SCPI reference.
-    """
-    # Stop the instrument's acquisition (alternative to RSTOP)
-    scpi_command("ACQUIRE:STATE STOP")
-    print("Acquisition stopped.")
-    
-    # Configure hardcopy capture to PDF and local destination.
-    scpi_command("HARDCOPY:FORMAT PDF")
-    scpi_command("HARDCOPY:DESTINATION INTERNAL")
-    
-    # Initiate the capture.
-    scpi_command("HARDCOPY:START")
-    print("Hardcopy capture initiated.")
-    
-    # Allow time for the capture to complete.
-    time.sleep(5)
-    
-    print(f"Report captured and saved locally as {pdf_filename}")
 
 async def main():
     target_volume = "DISK"  # Replace with your actual target volume
