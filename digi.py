@@ -1,6 +1,6 @@
 #digi.py 
 
-import asyncio import shutil import time from tektronix import scpi_command, recall_setup, stop_run_and_capture_pdf
+import asyncio import shutil import time from tektronix import scpi_command, recall_setup, stop_run_and_capture_pdf, stop_run
 
 # Ensure disktester is available on PATH.
 DISKTESTER_TOOL = shutil.which("disktester")
@@ -44,9 +44,11 @@ async def main():
     else:
         print(f"Disktester sequential suite test exited with code {retcode}.")
     
-    # Stop the run and capture the report as a PDF.
-    stop_run_and_capture_pdf("tek_report.pdf")
 
 if __name__ == "__main__":
-    asyncio.run(main())
-
+    try:
+        asyncio.run(main())
+    except Exception as e:
+        print(f"Error encountered: {e}")
+    finally:
+        stop_run() 
