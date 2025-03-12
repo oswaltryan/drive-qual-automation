@@ -52,6 +52,25 @@ async def run_fio_benchmark(target_dir, test_type, size_mb, loops):
         
     return process.returncode
 
+def dut_enumeration(unlock_dut=True):
+    global device
+    if unlock_dut:
+        print("Unlock Apricorn device..")
+        while device == None:
+            device = find_apricorn_device()
+        if device.iProduct == "Secure Key 3.0":
+            dut_type = "Secure Key"
+        else:
+            dut_type = "Portable"
+        print(f"Found device: {device.iProduct}")
+    else:
+        # device = None
+        device = find_apricorn_device()
+        if device != None:
+            print("Remove Apricorn device..")
+        while device != None:
+            device = find_apricorn_device()
+
 async def in_rush_current():
     global device, dut_type
     target_directory = "E"  # Update with your test directory
@@ -60,16 +79,7 @@ async def in_rush_current():
     
     # Create test directory if it doesn't exist
     os.makedirs(target_directory, exist_ok=True)
-
-    print("Unlock Apricorn device..")
-    while device == None:
-        device = find_apricorn_device()
-
-    if device.iProduct == "Secure Key 3.0":
-        dut_type = "Secure Key"
-    else:
-        dut_type = "Portable"
-
+    dut_enumeration(unlock_dut=True)
     time.sleep(3)
 
 async def max_IO():
@@ -81,9 +91,9 @@ async def max_IO():
     os.makedirs(target_directory, exist_ok=True)
     
     # Run write benchmark
-    write_ret = await run_fio_benchmark(target_directory, "write", 10, 10)
+    write_ret = await run_fio_benchmark(target_directory, "write", 10, 100)
     # Run read benchmark
-    read_ret = await run_fio_benchmark(target_directory, "read", 10, 10)
+    read_ret = await run_fio_benchmark(target_directory, "read", 10, 100)
     
     # Cleanup test file
     test_file = os.path.join(target_directory, "benchmark_file.dat")
@@ -101,22 +111,18 @@ async def max_IO():
 
 
 if __name__ == "__main__":
-    print("Unlock Apricorn device..")
-    get_device = None
-    while get_device == None:
-        get_device = find_apricorn_device()
+    dut_enumeration(unlock_dut=True)
 
-    if get_device.iProduct == "Secure Key 3.0":
-        dut_type = "Secure Key"
-    else:
-        dut_type = "Portable"
-    print(f"Found device: {get_device.iProduct}")
-    
-    device_under_test = find_apricorn_device()
-    if device_under_test != None:
-        print("Remove Apricorn device to start In-Rush test..")
-    while device_under_test != None:
-        device_under_test = find_apricorn_device()
+    try:
+        asyncio.run(max_IO())
+    except Exception as e:
+        print(f"Critical error: {e}")
+    finally:
+        stop_run()  # Ensure Tektronix equipment stops
+        save_measurements(f"E:\\{part_number}\\Windows\\Max IO\\{device.iProduct}.csv")
+        backup_session(f"E:\\{part_number}\\Windows\\Max IO\\{device.iProduct}.png")
+        dut_enumeration(unlock_dut=False)
+        print("")
 
     try:
         asyncio.run(in_rush_current())
@@ -126,21 +132,3 @@ if __name__ == "__main__":
         stop_run()  # Ensure Tektronix equipment stops
         save_measurements(f"E:\\{part_number}\\Windows\\In Rush Current\\{device.iProduct}.csv")
         backup_session(f"E:\\{part_number}\\Windows\\In Rush Current\\{device.iProduct}.png")
-        print("")
-        time.sleep(3)
-        
-    try:
-        asyncio.run(max_IO())
-    except Exception as e:
-        print(f"Critical error: {e}")
-    finally:
-        stop_run()  # Ensure Tektronix equipment stops
-        save_measurements(f"E:\\{part_number}\\Windows\\Max IO\\{device.iProduct}.csv")
-        backup_session(f"E:\\{part_number}\\Windows\\Max IO\\{device.iProduct}.png")
-  
-    completed_device_under_test = find_apricorn_device()
-    if completed_device_under_test != None:
-        print(f"Remove Apricorn device to complete testing on {device.iProduct} ..")
-    while completed_device_under_test != None:
-        completed_device_under_test = find_apricorn_device()
-
