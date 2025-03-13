@@ -4,7 +4,6 @@ import os
 from tektronix import *
 from windows_usb import *
 import time
-from pprint import pprint
 
 part_number = input("Enter the Apricorn P/N for this drive: ")
 device = None
@@ -79,8 +78,8 @@ async def in_rush_current():
     
     # Create test directory if it doesn't exist
     os.makedirs(target_directory, exist_ok=True)
-    dut_enumeration(unlock_dut=True)
     time.sleep(3)
+    dut_enumeration(unlock_dut=True)
 
 async def max_IO():
     target_directory = "E"  # Update with your test directory
