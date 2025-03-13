@@ -113,8 +113,6 @@ async def in_rush_current():
     recall_setup(setup_type="InRush", device_type=dut_type)  # Initialize Tektronix equipment
     mk_dir(os.path.join("E:\\", part_number, "Windows", "In Rush Current"))  # Create directory for In Rush Current results
     
-    # Create test directory if it doesn't exist
-    os.makedirs(target_directory, exist_ok=True)
     time.sleep(3)
     dut_enumeration(unlock_dut=True)
 
@@ -122,9 +120,6 @@ async def max_IO():
     target_directory = "E"  # Update with your test directory
     recall_setup(setup_type="Max IO")  # Initialize Tektronix equipment
     mk_dir(os.path.join("E:\\", part_number, "Windows", "Max IO"))  # Create directory for Max IO results
-    
-    # Create test directory if it doesn't exist
-    os.makedirs(target_directory, exist_ok=True)
     
     # Run write benchmark
     write_ret = await run_diskspd_benchmark(target_directory, "write")

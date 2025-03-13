@@ -40,12 +40,14 @@ def list_usb_drives():
             size_bytes = int(drive.Size)
         except (TypeError, ValueError):
             continue
+        # for prop in drive.Properties_:
+        #     print(prop.Name, prop.Value)
         size_gb = bytes_to_gb(size_bytes)
         closest_match = find_closest(size_gb, closest_values)
         drives_info.append({
-            "caption": drive.Caption,
-            "size_gb": size_gb,
-            "closest_match": closest_match,
+            "iProduct": drive.Caption,
+            "Capacity": closest_match,
+            "Serial Number": drive.SerialNumber.strip()
         })
     return drives_info
 
