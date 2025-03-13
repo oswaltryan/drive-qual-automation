@@ -1,9 +1,9 @@
 import asyncio
 import shutil
 import os
+import time
 from tektronix import *
 from windows_usb import *
-import time
 
 part_number = input("Enter the Apricorn P/N for this drive: ")
 device = None
@@ -16,6 +16,25 @@ if FIO_TOOL is None:
         "fio not found in PATH. Download from https://bsdio.com/fio/ "
         "and add to system PATH"
     )
+
+def dut_enumeration(unlock_dut=True):
+    global device
+    if unlock_dut:
+        print("Unlock Apricorn device..")
+        while device == None:
+            device = find_apricorn_device()
+        if device.iProduct == "Secure Key 3.0":
+            dut_type = "Secure Key"
+        else:
+            dut_type = "Portable"
+        print(f"Found device: {device.iProduct}")
+    else:
+        # device = None
+        device = find_apricorn_device()
+        if device != None:
+            print("Remove Apricorn device..")
+        while device != None:
+            device = find_apricorn_device()
 
 async def run_fio_benchmark(target_dir, test_type, size_mb, loops):
     """Run fio benchmark with Windows-specific parameters"""
@@ -48,33 +67,14 @@ async def run_fio_benchmark(target_dir, test_type, size_mb, loops):
         print(stdout.decode().strip())
     if stderr:
         print(stderr.decode().strip())
-        
+    
     return process.returncode
-
-def dut_enumeration(unlock_dut=True):
-    global device
-    if unlock_dut:
-        print("Unlock Apricorn device..")
-        while device == None:
-            device = find_apricorn_device()
-        if device.iProduct == "Secure Key 3.0":
-            dut_type = "Secure Key"
-        else:
-            dut_type = "Portable"
-        print(f"Found device: {device.iProduct}")
-    else:
-        # device = None
-        device = find_apricorn_device()
-        if device != None:
-            print("Remove Apricorn device..")
-        while device != None:
-            device = find_apricorn_device()
 
 async def in_rush_current():
     global device, dut_type
     target_directory = "E"  # Update with your test directory
     recall_setup(setup_type="InRush", device_type=dut_type)  # Initialize Tektronix equipment
-    mk_dir(os.path.join(f"E:\\", part_number, "Windows", "In Rush Current")) # Create directory for In Rush Current results
+    mk_dir(os.path.join("E:\\", part_number, "Windows", "In Rush Current"))  # Create directory for In Rush Current results
     
     # Create test directory if it doesn't exist
     os.makedirs(target_directory, exist_ok=True)
@@ -84,7 +84,7 @@ async def in_rush_current():
 async def max_IO():
     target_directory = "E"  # Update with your test directory
     recall_setup(setup_type="Max IO")  # Initialize Tektronix equipment
-    mk_dir(os.path.join(f"E:\\", part_number, "Windows", "Max IO")) # Create path for Max IO results
+    mk_dir(os.path.join("E:\\", part_number, "Windows", "Max IO"))  # Create directory for Max IO results
     
     # Create test directory if it doesn't exist
     os.makedirs(target_directory, exist_ok=True)
@@ -107,7 +107,6 @@ async def max_IO():
         print("\nBenchmark completed successfully")
     else:
         print(f"\nBenchmark failed - Write: {write_ret}, Read: {read_ret}")
-
 
 if __name__ == "__main__":
     dut_enumeration(unlock_dut=True)

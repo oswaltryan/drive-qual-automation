@@ -4,7 +4,6 @@ import os
 import time
 from tektronix import *
 from windows_usb import *
-from pprint import pprint
 
 part_number = input("Enter the Apricorn P/N for this drive: ")
 device = None
@@ -16,6 +15,25 @@ if DISKSPD_TOOL is None:
     raise FileNotFoundError(
         "diskspd not found in PATH. Download it and add to system PATH"
     )
+
+def dut_enumeration(unlock_dut=True):
+    global device
+    if unlock_dut:
+        print("Unlock Apricorn device..")
+        while device == None:
+            device = find_apricorn_device()
+        if device.iProduct == "Secure Key 3.0":
+            dut_type = "Secure Key"
+        else:
+            dut_type = "Portable"
+        print(f"Found device: {device.iProduct}")
+    else:
+        # device = None
+        device = find_apricorn_device()
+        if device != None:
+            print("Remove Apricorn device..")
+        while device != None:
+            device = find_apricorn_device()
 
 def parse_diskspd_output(output: str) -> dict:
     """
@@ -95,24 +113,17 @@ async def in_rush_current():
     recall_setup(setup_type="InRush", device_type=dut_type)  # Initialize Tektronix equipment
     mk_dir(os.path.join("E:\\", part_number, "Windows", "In Rush Current"))  # Create directory for In Rush Current results
     
+    # Create test directory if it doesn't exist
     os.makedirs(target_directory, exist_ok=True)
-    
-    print("Unlock Apricorn device..")
-    while device is None:
-        device = find_apricorn_device()
-    
-    if device.iProduct == "Secure Key 3.0":
-        dut_type = "Secure Key"
-    else:
-        dut_type = "Portable"
-    
     time.sleep(3)
+    dut_enumeration(unlock_dut=True)
 
 async def max_IO():
     target_directory = "E"  # Update with your test directory
     recall_setup(setup_type="Max IO")  # Initialize Tektronix equipment
     mk_dir(os.path.join("E:\\", part_number, "Windows", "Max IO"))  # Create directory for Max IO results
     
+    # Create test directory if it doesn't exist
     os.makedirs(target_directory, exist_ok=True)
     
     # Run write benchmark
@@ -128,40 +139,15 @@ async def max_IO():
     except Exception as e:
         print(f"\nError cleaning up test file: {e}")
     
+    # Check results
     if write_ret == 0 and read_ret == 0:
         print("\nBenchmark completed successfully")
     else:
         print(f"\nBenchmark failed - Write: {write_ret}, Read: {read_ret}")
 
 if __name__ == "__main__":
-    print("Unlock Apricorn device..")
-    get_device = None
-    while get_device is None:
-        get_device = find_apricorn_device()
-    
-    if get_device.iProduct == "Secure Key 3.0":
-        dut_type = "Secure Key"
-    else:
-        dut_type = "Portable"
-    print(f"Found device: {get_device.iProduct}")
-    
-    device_under_test = find_apricorn_device()
-    if device_under_test is not None:
-        print("Remove Apricorn device to start In-Rush test..")
-    while device_under_test is not None:
-        device_under_test = find_apricorn_device()
-    
-    try:
-        asyncio.run(in_rush_current())
-    except Exception as e:
-        print(f"Critical error: {e}")
-    finally:
-        stop_run()  # Ensure Tektronix equipment stops
-        save_measurements(f"E:\\{part_number}\\Windows\\In Rush Current\\{device.iProduct}.csv")
-        backup_session(f"E:\\{part_number}\\Windows\\In Rush Current\\{device.iProduct}.png")
-        print("")
-        time.sleep(3)
-    
+    dut_enumeration(unlock_dut=True)
+
     try:
         asyncio.run(max_IO())
     except Exception as e:
@@ -170,9 +156,14 @@ if __name__ == "__main__":
         stop_run()  # Ensure Tektronix equipment stops
         save_measurements(f"E:\\{part_number}\\Windows\\Max IO\\{device.iProduct}.csv")
         backup_session(f"E:\\{part_number}\\Windows\\Max IO\\{device.iProduct}.png")
-    
-    completed_device_under_test = find_apricorn_device()
-    if completed_device_under_test is not None:
-        print(f"Remove Apricorn device to complete testing on {device.iProduct} ..")
-    while completed_device_under_test is not None:
-        completed_device_under_test = find_apricorn_device()
+        dut_enumeration(unlock_dut=False)
+        print("")
+
+    try:
+        asyncio.run(in_rush_current())
+    except Exception as e:
+        print(f"Critical error: {e}")
+    finally:
+        stop_run()  # Ensure Tektronix equipment stops
+        save_measurements(f"E:\\{part_number}\\Windows\\In Rush Current\\{device.iProduct}.csv")
+        backup_session(f"E:\\{part_number}\\Windows\\In Rush Current\\{device.iProduct}.png")
