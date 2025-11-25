@@ -185,7 +185,7 @@ def update_progress(project_path: Path, category: str, task: str, status: bool =
     except Exception as e:
         print(f"Failed to update tracker: {e}")
 
-def data_drive_setup() -> Tuple[Path, Path, str]:
+def data_drive_setup() -> Tuple[Path, Path]:
     """
     The main orchestrator function.
     Returns:
@@ -236,8 +236,7 @@ def data_drive_setup() -> Tuple[Path, Path, str]:
     initialize_tracker(project_path)
     
     print("--- Setup Complete ---")
-    # Return project_path.name separately so we can send just the string to the Tektronix
-    return drive_root, project_path, project_path.name
+    return drive_root, project_path
 
 if __name__ == "__main__":
     try:

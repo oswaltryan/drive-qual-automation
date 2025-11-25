@@ -12,76 +12,69 @@ maxio_path = 'C:/Drive Qual IO Current Voltage'
 
 # FUNCTIONS
 #################################################
-def scpi_command(cmd, read_response=False):
+def scpi_command(cmd, read_response=False, raw=False):
     """
     Sends a SCPI command to the instrument over TCP.
-    If read_response is True, returns the instrument's response.
+    
+    Args:
+        cmd (str): SCPI command (without trailing newline).
+        read_response (bool): If True, read a response from the instrument.
+        raw (bool): If True, return raw bytes and read until EOF.
+                    If False, read a single ASCII chunk (up to 4096 bytes).
+
+    Returns:
+        - None if read_response is False or on error.
+        - str if read_response is True and raw is False.
+        - bytes if read_response is True and raw is True.
     """
     try:
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-            s.settimeout(5) # Safety timeout
+            s.settimeout(5)  # Safety timeout
             s.connect((HOST, PORT))
             s.sendall((cmd + "\n").encode("ascii"))
-            if read_response:
+
+            if not read_response:
+                return None
+
+            if raw:
+                # Read until the instrument closes the connection
+                chunks = []
+                while True:
+                    chunk = s.recv(4096)
+                    if not chunk:
+                        break
+                    chunks.append(chunk)
+                return b"".join(chunks)
+            else:
+                # Simple ASCII response for normal SCPI queries
                 return s.recv(4096).decode("ascii").strip().strip('"')
+
     except socket.error as e:
         print(f"SCPI Communication Error: {e}")
         return None
-
-def detect_scope_drive():
+    
+def tektronix_copy(remote_path, local_path):
     """
-    Probes the Tektronix MSO for available USB host drive: E:, F:, or G:.
-    This uses scpi_command internal to this library.
+    Copies a file FROM the Tektronix MSO TO the host machine.
+
+    Args:
+        remote_path (str): Path as seen by the scope, e.g. 'E:/waveforms/tek0001CH1.csv'
+        local_path  (str): Local path on the host, e.g. './tek0001CH1.csv'
 
     Returns:
-        'E:', 'F:', or 'G:' when found.
-        Raises Exception if none found.
+        local_path on success, or raises RuntimeError on failure.
     """
-    for drive in ["E:", "F:", "G:"]:
-        # Try setting the working directory to that drive
-        scpi_command(f'FILESYSTEM:CWD "{drive}"')
-        
-        # Confirm by querying the CWD back
-        current = scpi_command("FILESYSTEM:CWD?", read_response=True)
-        
-        if current and drive in current:
-            print(f"Scope Storage Detected: {drive}")
-            return drive
-            
-    raise IOError("No USB drive detected on Tektronix Scope (Checked E, F, G)")
+    data = scpi_command(f'FILESystem:READFile "{remote_path}"', read_response=True, raw=True)
+    if data is None:
+        raise RuntimeError(f"Failed to read remote file '{remote_path}' from Tektronix (no data returned).")
 
-def mk_dir(path):
-    """
-    Attempts to create a directory on the Scope.
-    """
-    # Note: SCPI often throws an error if the dir exists, 
-    # but we can just proceed as it doesn't crash the python script.
-    scpi_command(f"FILESystem:MKDir '{path}'")
+    try:
+        with open(local_path, "wb") as f:
+            f.write(data)
+    except OSError as e:
+        raise RuntimeError(f"Failed to save file to '{local_path}': {e}")
 
-def ensure_scope_directory_structure(drive_letter, project_name, sub_folders):
-    """
-    Creates the folder hierarchy on the Scope one level at a time.
-    Example: E:/ -> E:/Project -> E:/Project/Windows -> E:/Project/Windows/Max IO
-    
-    Returns:
-        str: The base project path on the scope (e.g., "E:/ProjectName")
-    """
-    # 1. Create Project Folder
-    base_project_path = f"{drive_letter}/{project_name}"
-    mk_dir(base_project_path) 
-    print(f"Verifying Scope path: {base_project_path}")
-    
-    # 2. Create Subfolders
-    for folder in sub_folders:
-        # Create OS folder (e.g., Windows)
-        current_path = f"{base_project_path}/{folder}"
-        mk_dir(current_path) 
-        
-        # Create Test specific folders within that OS folder
-        mk_dir(f"{current_path}/Max IO")
-        mk_dir(f"{current_path}/In Rush Current")
-    
-    return base_project_path
+    return local_path
 
 def recall_setup(setup_type="Max IO", device_type="Portable"):
     """
