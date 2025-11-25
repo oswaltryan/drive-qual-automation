@@ -53,6 +53,11 @@ def scpi_command(cmd, read_response=False, raw=False):
         print(f"SCPI Communication Error: {e}")
         return None
     
+def check_error():
+    # SYSTem:ERRor? returns the next error in the queue
+    err = scpi_command("SYSTem:ERRor?", read_response=True)
+    print(f"Instrument Error: {err}")
+    
 def tektronix_list_dir(remote_path=""):
     """
     Lists the contents of a directory on the instrument.
