@@ -57,7 +57,7 @@ def check_error():
     # SYSTem:ERRor? returns the next error in the queue
     err = scpi_command("SYSTem:ERRor?", read_response=True)
     print(f"Instrument Error: {err}")
-    
+
 def tektronix_list_dir(remote_path=""):
     """
     Lists the contents of a directory on the instrument.
@@ -86,71 +86,64 @@ def tektronix_list_dir(remote_path=""):
     return response
 
 def tektronix_copy(remote_path, local_path):
-    """
-    Copies a file FROM the Tektronix MSO TO the host machine
-    using FILESystem:READFile, which returns arbitrary block data.
-
-    Args:
-        remote_path (str): Path as seen by the scope, e.g. 'E:/data/file.csv'
-        local_path  (str): Local path on the host, e.g. './file.csv'
-
-    Returns:
-        local_path on success, or raises RuntimeError on failure.
-    """
     cmd = f'FILESystem:READFile "{remote_path}"'
     
     try:
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-            s.settimeout(10) # Use a longer timeout for file transfer
+            s.settimeout(10) 
             s.connect((HOST, PORT))
             
-            # 1. Send the READFile command
+            # Flush banner if necessary
+            s.settimeout(0.1)
+            try: s.recv(1024)
+            except: pass
+            s.settimeout(10)
+
             s.sendall((cmd + "\n").encode("ascii"))
             
-            # 2. Read the definite-length arbitrary block header
-            # Header format: #<A><X...>, where A is length of X, and X is data length
-            header = s.recv(1) # Read the '#'
+            # 1. Read the Block Header '#'
+            header = s.recv(1)
             if header != b'#':
-                raise RuntimeError(f"Unexpected start of file transfer response: {header.decode()}")
+                # If we get text instead of '#', it's likely an error message
+                trailing = s.recv(1024) 
+                err_msg = (header + trailing).decode('latin-1')
+                raise RuntimeError(f"Scope returned error instead of file: {err_msg}")
 
-            len_digits_byte = s.recv(1) # Read 'A' (the number of digits in the length field)
-            if not len_digits_byte:
-                raise RuntimeError("Failed to read block length digit count.")
-            
-            len_digits = int(len_digits_byte.decode())
-            
-            # Read 'X...' (the length of the data block)
+            # 2. Read 'A' (length of length)
+            len_digits_byte = s.recv(1)
+            # Decode using latin-1 to avoid crash, then convert to int
+            len_digits = int(len_digits_byte.decode('latin-1'))
+
+            # 3. Read 'X' (the byte count)
             data_length_bytes = s.recv(len_digits)
-            data_length = int(data_length_bytes.decode())
-            print(f"File transfer detected: {data_length} bytes.")
+            data_length = int(data_length_bytes.decode('latin-1'))
+            
+            print(f"Downloading {data_length} bytes...")
 
-            # 3. Read the exact data block
+            # 4. Read the binary data loop
             data_buffer = []
             bytes_received = 0
             while bytes_received < data_length:
-                # Read the remaining bytes or 4096 (whichever is smaller)
-                chunk = s.recv(min(data_length - bytes_received, 4096))
+                chunk_size = min(data_length - bytes_received, 4096)
+                chunk = s.recv(chunk_size)
                 if not chunk:
-                    raise RuntimeError("Socket closed unexpectedly during file transfer.")
+                    raise RuntimeError("Connection closed during transfer")
                 data_buffer.append(chunk)
                 bytes_received += len(chunk)
             
             data = b"".join(data_buffer)
-
-            # 4. Read the termination character(s) (e.g., \n or \r\n)
-            s.recv(1) # This assumes the termination is a single character (\n)
             
-            if len(data) != data_length:
-                 raise RuntimeError(f"Data length mismatch. Expected {data_length}, received {len(data)}.")
-                 
-            # 5. Save the received data locally
+            # 5. Read trailing newline (SCPI termination)
+            s.recv(1) 
+
             with open(local_path, "wb") as f:
                 f.write(data)
 
-    except socket.error as e:
-        raise RuntimeError(f"SCPI Communication Error during file transfer: {e}")
-
-    return local_path
+    except Exception as e:
+        print(f"Transfer failed: {e}")
+        # Suggest checking error queue if it fails
+        err = scpi_command("SYSTem:ERRor?", read_response=True)
+        print(f"System Error Queue: {err}")
 
 def recall_setup(setup_type="Max IO", device_type="Portable"):
     """
