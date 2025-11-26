@@ -111,58 +111,58 @@ def tektronix_list_dir(remote_path=""):
         
     return response
 
-def tek_filesystem_copy(source_path: str, dest_path: str):
+def tek_filesystem_copy(source_path, dest_path):
     """
     Instructs the Tektronix scope to copy a file from its local disk 
-    to another location (e.g., a mounted network drive) using SCPI commands.
-    
-    Args:
-        source_path (str): Path on the Tektronix (e.g., "C:\\Temp\\test.csv")
-        dest_path (str): Destination on the Tektronix (e.g., "Z:\\Results\\test.csv")
+    to another location using SCPI commands, with extended timeout handling.
     """
     # 1. Normalize paths for Windows (Scope OS)
-    # Tektronix Windows backend strictly prefers backslashes
     src = source_path.replace('/', '\\')
     dst = dest_path.replace('/', '\\')
-
-    # 2. Construct the SCPI Command
-    # Syntax: FILESYSTEM:COPY "<source>", "<destination>"
-    command = f'FILESYSTEM:COPY "{src}", "{dst}"'
+    
+    cmd = f'FILESYSTEM:COPY "{src}", "{dst}"'
+    print(f"Sending Copy Command: {cmd}")
 
     try:
-        # Assuming 'sock' is your global socket object defined earlier in tektronix.py
-        # Send the copy command
-        print(f"Sending Copy Command: {command}")
-        sock.sendall(f"{command}\n".encode())
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            s.settimeout(10)
+            s.connect((HOST, PORT))
 
-        # 3. Synchronization (Critical!)
-        # We must wait for the operation to finish before moving on.
-        # *OPC? (Operation Complete Query) waits for all pending operations to finish
-        # and returns '1' when done.
-        sock.sendall(b"*OPC?\n")
-        
-        # Set a reasonable timeout for the copy operation (e.g., 10 seconds)
-        old_timeout = sock.gettimeout()
-        sock.settimeout(10.0) 
-        
-        response = sock.recv(1024).decode().strip()
-        
-        # Restore original timeout
-        sock.settimeout(old_timeout)
+            # --- Flush Welcome Banner (Matches scpi_command logic) ---
+            s.settimeout(0.1)
+            try:
+                s.recv(4096)
+            except socket.timeout:
+                pass
+            # ---------------------------------------------------------
 
-        if response != '1':
-            print(f"Warning: *OPC? returned unexpected value: {response}")
-        else:
-            print(" -> Copy operation confirmed complete by Scope.")
+            # 2. Send the Copy Command
+            s.sendall((cmd + "\n").encode("ascii"))
+
+            # 3. Synchronization (*OPC?)
+            # We send *OPC? immediately to make the socket wait until the 
+            # copy operation is finished before returning.
+            s.sendall(b"*OPC?\n")
+
+            # 4. Set Extended Timeout
+            # File copies over network can take time. We override the default 
+            # 10s timeout to 60s for this specific operation.
+            s.settimeout(60.0)
+
+            # 5. Read Response
+            # We expect '1' when the operation is complete.
+            response = s.recv(1024).decode("latin-1").strip()
+
+            if response != '1':
+                print(f"Warning: *OPC? returned unexpected value: {response}")
+            else:
+                print(" -> Copy operation confirmed complete by Scope.")
 
     except socket.timeout:
-        print("Error: Copy operation timed out. The file might be too large or the network drive is slow.")
-        # Restore timeout just in case
-        try: sock.settimeout(old_timeout) 
-        except: pass
+        print(f"Error: Copy operation timed out (Limit: 60s). Check network/file size.")
         raise
-    except Exception as e:
-        print(f"SCPI Error: {e}")
+    except socket.error as e:
+        print(f"SCPI Copy Error: {e}")
         raise
 
 def recall_setup(setup_type="Max IO", device_type="Portable"):
