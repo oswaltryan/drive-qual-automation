@@ -79,10 +79,11 @@ def find_apricorn_device() -> ApricornDevice | None:
     physical_drive_num = physical_drive_num if isinstance(physical_drive_num, int) else None
 
     drive_letter = device_info.get("driveLetter")
+    drive_letter_colon_len = 2
     if isinstance(drive_letter, str) and drive_letter:
         if len(drive_letter) == 1:
             drive_letter = f"{drive_letter}:\\"
-        elif len(drive_letter) == 2 and drive_letter[1] == ":":
+        elif len(drive_letter) == drive_letter_colon_len and drive_letter[1] == ":":
             drive_letter = f"{drive_letter}\\"
     else:
         drive_letter = _drive_letter_from_physical(physical_drive_num) if physical_drive_num is not None else None
