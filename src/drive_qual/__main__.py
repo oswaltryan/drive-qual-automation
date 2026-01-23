@@ -1,9 +1,8 @@
 import os
 from typing import Any
 
-import benchmark
-import tektronix
-from usb_tool import find_apricorn_device
+from . import benchmark, tektronix
+from .usb_tool import find_apricorn_device
 
 dut: Any | None = None
 part_number = input("Enter the Apricorn Part Number: ")
@@ -108,8 +107,12 @@ async def max_io() -> None:
         print("")
     
 
-if __name__ == "__main__":
+def main() -> None:
     # in_rush()
     # max_io()
-    pass
+    return None
+
+
+if __name__ == "__main__":
+    main()
     

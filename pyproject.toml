@@ -9,6 +9,9 @@ dependencies = [
     "pyyaml",
 ]
 
+[project.scripts]
+drive-qual = "drive_qual.__main__:main"
+
 [project.optional-dependencies]
 dev = [
     "mypy",
@@ -36,7 +39,7 @@ dev = [
 ]
 
 [tool.ruff]
-src = ["."]
+src = ["src"]
 line-length = 120
 target-version = "py312"
 

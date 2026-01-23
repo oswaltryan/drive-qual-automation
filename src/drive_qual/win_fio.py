@@ -4,21 +4,21 @@ import shutil
 import time
 from typing import Any
 
-from tektronix import (
+from .tektronix import (
     backup_session,
     mk_dir,
     recall_setup,
     save_measurements,
     stop_run,
 )
-from usb_tool import find_apricorn_device
+from .usb_tool import find_apricorn_device
 
 part_number = input("Enter the Apricorn P/N for this drive: ")
 device: Any | None = None
 dut_type: str | None = None
 
 # Verify fio is available on PATH (Windows version)
-FIO_TOOL = shutil.which("fio.exe")
+FIO_TOOL = shutil.which("fio.exe") or shutil.which("tools/fio.exe")
 if FIO_TOOL is None:
     raise FileNotFoundError("fio not found in PATH. Download from https://bsdio.com/fio/ and add to system PATH")
 FIO_TOOL_STR = FIO_TOOL

@@ -4,7 +4,7 @@ import shutil
 import sys
 
 # Verify fio is available on PATH (Windows version)
-FIO_TOOL = shutil.which("fio.exe")
+FIO_TOOL = shutil.which("fio.exe") or shutil.which("tools/fio.exe")
 if FIO_TOOL is None:
     raise FileNotFoundError(
         "fio not found in PATH. Download from https://bsdio.com/fio/ "
@@ -12,7 +12,7 @@ if FIO_TOOL is None:
     )
 
 # Verify diskspd is available on PATH (Windows version)
-DISKSPD_TOOL = shutil.which("diskspd.exe")
+DISKSPD_TOOL = shutil.which("diskspd.exe") or shutil.which("tools/diskspd.exe")
 if DISKSPD_TOOL is None:
     raise FileNotFoundError(
         "diskspd not found in PATH. Download it and add to system PATH"

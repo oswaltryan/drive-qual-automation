@@ -16,6 +16,12 @@ uv run pre-commit install
 uv run pre-commit run --all-files
 ```
 
+## Run CLI
+
+```
+uv run drive-qual
+```
+
 ## Windows USB tool note
 
 For Windows, you must set up `win-usb-tool`. For macOS and Linux, no extra setup is required beyond Python.

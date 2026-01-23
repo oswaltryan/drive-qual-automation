@@ -4,21 +4,21 @@ import shutil
 import time
 from typing import Any
 
-from tektronix import (
+from .tektronix import (
     backup_session,
     mk_dir,
     recall_setup,
     save_measurements,
     stop_run,
 )
-from usb_tool import find_apricorn_device
+from .usb_tool import find_apricorn_device
 
 part_number = input("Enter the Apricorn P/N for this drive: ")
 device: Any | None = None
 dut_type: str | None = None
 
 # Verify diskspd is available on PATH (Windows version)
-DISKSPD_TOOL = shutil.which("diskspd.exe")
+DISKSPD_TOOL = shutil.which("diskspd.exe") or shutil.which("tools/diskspd.exe")
 if DISKSPD_TOOL is None:
     raise FileNotFoundError("diskspd not found in PATH. Download it and add to system PATH")
 DISKSPD_TOOL_STR = DISKSPD_TOOL
