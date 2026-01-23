@@ -1,14 +1,21 @@
-# For windows you MUST setup win-usb-tool. for mac and linux we do not depend on anything besides python 3.6+
+# Setup (uv)
 
+This repo uses `uv` to manage dependencies and the virtual environment.
 
-# enter install dir
-cd win-usb-tool
+## Create the venv and install deps
 
-# Install windows-usb-tool module for global access
+```
+uv venv
+uv sync --group dev
+```
 
-pip install . 
+## Run tools
 
-# Install windows-usb-tool module for global access, offline
+```
+uv run pre-commit install
+uv run pre-commit run --all-files
+```
 
-pip install --no-index --find-links=wheels .
+## Windows USB tool note
 
+For Windows, you must set up `win-usb-tool`. For macOS and Linux, no extra setup is required beyond Python.
