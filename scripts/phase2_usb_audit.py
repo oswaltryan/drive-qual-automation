@@ -7,6 +7,7 @@ sys.path.append(str(Path(__file__).resolve().parents[1] / "src"))
 
 from drive_qual import usb_tool
 
+
 def main() -> int:
     payload = usb_tool.get_usb_payload()
     if payload is None:

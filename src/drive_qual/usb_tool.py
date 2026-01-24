@@ -30,7 +30,7 @@ class ApricornDevice:
     driveLetter: str | None = None
 
     @classmethod
-    def from_dict(cls, raw: dict[str, Any], drive_letter: str | None = None) -> "ApricornDevice":
+    def from_dict(cls, raw: dict[str, Any], drive_letter: str | None = None) -> ApricornDevice:
         physical_drive_num = raw.get("physicalDriveNum")
         physical_drive_num = physical_drive_num if isinstance(physical_drive_num, int) else None
         normalized_drive_letter = raw.get("driveLetter")
@@ -67,6 +67,7 @@ def _extract_json(payload: str) -> dict[str, Any] | None:
         return cast(dict[str, Any], json.loads(payload[start : end + 1]))
     except json.JSONDecodeError:
         return None
+
 
 def get_usb_payload() -> dict[str, Any] | None:
     try:
