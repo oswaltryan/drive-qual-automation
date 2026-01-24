@@ -1,4 +1,6 @@
+import json
 import sys
+from dataclasses import asdict
 from pathlib import Path
 
 sys.path.append(str(Path(__file__).resolve().parents[1] / "src"))
@@ -16,7 +18,8 @@ def main() -> int:
         print("Apricorn device not detected by wrapper.")
         return 0
 
-    print("Device snapshot:")
+    print(json.dumps(asdict(device), indent=2))
+    print("\nDevice snapshot:")
     print(f"  iProduct: {device.iProduct}")
     print(f"  iSerial: {device.iSerial}")
     print(f"  bcdDevice: {device.bcdDevice}")

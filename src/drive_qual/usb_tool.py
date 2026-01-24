@@ -109,7 +109,4 @@ def find_apricorn_device() -> ApricornDevice | None:
 
     device_info = device_infos[0]
 
-    physical_drive_num = device_info.get("physicalDriveNum")
-    physical_drive_num = physical_drive_num if isinstance(physical_drive_num, int) else None
-
     return ApricornDevice.from_dict(device_info)
