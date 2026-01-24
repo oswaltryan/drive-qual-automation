@@ -19,10 +19,15 @@ end-to-end flow, and capture gaps before new development begins.
 
 ## Phase 2: Validate USB Discovery and Device State Handling
 
-- [] Verify `usb --json` output parsing for device info and drive letter.
-- [] Confirm behavior when no device is present (retry loops).
-- [] Confirm behavior when device is present but locked/OOB.
-- [] Record observed exit codes and terminal messages.
+- [x] Verify `usb --json` output parsing for device info and drive letter.
+- [x] Confirm behavior when no device is present (retry loops).
+- [x] Confirm behavior when device is present but locked/OOB.
+- [x] Record observed exit codes and terminal messages.
+
+Observed runs:
+- No device: `usb --json did not return parseable JSON.` (exit code 1).
+- Device present, locked/OOB: `driveLetter: None` with device metadata present (exit code 0).
+- Device present, unlocked: `driveLetter: D:` with device metadata present (exit code 0).
 
 ## Phase 3: Validate Tektronix Scope Integration
 

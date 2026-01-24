@@ -8,9 +8,54 @@ from typing import Any, cast
 
 @dataclass(frozen=True)
 class ApricornDevice:
-    iProduct: str
-    physicalDriveNum: int | None
-    driveLetter: str | None
+    bcdUSB: float | None = None
+    idVendor: str | None = None
+    idProduct: str | None = None
+    bcdDevice: str | None = None
+    iManufacturer: str | None = None
+    iProduct: str | None = None
+    iSerial: str | None = None
+    SCSIDevice: bool | None = None
+    driveSizeGB: str | None = None
+    mediaType: str | None = None
+    usbController: str | None = None
+    busNumber: int | None = None
+    deviceAddress: int | None = None
+    physicalDriveNum: int | None = None
+    readOnly: bool | None = None
+    scbPartNumber: str | None = None
+    hardwareVersion: str | None = None
+    modelID: str | None = None
+    mcuFW: str | None = None
+    driveLetter: str | None = None
+
+    @classmethod
+    def from_dict(cls, raw: dict[str, Any], drive_letter: str | None = None) -> "ApricornDevice":
+        physical_drive_num = raw.get("physicalDriveNum")
+        physical_drive_num = physical_drive_num if isinstance(physical_drive_num, int) else None
+        normalized_drive_letter = raw.get("driveLetter")
+        return cls(
+            bcdUSB=raw.get("bcdUSB"),
+            idVendor=raw.get("idVendor"),
+            idProduct=raw.get("idProduct"),
+            bcdDevice=raw.get("bcdDevice"),
+            iManufacturer=raw.get("iManufacturer"),
+            iProduct=raw.get("iProduct"),
+            iSerial=raw.get("iSerial"),
+            SCSIDevice=raw.get("SCSIDevice"),
+            driveSizeGB=raw.get("driveSizeGB"),
+            mediaType=raw.get("mediaType"),
+            usbController=raw.get("usbController"),
+            busNumber=raw.get("busNumber"),
+            deviceAddress=raw.get("deviceAddress"),
+            physicalDriveNum=physical_drive_num,
+            readOnly=raw.get("readOnly"),
+            scbPartNumber=raw.get("scbPartNumber"),
+            hardwareVersion=raw.get("hardwareVersion"),
+            modelID=raw.get("modelID"),
+            mcuFW=raw.get("mcuFW"),
+            driveLetter=drive_letter or normalized_drive_letter,
+        )
 
 
 def _extract_json(payload: str) -> dict[str, Any] | None:
@@ -23,31 +68,7 @@ def _extract_json(payload: str) -> dict[str, Any] | None:
     except json.JSONDecodeError:
         return None
 
-
-def _drive_letter_from_physical(physical_drive_num: int) -> str | None:
-    command = (
-        f"(Get-Disk -Number {physical_drive_num} | "
-        "Get-Partition | Get-Volume | "
-        "Select -ExpandProperty DriveLetter) -join ''"
-    )
-    try:
-        result = subprocess.run(
-            ["powershell", "-NoProfile", "-Command", command],
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-    except OSError:
-        return None
-
-    letter = result.stdout.strip()
-    if not letter:
-        return None
-    return f"{letter}:\\"
-
-
-def find_apricorn_device() -> ApricornDevice | None:
-    """Return the first detected Apricorn device using the `usb --json` CLI output."""
+def get_usb_payload() -> dict[str, Any] | None:
     try:
         result = subprocess.run(
             ["usb", "--json"],
@@ -58,38 +79,37 @@ def find_apricorn_device() -> ApricornDevice | None:
     except OSError:
         return None
 
-    data = _extract_json(result.stdout)
+    return _extract_json(result.stdout)
+
+
+def list_usb_devices(payload: dict[str, Any]) -> list[dict[str, Any]]:
+    devices = payload.get("devices")
+    if not isinstance(devices, list) or not devices:
+        return []
+
+    device_infos: list[dict[str, Any]] = []
+    for entry in devices:
+        if not isinstance(entry, dict) or not entry:
+            continue
+        device_info = next(iter(entry.values()))
+        if isinstance(device_info, dict):
+            device_infos.append(device_info)
+    return device_infos
+
+
+def find_apricorn_device() -> ApricornDevice | None:
+    """Return the first detected Apricorn device using the `usb --json` CLI output."""
+    data = get_usb_payload()
     if not data:
         return None
 
-    devices = data.get("devices")
-    if not isinstance(devices, list) or not devices:
+    device_infos = list_usb_devices(data)
+    if not device_infos:
         return None
 
-    device_entry = devices[0]
-    if not isinstance(device_entry, dict) or not device_entry:
-        return None
+    device_info = device_infos[0]
 
-    device_info = next(iter(device_entry.values()))
-    if not isinstance(device_info, dict):
-        return None
-
-    i_product = str(device_info.get("iProduct", "")).strip()
     physical_drive_num = device_info.get("physicalDriveNum")
     physical_drive_num = physical_drive_num if isinstance(physical_drive_num, int) else None
 
-    drive_letter = device_info.get("driveLetter")
-    drive_letter_colon_len = 2
-    if isinstance(drive_letter, str) and drive_letter:
-        if len(drive_letter) == 1:
-            drive_letter = f"{drive_letter}:\\"
-        elif len(drive_letter) == drive_letter_colon_len and drive_letter[1] == ":":
-            drive_letter = f"{drive_letter}\\"
-    else:
-        drive_letter = _drive_letter_from_physical(physical_drive_num) if physical_drive_num is not None else None
-
-    return ApricornDevice(
-        iProduct=i_product,
-        physicalDriveNum=physical_drive_num,
-        driveLetter=drive_letter,
-    )
+    return ApricornDevice.from_dict(device_info)
