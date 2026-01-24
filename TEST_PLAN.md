@@ -12,10 +12,10 @@ end-to-end flow, and capture gaps before new development begins.
 
 ## Phase 1: Define the End-to-End Workflow
 
-- [] Write a step-by-step operator flow (prompts, actions, expected results).
-- [] Document device states (connected, removed, locked/unlocked).
-- [] Define inputs and outputs for each step (files, screenshots, CSVs).
-- [] Specify where artifacts are stored and naming conventions.
+- [x] Write a step-by-step operator flow (prompts, actions, expected results).
+- [x] Document device states (connected, removed, locked/unlocked).
+- [x] Define inputs and outputs for each step (files, screenshots, CSVs).
+- [x] Specify where artifacts are stored and naming conventions.
 
 ## Phase 2: Validate USB Discovery and Device State Handling
 

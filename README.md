@@ -4,18 +4,6 @@ This project automates Apricorn drive qualification workflows using a Tektronix
 scope, benchmark tools, and a signed `usb` discovery CLI. It is designed as a
 scripted, interactive CLI experience for technicians running repeatable tests.
 
-## What the CLI does
-
-When you run the CLI, you will be prompted to:
-- Enter the Apricorn part number.
-- Choose the device type (Portables or Secure Key).
-- Connect or remove the device when prompted.
-
-The flow then:
-- Recalls the appropriate Tektronix scope setup.
-- Runs IO benchmarks on the attached drive.
-- Saves scope measurements and screenshots to the configured output paths.
-
 ## Inventory and Baseline
 
 Scripts and CLI entry points:
@@ -46,6 +34,32 @@ Expected outputs and file artifacts:
 - Temporary benchmark files on the DUT: `benchmark_file.dat` (fio) or `testfile.dat` (diskspd), deleted after runs.
 - Data drive structure and tracker: `<project>\Linux`, `<project>\macOS`, `<project>\Windows`, and `progress_tracker.json`.
 - Post-processing output (when run): `current_measurements.json`.
+
+## Phase 1: End-to-End Workflow
+
+Step-by-step operator flow (current scripts):
+1) Run `uv run drive-qual`.
+2) Enter the Apricorn part number when prompted.
+3) Select device type (Portables or Secure Key) if running `drive-qual`.
+4) Remove the Apricorn device when prompted; script waits until no device is detected.
+5) In Rush Current: recall the InRush scope setup, create the output directory, then unlock/connect the device.
+6) Save the In Rush Current measurements and screenshot, then stop acquisition.
+7) Max IO: unlock/connect the device, recall the Max IO setup, run benchmarks, then delete the benchmark file.
+8) Save the Max IO measurements and screenshot, stop acquisition, and remove the device.
+
+Device states the scripts handle:
+- Connected vs removed (polling `usb --json` until the state changes).
+
+Inputs and outputs by step:
+- Inputs: part number, device type (in `drive-qual`), device connect/remove actions, scope network access, `usb` CLI.
+- Benchmark inputs: target drive letter, test type, size/loops (fio) or fixed diskspd params.
+- Outputs: CSV measurements, PNG screenshots, stdout benchmark logs, and a deleted benchmark temp file.
+
+Artifacts, locations, and naming conventions:
+- In Rush outputs: `E:\{part_number}\Windows\In Rush Current\{iProduct}.csv` and `.png`.
+- Max IO outputs: `E:\{part_number}\Windows\Max IO\{iProduct}.csv` and `.png`.
+- Benchmark temp files: `{drive}\benchmark_file.dat` (fio) or `{drive}\testfile.dat` (diskspd).
+- Data drive scaffold: `<project>\Linux`, `<project>\macOS`, `<project>\Windows`, plus `progress_tracker.json`.
 
 ## Setup (uv)
 
