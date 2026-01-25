@@ -4,13 +4,8 @@ import shutil
 import time
 from typing import Any
 
-from .tektronix import (
-    backup_session,
-    mk_dir,
-    recall_setup,
-    save_measurements,
-    stop_run,
-)
+from .io_utils import mk_dir
+from .tektronix import backup_session, recall_setup, save_measurements, stop_run
 from .usb_tool import find_apricorn_device
 
 part_number = input("Enter the Apricorn P/N for this drive: ")

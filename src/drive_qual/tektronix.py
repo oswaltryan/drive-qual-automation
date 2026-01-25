@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import contextlib
-import os
 import socket
 from typing import Literal, overload
 
@@ -102,6 +101,28 @@ def check_error() -> None:
     print(f"Instrument Error: {err}")
 
 
+def _normalize_scope_path(path: str) -> str:
+    return path.replace("\\", "/").strip()
+
+
+def _validate_scope_path(path: str, *, allow_empty: bool = False) -> str:
+    normalized = _normalize_scope_path(path)
+    if not normalized and allow_empty:
+        return normalized
+    if not normalized:
+        raise ValueError("Scope path is required.")
+    if not (normalized[1:3] == ":/" and normalized[0].isalpha()):
+        raise ValueError(f"Invalid scope path: {path!r}")
+    return normalized
+
+
+def _validate_scope_file_path(path: str) -> str:
+    normalized = _validate_scope_path(path)
+    if normalized.endswith("/"):
+        raise ValueError(f"Scope file path must not be a directory: {path!r}")
+    return normalized
+
+
 def tektronix_list_dir(remote_path: str = "") -> str | None:
     """
     Lists the contents of a directory on the instrument.
@@ -114,18 +135,19 @@ def tektronix_list_dir(remote_path: str = "") -> str | None:
         str: A CSV string of files/directories, or None on error.
     """
     # Set the CWD (optional, but good practice for specific path listing)
-    scpi_command(f'FILESystem:CWD "{remote_path}"')
+    normalized_path = _validate_scope_path(remote_path, allow_empty=True)
+    scpi_command(f'FILESystem:CWD "{normalized_path}"')
 
     # Query the directory contents
     cmd = "FILESystem:DIR?"
     response = scpi_command(cmd, read_response=True, raw=False)
 
     if response:
-        print(f"\n--- Directory Listing for '{remote_path}' ---")
+        (f"\n--- Directory Listing for '{normalized_path}' ---")
         print(response)
         print("-------------------------------------------\n")
     else:
-        print(f"Failed to get directory listing for '{remote_path}'.")
+        print(f"Failed to get directory listing for '{normalized_path}'.")
 
     return response
 
@@ -136,8 +158,8 @@ def tek_filesystem_copy(source_path: str, dest_path: str) -> None:
     to another location using SCPI commands, with extended timeout handling.
     """
     # 1. Normalize paths for Windows (Scope OS)
-    src = source_path.replace("/", "\\")
-    dst = dest_path.replace("/", "\\")
+    src = _validate_scope_file_path(source_path).replace("/", "\\")
+    dst = _validate_scope_file_path(dest_path).replace("/", "\\")
 
     cmd = f'FILESYSTEM:COPY "{src}", "{dst}"'
     print(f"Sending Copy Command: {cmd}")
@@ -202,14 +224,12 @@ def stop_run() -> None:
 
 
 def backup_session(path: str) -> None:
-    scpi_command(f'SAVe:IMAGe "{path}"')
-    print(f"Saved session screen capture to {path}")
+    normalized_path = _validate_scope_file_path(path)
+    scpi_command(f'SAVe:IMAGe "{normalized_path}"')
+    print(f"Saved session screen capture to {normalized_path}")
 
 
 def save_measurements(path: str) -> None:
-    scpi_command(f'SAVe:EVENTtable:MEASUrement "{path}"')
-    print(f"Saved session measurements to {path}")
-
-
-def mk_dir(path: str | os.PathLike[str]) -> None:
-    os.makedirs(path, exist_ok=True)
+    normalized_path = _validate_scope_file_path(path)
+    scpi_command(f'SAVe:EVENTtable:MEASUrement "{normalized_path}"')
+    print(f"Saved session measurements to {normalized_path}")

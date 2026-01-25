@@ -1,6 +1,7 @@
 import os
 
 from . import benchmark, tektronix
+from .io_utils import mk_dir
 from .usb_tool import ApricornDevice, find_apricorn_device
 
 DEVICE_TYPE_OPTIONS = {
@@ -85,9 +86,7 @@ async def in_rush() -> None:
         tektronix.recall_setup(
             setup_type="InRush", device_type=device_type or "Portable"
         )  # Initialize Tektronix equipment
-        tektronix.mk_dir(
-            os.path.join("C:\\", part_number, "Windows", "In Rush Current")
-        )  # Create directory for In Rush Current results
+        mk_dir(os.path.join("C:\\", part_number, "Windows", "In Rush Current"))
 
         dut = _wait_for_device_present("Unlock Apricorn device..")
 
