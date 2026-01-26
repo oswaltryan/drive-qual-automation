@@ -31,10 +31,10 @@ Observed runs:
 
 ## Phase 3: Validate Tektronix Scope Integration
 
-- Verify connectivity to the scope over TCP.
-- Confirm setup recall paths and expected scope state changes.
-- Validate measurement and screenshot save operations.
-- Note any timeouts, banner behavior, or connection issues.
+- [x] Verify connectivity to the scope over TCP.
+- [x] Confirm setup recall paths and expected scope state changes.
+- [x] Validate measurement and screenshot save operations.
+- [x] Note any timeouts, banner behavior, or connection issues.
 
 ## Phase 4: Validate Benchmark Tools
 

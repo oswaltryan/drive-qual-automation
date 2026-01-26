@@ -233,3 +233,9 @@ def save_measurements(path: str) -> None:
     normalized_path = _validate_scope_file_path(path)
     scpi_command(f'SAVe:EVENTtable:MEASUrement "{normalized_path}"')
     print(f"Saved session measurements to {normalized_path}")
+
+
+def save_report(path: str) -> None:
+    normalized_path = _validate_scope_file_path(path)
+    scpi_command(f'SAVe:REPOrt "{normalized_path}"')
+    print(f"Saved session screen capture to {normalized_path}")

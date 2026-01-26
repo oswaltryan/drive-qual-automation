@@ -65,6 +65,8 @@ Artifacts, locations, and naming conventions:
 
 This repo uses `uv` to manage dependencies and the virtual environment.
 
+**Note:** The scope's LAN implementation is brittle and only supports its default IPv4 address; manually setting a different scope IP will cause issues. Any machine that interfaces with the scope must be configured with a manual IPv4 address on the same subnet `169.254.8.xxx`.
+
 ## Create the venv and install deps
 
 ```

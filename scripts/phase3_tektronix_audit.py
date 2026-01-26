@@ -93,9 +93,11 @@ def _run_save_steps(results: list[dict[str, str]], output_dir: str) -> None:
         timestamp = time.strftime("%Y%m%d_%H%M%S")
         measurements_path = f"{output_dir}/phase3_measurements_{timestamp}.csv"
         screenshot_path = f"{output_dir}/phase3_screenshot_{timestamp}.png"
+        report_path = f"{output_dir}/phase3_report_{timestamp}.pdf"
     else:
         measurements_path = ""
         screenshot_path = ""
+        report_path = ""
 
     _run_step(
         results,
@@ -109,6 +111,12 @@ def _run_save_steps(results: list[dict[str, str]], output_dir: str) -> None:
         lambda: tektronix.backup_session(screenshot_path),
         skip_reason=None if screenshot_path else "--output-dir not provided",
     )
+    _run_step(
+        results,
+        "save_report()",
+        lambda: tektronix.save_report(report_path),
+        skip_reason=None if report_path else "--output-dir not provided",
+    )
 
 
 def _run_list_dir_step(results: list[dict[str, str]], list_dir: str) -> None:
@@ -117,27 +125,6 @@ def _run_list_dir_step(results: list[dict[str, str]], list_dir: str) -> None:
         "tektronix_list_dir()",
         lambda: tektronix.tektronix_list_dir(list_dir),
         skip_reason=None if list_dir else "--list-dir not provided",
-    )
-
-
-def _run_copy_step(results: list[dict[str, str]], copy_dest: str) -> None:
-    if copy_dest:
-        copy_source_input = input("Enter scope source file path for copy (blank to skip): ").strip()
-        copy_source = _normalize_scope_path(copy_source_input) if copy_source_input else ""
-    else:
-        copy_source = ""
-
-    copy_skip = ""
-    if not copy_dest:
-        copy_skip = "Provide --copy-dest"
-    elif not copy_source:
-        copy_skip = "No copy source provided"
-
-    _run_step(
-        results,
-        "tek_filesystem_copy()",
-        lambda: tektronix.tek_filesystem_copy(copy_source, copy_dest),
-        skip_reason=copy_skip if copy_skip else None,
     )
 
 
@@ -199,9 +186,6 @@ def main() -> int:
 
     list_dir = _normalize_scope_path(args.list_dir) if args.list_dir else ""
     _run_list_dir_step(results, list_dir)
-
-    copy_dest = _normalize_scope_path(args.copy_dest) if args.copy_dest else ""
-    _run_copy_step(results, copy_dest)
 
     _save_results(results, args.log or None)
     return 0
