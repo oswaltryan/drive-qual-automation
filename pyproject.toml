@@ -7,6 +7,7 @@ requires-python = ">=3.12"
 dependencies = [
     "requests",
     "pyyaml",
+    "pymodbus",
 ]
 
 [project.scripts]
