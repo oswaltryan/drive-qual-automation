@@ -101,6 +101,21 @@ def check_error() -> None:
     print(f"Instrument Error: {err}")
 
 
+def get_identity() -> str | None:
+    """Return the SCPI *IDN? response from the scope."""
+    return scpi_command("*IDN?", read_response=True)
+
+
+def get_firmware_version() -> str | None:
+    """Return the firmware/system version string."""
+    return scpi_command("SYSTem:VERSion?", read_response=True)
+
+
+def get_acquire_state() -> str | None:
+    """Return the acquisition state (RUN/STOP) if available."""
+    return scpi_command("ACQuire:STATE?", read_response=True)
+
+
 def _normalize_scope_path(path: str) -> str:
     return path.replace("\\", "/").strip()
 

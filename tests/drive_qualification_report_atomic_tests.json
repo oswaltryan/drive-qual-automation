@@ -1,0 +1,113 @@
+{
+  "drive_info": {
+    "apricorn_part_number": null,
+    "manufacturer": null,
+    "manufacturer_part_number": null,
+    "capacity": null,
+    "firmware": null,
+    "form_factor": null,
+    "interface": null,
+    "technology": null
+  },
+  "equipment": {
+    "scope": {
+      "model": null,
+      "version": null,
+      "serial_number": null
+    },
+    "probe_current": {
+      "model": null,
+      "channel": null,
+      "serial_number": null
+    },
+    "probe_voltage": {
+      "model": null,
+      "channel": null,
+      "serial_number": null
+    },
+    "windows_host": {
+      "hardware": "ASUS PRIME Z270-K, i5-7400K",
+      "os_version": "Windows 10 Pro 22H2, 19045.6646",
+      "software": [
+        {"name": "CrystalDiskInfo", "version": "8.8.9"},
+        {"name": "CrystalDiskMark", "version": "7.0.0"},
+        {"name": "disk_tester", "version": "0.3.3"},
+        {"name": "ATTO", "version": "4.0.0f1"}
+      ]
+    },
+    "usb_if_host": {
+      "hardware": "ASROCK Z790 Pro RS, i7-12700K",
+      "os_version": "Windows 11 Pro 24H2, 26100.4652",
+      "software": [
+        {"name": "USB-IF CV Suite", "version": "3.1.2.0"}
+      ]
+    },
+    "linux_host": {
+      "hardware": "NUC8i3BEK1",
+      "os_version": "Ubuntu 18.04.6 LTS, 5.0.4-150-generic",
+      "software": [
+        {"name": "Disks (native)", "version": null}
+      ]
+    },
+    "macos_host": {
+      "hardware": "Mac Mini M2",
+      "os_version": "OS 15 Sequoia",
+      "software": [
+        {"name": "BlackMagic RAW Speed Test", "version": "4.2"}
+      ]
+    }
+  },
+  "power": {},
+  "compatibility": {
+    "recognized_by_os": {
+      "linux": null,
+      "macos": null,
+      "windows": null
+    },
+    "hot_pluggable": {
+      "linux": null,
+      "macos": null,
+      "windows": null
+    },
+    "safely_remove": {
+      "linux": null,
+      "macos": null,
+      "windows": null
+    },
+    "device_manager_disk_mgmt": {
+      "windows": null
+    },
+    "partition_drive": {
+      "linux": null,
+      "macos": null,
+      "windows": null
+    },
+    "format_drive": {
+      "linux": null,
+      "macos": null,
+      "windows": null
+    },
+    "copy_to_drive": {
+      "linux": null,
+      "macos": null,
+      "windows": null
+    },
+    "copy_from_drive": {
+      "linux": null,
+      "macos": null,
+      "windows": null
+    },
+    "delete_data": {
+      "linux": null,
+      "macos": null,
+      "windows": null
+    }
+  },
+  "performance": {},
+  "compliance": {
+    "usb_if_msc_result": null,
+    "disk_tester_reliability_iterations": null,
+    "disk_tester_reliability_result": null
+  },
+  "temperature": {}
+}

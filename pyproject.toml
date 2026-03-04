@@ -12,6 +12,10 @@ dependencies = [
 
 [project.scripts]
 drive-qual = "drive_qual.__main__:main"
+drive-qual-report = "drive_qual.report_workflow:run_report_workflow_cli"
+
+[tool.uv]
+package = true
 
 [project.optional-dependencies]
 dev = [

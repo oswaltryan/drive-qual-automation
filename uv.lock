@@ -172,7 +172,7 @@ wheels = [
 [[package]]
 name = "drive-qual-automation"
 version = "0.2.0"
-source = { virtual = "." }
+source = { editable = "." }
 dependencies = [
     { name = "pymodbus" },
     { name = "pyyaml" },
