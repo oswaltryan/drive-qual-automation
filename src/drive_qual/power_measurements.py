@@ -1,0 +1,252 @@
+from __future__ import annotations
+
+import csv
+import re
+import time
+from pathlib import Path, PureWindowsPath
+from typing import Any
+
+from drive_qual.report_session import load_report, report_path_for, resolve_folder_name, sanitize_dir_name, save_report
+from drive_qual.storage_paths import SCOPE_ARTIFACT_ROOT
+
+DUT_ALIASES: dict[str, str] = {
+    "secure key 3 0": "Padlock DT",
+    "secure key 3": "Padlock DT",
+    "secure key dt": "Padlock DT",
+    "secure key dt fips": "Padlock DT FIPS",
+    "secure key 3 0 fips": "Padlock DT FIPS",
+    "secure key fips": "Padlock DT FIPS",
+}
+
+
+def _to_float(value: object) -> float | None:
+    if value is None:
+        return None
+    text = str(value).strip()
+    if not text:
+        return None
+    parts = text.split()
+    if len(parts) == 2:
+        raw_value, unit = parts
+        try:
+            magnitude = float(raw_value)
+        except ValueError:
+            return None
+        normalized_unit = unit.casefold()
+        if normalized_unit == "a":
+            return magnitude * 1000.0
+        if normalized_unit == "ma":
+            return magnitude
+        if normalized_unit == "ua":
+            return magnitude / 1000.0
+        return None
+    try:
+        return float(text)
+    except (TypeError, ValueError):
+        return None
+
+
+def _measurement_rows(csv_path: Path) -> list[dict[str, str]]:
+    try:
+        lines = csv_path.read_text(encoding="utf-8").splitlines()
+    except OSError as exc:
+        print(f"Failed to read measurements CSV {csv_path}: {exc}")
+        return []
+
+    header_index = next((i for i, line in enumerate(lines) if line.startswith("Name,")), None)
+    if header_index is None:
+        return []
+
+    table = "\n".join(lines[header_index:])
+    reader = csv.DictReader(table.splitlines())
+    rows: list[dict[str, str]] = []
+    for row in reader:
+        name = row.get("Name", "").strip()
+        if not name:
+            continue
+        rows.append({str(key): str(value).strip() for key, value in row.items() if key is not None and value is not None})
+    return rows
+
+
+def _extract_measurement(csv_path: Path, measurement: str, field_name: str) -> float | None:
+    for row in _measurement_rows(csv_path):
+        if row.get("Name", "") != measurement:
+            continue
+        return _to_float(row.get(field_name))
+    return None
+
+
+def _wait_for_csv(csv_path: Path, *, timeout_seconds: float = 10.0, interval_seconds: float = 0.25) -> bool:
+    deadline = time.monotonic() + timeout_seconds
+    while True:
+        if csv_path.exists():
+            return True
+        if time.monotonic() >= deadline:
+            return False
+        time.sleep(interval_seconds)
+
+
+def _normalize_dut_name(value: str) -> str:
+    normalized = re.sub(r"[^a-z0-9]+", " ", value.casefold()).strip()
+    return re.sub(r"\s+", " ", normalized)
+
+
+def _find_matching_power_key(power: dict[str, Any], candidate: str) -> str | None:
+    if candidate in power:
+        return candidate
+    normalized_candidate = _normalize_dut_name(candidate)
+    for key in power:
+        if _normalize_dut_name(key) == normalized_candidate:
+            return key
+    return None
+
+
+def _resolve_dut_key(power: dict[str, Any], dut_name: str) -> str | None:
+    direct_match = _find_matching_power_key(power, dut_name)
+    if direct_match is not None:
+        return direct_match
+
+    alias_target = DUT_ALIASES.get(_normalize_dut_name(dut_name))
+    if alias_target is not None:
+        alias_match = _find_matching_power_key(power, alias_target)
+        if alias_match is not None:
+            return alias_match
+
+    if len(power) == 1:
+        return next(iter(power))
+    return None
+
+
+def _ensure_windows_slot(fields: dict[str, Any], key: str) -> dict[str, Any]:
+    slot = fields.setdefault(key, {"linux": None, "macos": None, "windows": None})
+    if not isinstance(slot, dict):
+        slot = {"linux": None, "macos": None, "windows": None}
+        fields[key] = slot
+    return slot
+
+
+def _apply_csv_to_power(power: dict[str, Any], csv_path: Path) -> bool:
+    measurement_group = csv_path.parent.name.casefold()
+    dut_name = csv_path.stem
+    dut_key = _resolve_dut_key(power, dut_name)
+    if dut_key is None:
+        print(f"Skipping CSV {csv_path}; could not map DUT '{dut_name}' in report power section.")
+        return False
+
+    fields = power.get(dut_key)
+    if not isinstance(fields, dict):
+        fields = {}
+        power[dut_key] = fields
+
+    changed = False
+    if measurement_group == "in rush current":
+        max_inrush = _extract_measurement(csv_path, "Meas1", "Accum-Max")
+        if max_inrush is not None:
+            slot = _ensure_windows_slot(fields, "max_inrush_current")
+            if slot.get("windows") != max_inrush:
+                slot["windows"] = max_inrush
+                changed = True
+    elif measurement_group == "max io":
+        max_rw = _extract_measurement(csv_path, "Meas1", "Accum-Max")
+        rms_rw = _extract_measurement(csv_path, "Meas3", "Accum-Mean")
+        if max_rw is not None:
+            slot = _ensure_windows_slot(fields, "max_read_write_current")
+            if slot.get("windows") != max_rw:
+                slot["windows"] = max_rw
+                changed = True
+        if rms_rw is not None:
+            slot = _ensure_windows_slot(fields, "rms_read_write_current")
+            if slot.get("windows") != rms_rw:
+                slot["windows"] = rms_rw
+                changed = True
+    return changed
+
+
+def extract_power_values_from_csv(csv_path: str) -> dict[str, float | None]:
+    path = Path(csv_path)
+    measurement_group = path.parent.name.casefold()
+    values: dict[str, float | None] = {
+        "max_inrush_current": None,
+        "max_read_write_current": None,
+        "rms_read_write_current": None,
+    }
+    if measurement_group == "in rush current":
+        values["max_inrush_current"] = _extract_measurement(path, "Meas1", "Accum-Max")
+    elif measurement_group == "max io":
+        values["max_read_write_current"] = _extract_measurement(path, "Meas1", "Accum-Max")
+        values["rms_read_write_current"] = _extract_measurement(path, "Meas3", "Accum-Mean")
+    return values
+
+
+def _resolve_csv_root(data: dict[str, Any], folder_name: str, requested_part_number: str | None) -> Path:
+    part_number = requested_part_number
+    drive_info = data.get("drive_info")
+    if isinstance(drive_info, dict):
+        raw_part_number = drive_info.get("apricorn_part_number")
+        if isinstance(raw_part_number, str) and raw_part_number.strip():
+            part_number = raw_part_number.strip()
+    if not part_number:
+        part_number = folder_name
+    return Path(SCOPE_ARTIFACT_ROOT) / part_number / "windows"
+
+
+def update_report_power_from_csv_path(csv_path: str) -> bool:
+    win_path = PureWindowsPath(csv_path)
+    if len(win_path.parts) < 5:
+        return False
+    part_number = win_path.parts[1]
+    folder_name = sanitize_dir_name(part_number)
+    if not folder_name:
+        return False
+
+    report_path = report_path_for(folder_name)
+    if not report_path.exists():
+        return False
+
+    data = load_report(report_path)
+    power = data.get("power")
+    if not isinstance(power, dict) or not power:
+        return False
+
+    path = Path(win_path)
+    if not _wait_for_csv(path):
+        print(f"Failed to read measurements CSV {path}: file did not appear on host after copy.")
+        return False
+
+    changed = _apply_csv_to_power(power, path)
+    if not changed:
+        return False
+
+    save_report(report_path, data)
+    print(f"Updated power measurements in {report_path}")
+    return True
+
+
+def update_power_measurements_from_saved_csvs(part_number: str | None = None) -> None:
+    folder_name = resolve_folder_name(part_number)
+    report_path = report_path_for(folder_name)
+    data = load_report(report_path)
+    power = data.get("power")
+    if not isinstance(power, dict):
+        raise ValueError("Missing or invalid 'power' section in report.")
+    if not power:
+        raise ValueError("No DUT entries found in 'power'. Run the equipment step first.")
+
+    csv_root = _resolve_csv_root(data, folder_name, part_number)
+    inrush_dir = csv_root / "In Rush Current"
+    max_io_dir = csv_root / "Max IO"
+    csv_files = sorted(inrush_dir.glob("*.csv")) + sorted(max_io_dir.glob("*.csv"))
+    if not csv_files:
+        print(f"No measurement CSV files found under {csv_root}")
+        return
+
+    changed = False
+    for csv_file in csv_files:
+        changed = _apply_csv_to_power(power, csv_file) or changed
+
+    if not changed:
+        print("No power measurements were updated from the discovered CSV files.")
+        return
+
+    save_report(report_path, data)
+    print(f"Updated power measurements in {report_path}")

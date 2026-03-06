@@ -2,11 +2,15 @@ from __future__ import annotations
 
 import contextlib
 import socket
+from pathlib import PureWindowsPath
 from typing import Literal, overload
+
+from .power_measurements import update_report_power_from_csv_path
+from .storage_paths import SCOPE_ARTIFACT_ROOT
 
 # CONFIG
 #################################################
-HOST = "169.254.8.130"  # Instrument IP
+HOST = "10.10.10.3"  # Instrument IP
 PORT = 5025  # SCPI socket port
 
 # These are base paths for the setup files stored on the Scope's internal C: drive
@@ -138,13 +142,34 @@ def _validate_scope_file_path(path: str) -> str:
     return normalized
 
 
+def _mkdir_scope(path: str) -> None:
+    normalized = _validate_scope_path(path)
+    scpi_command(f'FILESystem:MKDir "{normalized}"')
+
+
+def _parts_from_scope_file(path: str) -> tuple[str, str, str, str] | None:
+    parts = PureWindowsPath(path.replace("/", "\\")).parts
+    if len(parts) < 5:
+        return None
+    return parts[1], parts[2], parts[3], parts[-1]
+
+
+def _ensure_share_structure(part_number: str, category: str) -> None:
+    root = _validate_scope_path(SCOPE_ARTIFACT_ROOT)
+    _mkdir_scope(f"{root}{part_number}")
+    _mkdir_scope(f"{root}{part_number}/linux")
+    _mkdir_scope(f"{root}{part_number}/macOS")
+    _mkdir_scope(f"{root}{part_number}/windows")
+    _mkdir_scope(f"{root}{part_number}/windows/{category}")
+
+
 def tektronix_list_dir(remote_path: str = "") -> str | None:
     """
     Lists the contents of a directory on the instrument.
 
     Args:
         remote_path (str): The directory to list. Defaults to the CWD.
-                           Use a path like 'C:/' or 'E:/Waveforms/'.
+                           Use a path like 'C:/' or 'Z:/captures/'.
 
     Returns:
         str: A CSV string of files/directories, or None on error.
@@ -165,57 +190,6 @@ def tektronix_list_dir(remote_path: str = "") -> str | None:
         print(f"Failed to get directory listing for '{normalized_path}'.")
 
     return response
-
-
-def tek_filesystem_copy(source_path: str, dest_path: str) -> None:
-    """
-    Instructs the Tektronix scope to copy a file from its local disk
-    to another location using SCPI commands, with extended timeout handling.
-    """
-    # 1. Normalize paths for Windows (Scope OS)
-    src = _validate_scope_file_path(source_path).replace("/", "\\")
-    dst = _validate_scope_file_path(dest_path).replace("/", "\\")
-
-    cmd = f'FILESYSTEM:COPY "{src}", "{dst}"'
-    print(f"Sending Copy Command: {cmd}")
-
-    try:
-        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-            s.settimeout(10)
-            s.connect((HOST, PORT))
-
-            # --- Flush Welcome Banner (Matches scpi_command logic) ---
-            _flush_banner(s)
-            # ---------------------------------------------------------
-
-            # 2. Send the Copy Command
-            s.sendall((cmd + "\n").encode("ascii"))
-
-            # 3. Synchronization (*OPC?)
-            # We send *OPC? immediately to make the socket wait until the
-            # copy operation is finished before returning.
-            s.sendall(b"*OPC?\n")
-
-            # 4. Set Extended Timeout
-            # File copies over network can take time. We override the default
-            # 10s timeout to 60s for this specific operation.
-            s.settimeout(60.0)
-
-            # 5. Read Response
-            # We expect '1' when the operation is complete.
-            response = s.recv(1024).decode("latin-1").strip()
-
-            if response != "1":
-                print(f"Warning: *OPC? returned unexpected value: {response}")
-            else:
-                print(" -> Copy operation confirmed complete by Scope.")
-
-    except TimeoutError:
-        print("Error: Copy operation timed out (Limit: 60s). Check network/file size.")
-        raise
-    except OSError as e:
-        print(f"SCPI Copy Error: {e}")
-        raise
 
 
 def recall_setup(setup_type: str = "Max IO", device_type: str = "Portable") -> None:
@@ -240,14 +214,24 @@ def stop_run() -> None:
 
 def backup_session(path: str) -> None:
     normalized_path = _validate_scope_file_path(path)
+    parsed = _parts_from_scope_file(normalized_path)
+    if parsed is not None:
+        part_number, _, category, _ = parsed
+        _ensure_share_structure(part_number, category)
     scpi_command(f'SAVe:IMAGe "{normalized_path}"')
     print(f"Saved session screen capture to {normalized_path}")
 
 
-def save_measurements(path: str) -> None:
+def save_measurements(path: str) -> str:
     normalized_path = _validate_scope_file_path(path)
+    parsed = _parts_from_scope_file(normalized_path)
+    if parsed is not None:
+        part_number, _, category, _ = parsed
+        _ensure_share_structure(part_number, category)
     scpi_command(f'SAVe:EVENTtable:MEASUrement "{normalized_path}"')
     print(f"Saved session measurements to {normalized_path}")
+    update_report_power_from_csv_path(normalized_path)
+    return normalized_path
 
 
 def save_report(path: str) -> None:

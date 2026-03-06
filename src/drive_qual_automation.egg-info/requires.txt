@@ -1,0 +1,14 @@
+requests
+pyyaml
+pymodbus
+
+[dev]
+mypy
+pytest
+pytest-asyncio
+pytest-cov
+pytest-mock
+ruff
+pre-commit
+types-requests
+types-PyYAML

@@ -5,6 +5,7 @@ import time
 from typing import Any
 
 from .io_utils import mk_dir
+from .storage_paths import artifact_dir, artifact_file
 from .tektronix import backup_session, recall_setup, save_measurements, stop_run
 from .usb_tool import find_apricorn_device
 
@@ -108,9 +109,7 @@ async def run_diskspd_benchmark(target_dir: str, test_type: str) -> int:
 async def in_rush_current() -> None:
     global device, dut_type
     recall_setup(setup_type="InRush", device_type=dut_type or "Portable")  # Initialize Tektronix equipment
-    mk_dir(
-        os.path.join("E:\\", part_number, "Windows", "In Rush Current")
-    )  # Create directory for In Rush Current results
+    mk_dir(artifact_dir(part_number, "Windows", "In Rush Current"))
 
     time.sleep(3)
     dut_enumeration(unlock_dut=True)
@@ -119,7 +118,7 @@ async def in_rush_current() -> None:
 async def max_IO() -> None:
     target_directory = "E"  # Update with your test directory
     recall_setup(setup_type="Max IO")  # Initialize Tektronix equipment
-    mk_dir(os.path.join("E:\\", part_number, "Windows", "Max IO"))  # Create directory for Max IO results
+    mk_dir(artifact_dir(part_number, "Windows", "Max IO"))
 
     # Run write benchmark
     write_ret = await run_diskspd_benchmark(target_directory, "write")
@@ -152,8 +151,8 @@ if __name__ == "__main__":
         if device is None:
             raise RuntimeError("Device not detected for Max IO results.")
         stop_run()  # Ensure Tektronix equipment stops
-        save_measurements(f"E:\\{part_number}\\Windows\\Max IO\\{device.iProduct}.csv")
-        backup_session(f"E:\\{part_number}\\Windows\\Max IO\\{device.iProduct}.png")
+        save_measurements(artifact_file(part_number, "Windows", "Max IO", f"{device.iProduct}.csv"))
+        backup_session(artifact_file(part_number, "Windows", "Max IO", f"{device.iProduct}.png"))
         dut_enumeration(unlock_dut=False)
         print("")
 
@@ -165,5 +164,5 @@ if __name__ == "__main__":
         if device is None:
             raise RuntimeError("Device not detected for In Rush results.")
         stop_run()  # Ensure Tektronix equipment stops
-        save_measurements(f"E:\\{part_number}\\Windows\\In Rush Current\\{device.iProduct}.csv")
-        backup_session(f"E:\\{part_number}\\Windows\\In Rush Current\\{device.iProduct}.png")
+        save_measurements(artifact_file(part_number, "Windows", "In Rush Current", f"{device.iProduct}.csv"))
+        backup_session(artifact_file(part_number, "Windows", "In Rush Current", f"{device.iProduct}.png"))

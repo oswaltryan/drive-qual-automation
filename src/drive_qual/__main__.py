@@ -2,6 +2,7 @@ import os
 
 from . import benchmark, tektronix
 from .io_utils import mk_dir
+from .storage_paths import artifact_dir, artifact_file
 from .usb_tool import ApricornDevice, find_apricorn_device
 
 DEVICE_TYPE_OPTIONS = {
@@ -86,7 +87,7 @@ async def in_rush() -> None:
         tektronix.recall_setup(
             setup_type="InRush", device_type=device_type or "Portable"
         )  # Initialize Tektronix equipment
-        mk_dir(os.path.join("C:\\", part_number, "Windows", "In Rush Current"))
+        mk_dir(artifact_dir(part_number, "Windows", "In Rush Current"))
 
         dut = _wait_for_device_present("Unlock Apricorn device..")
 
@@ -97,8 +98,8 @@ async def in_rush() -> None:
         if dut is None:
             raise RuntimeError("Device not detected for In Rush results.")
         tektronix.stop_run()  # Ensure Tektronix equipment stops
-        tektronix.save_measurements(f"E:\\{part_number}\\Windows\\In Rush Current\\{dut.iProduct}.csv")
-        tektronix.backup_session(f"E:\\{part_number}\\Windows\\In Rush Current\\{dut.iProduct}.png")
+        tektronix.save_measurements(artifact_file(part_number, "Windows", "In Rush Current", f"{dut.iProduct}.csv"))
+        tektronix.backup_session(artifact_file(part_number, "Windows", "In Rush Current", f"{dut.iProduct}.png"))
 
 
 async def max_io() -> None:
@@ -116,8 +117,8 @@ async def max_io() -> None:
         if dut is None:
             raise RuntimeError("Device not detected for Max IO results.")
         tektronix.stop_run()  # Ensure Tektronix equipment stops
-        tektronix.save_measurements(f"E:\\{part_number}\\Windows\\Max IO\\{dut.iProduct}.csv")
-        tektronix.backup_session(f"E:\\{part_number}\\Windows\\Max IO\\{dut.iProduct}.png")
+        tektronix.save_measurements(artifact_file(part_number, "Windows", "Max IO", f"{dut.iProduct}.csv"))
+        tektronix.backup_session(artifact_file(part_number, "Windows", "Max IO", f"{dut.iProduct}.png"))
         _wait_for_device_removed("Remove Apricorn device..")
         print("")
 

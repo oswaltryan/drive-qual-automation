@@ -4,8 +4,10 @@ import json
 from pathlib import Path
 from typing import Any
 
-LOGS_DIR = Path("logs")
-CURRENT_MARKER = LOGS_DIR / ".current"
+from drive_qual.storage_paths import SCOPE_ARTIFACT_ROOT
+
+REPORT_ROOT = Path(SCOPE_ARTIFACT_ROOT)
+CURRENT_MARKER = REPORT_ROOT / ".current"
 TEMPLATE_NAME = "drive_qualification_report_atomic_tests.json"
 
 
@@ -20,7 +22,7 @@ def sanitize_dir_name(value: str) -> str:
 
 
 def set_current_session(folder_name: str) -> None:
-    LOGS_DIR.mkdir(parents=True, exist_ok=True)
+    REPORT_ROOT.mkdir(parents=True, exist_ok=True)
     CURRENT_MARKER.write_text(f"{folder_name}\n", encoding="utf-8")
 
 
@@ -32,7 +34,7 @@ def resolve_folder_name(part_number: str | None) -> str:
         return folder_name
     if CURRENT_MARKER.exists():
         return CURRENT_MARKER.read_text(encoding="utf-8").strip()
-    entry = input("Apricorn Part Number (for logs folder): ").strip()
+    entry = input("Apricorn Part Number (for report folder): ").strip()
     if not entry:
         raise ValueError("Apricorn Part Number is required.")
     folder_name = sanitize_dir_name(entry)
@@ -42,7 +44,7 @@ def resolve_folder_name(part_number: str | None) -> str:
 
 
 def report_path_for(folder_name: str) -> Path:
-    return LOGS_DIR / folder_name / TEMPLATE_NAME
+    return REPORT_ROOT / folder_name / TEMPLATE_NAME
 
 
 def load_report(report_path: Path) -> dict[str, Any]:

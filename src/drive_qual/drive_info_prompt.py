@@ -3,10 +3,9 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from drive_qual.report_session import sanitize_dir_name, save_report, set_current_session
+from drive_qual.report_session import report_path_for, sanitize_dir_name, save_report, set_current_session
 
 DEFAULT_TEMPLATE = Path("tests/drive_qualification_report_atomic_tests.json")
-LOGS_DIR = Path("logs")
 
 FIELDS: tuple[tuple[str, str], ...] = (
     ("apricorn_part_number", "Apricorn Part Number"),
@@ -51,9 +50,8 @@ def run_drive_info_prompt() -> None:
     if not folder_name:
         raise ValueError("Apricorn Part Number produced an empty directory name after sanitizing.")
 
-    output_dir = LOGS_DIR / folder_name
-    output_dir.mkdir(parents=True, exist_ok=True)
-    output_path = output_dir / DEFAULT_TEMPLATE.name
+    output_path = report_path_for(folder_name)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
     save_report(output_path, data)
     set_current_session(folder_name)
     print(f"Wrote updated template to {output_path}")

@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import argparse
 from typing import Any
 
 from drive_qual.report_session import load_report, report_path_for, resolve_folder_name, save_report
@@ -133,22 +132,17 @@ def _ensure_dut_sections(data: dict[str, Any], duts: list[str]) -> None:
         temperature.setdefault(dut, _temperature_template())
 
 
-def run_equipment_prompt() -> None:
-    parser = argparse.ArgumentParser(description="Fill equipment section in report JSON.")
-    parser.add_argument("--part-number", help="Apricorn part number for selecting the logs folder.")
-    parser.add_argument("--scope-profile", help="Apply a scope/probe profile (e.g., tektronix, rigol).")
-    args = parser.parse_args()
-
-    folder_name = resolve_folder_name(args.part_number)
+def run_equipment_prompt(part_number: str | None = None, scope_profile: str | None = None) -> None:
+    folder_name = resolve_folder_name(part_number)
     report_path = report_path_for(folder_name)
     data = load_report(report_path)
     equipment = data.get("equipment")
     if not isinstance(equipment, dict):
         raise ValueError("Missing or invalid 'equipment' section in report.")
 
-    scope_profile = args.scope_profile or _prompt("Scope profile (tektronix/rigol)", "")
-    if scope_profile:
-        apply_scope_profile(equipment, scope_profile)
+    resolved_scope_profile = scope_profile or _prompt("Scope profile (tektronix/rigol)", "")
+    if resolved_scope_profile:
+        apply_scope_profile(equipment, resolved_scope_profile)
 
     _ensure_hosts(equipment)
 
@@ -160,4 +154,10 @@ def run_equipment_prompt() -> None:
 
 
 if __name__ == "__main__":
-    run_equipment_prompt()
+    import argparse
+
+    parser = argparse.ArgumentParser(description="Fill equipment section in report JSON.")
+    parser.add_argument("--part-number", help="Apricorn part number for selecting the report folder.")
+    parser.add_argument("--scope-profile", help="Apply a scope/probe profile (e.g., tektronix, rigol).")
+    args = parser.parse_args()
+    run_equipment_prompt(part_number=args.part_number, scope_profile=args.scope_profile)
