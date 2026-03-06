@@ -1,9 +1,9 @@
 import os
 
 from . import benchmark, tektronix
+from .apricorn_usb_cli import ApricornDevice, find_apricorn_device
 from .io_utils import mk_dir
 from .storage_paths import artifact_dir, artifact_file
-from .usb_tool import ApricornDevice, find_apricorn_device
 
 DEVICE_TYPE_OPTIONS = {
     1: "Portables",
@@ -71,7 +71,7 @@ async def _run_benchmarks(dut: ApricornDevice) -> None:
     write_ret = await benchmark.run_fio(dut.driveLetter, "write", 10, 100)
     read_ret = await benchmark.run_fio(dut.driveLetter, "read", 10, 100)
 
-    test_file = os.path.join(dut.driveLetter, "benchmark_file.dat")
+    test_file = benchmark.benchmark_file_path(dut.driveLetter, "benchmark_file.dat")
     _cleanup_test_file(test_file)
     _report_benchmark_results(write_ret, read_ret)
 

@@ -4,10 +4,11 @@ import shutil
 import time
 from typing import Any
 
+from .apricorn_usb_cli import find_apricorn_device
+from .benchmark import benchmark_file_path
 from .io_utils import mk_dir
 from .storage_paths import artifact_dir, artifact_file
 from .tektronix import backup_session, recall_setup, save_measurements, stop_run
-from .usb_tool import find_apricorn_device
 
 part_number = input("Enter the Apricorn P/N for this drive: ")
 device: Any | None = None
@@ -70,7 +71,7 @@ async def run_diskspd_benchmark(target_dir: str, test_type: str) -> int:
     Executes diskspd.exe with fixed parameters:
       - 1GB file, 1M block size, 1 thread, 8 outstanding I/Os, 5s duration.
     """
-    test_file = os.path.join(target_dir, "testfile.dat")
+    test_file = benchmark_file_path(target_dir, "testfile.dat")
     if test_type.lower() == "write":
         w_flag = "-w100"
     elif test_type.lower() == "read":
@@ -126,7 +127,7 @@ async def max_IO() -> None:
     read_ret = await run_diskspd_benchmark(target_directory, "read")
 
     # Cleanup test file
-    test_file = os.path.join(target_directory, "testfile.dat")
+    test_file = benchmark_file_path(target_directory, "testfile.dat")
     try:
         os.remove(test_file)
         print(f"\nCleaned up test file: {test_file}")

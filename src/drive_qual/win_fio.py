@@ -4,10 +4,11 @@ import shutil
 import time
 from typing import Any
 
+from .apricorn_usb_cli import find_apricorn_device
+from .benchmark import benchmark_file_path
 from .io_utils import mk_dir
 from .storage_paths import artifact_dir, artifact_file
 from .tektronix import backup_session, recall_setup, save_measurements, stop_run
-from .usb_tool import find_apricorn_device
 
 part_number = input("Enter the Apricorn P/N for this drive: ")
 device: Any | None = None
@@ -40,7 +41,7 @@ def dut_enumeration(unlock_dut: bool = True) -> None:
 
 async def run_fio_benchmark(target_dir: str, test_type: str, size_mb: int, loops: int) -> int:
     """Run fio benchmark with Windows-specific parameters"""
-    test_file = os.path.join(target_dir, "benchmark_file.dat")
+    test_file = benchmark_file_path(target_dir, "benchmark_file.dat")
     cmd = [
         FIO_TOOL_STR,
         "--name",
@@ -105,7 +106,7 @@ async def max_IO() -> None:
     read_ret = await run_fio_benchmark(target_directory, "read", 10, 100)
 
     # Cleanup test file
-    test_file = os.path.join(target_directory, "benchmark_file.dat")
+    test_file = benchmark_file_path(target_directory, "benchmark_file.dat")
     try:
         os.remove(test_file)
         print(f"\nCleaned up test file: {test_file}")

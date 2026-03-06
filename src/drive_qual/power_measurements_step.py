@@ -8,11 +8,18 @@ from pathlib import Path
 from typing import Any
 
 from drive_qual import benchmark, tektronix
+from drive_qual.apricorn_usb_cli import (
+    ApricornDevice,
+    device_identity,
+    find_apricorn_device,
+    get_usb_payload,
+    is_same_device,
+    list_apricorn_devices,
+)
 from drive_qual.io_utils import mk_dir
 from drive_qual.power_measurements import extract_power_values_from_csv, update_power_measurements_from_saved_csvs
 from drive_qual.report_session import load_report, report_path_for, resolve_folder_name
 from drive_qual.storage_paths import artifact_dir, artifact_file
-from drive_qual.usb_tool import ApricornDevice, find_apricorn_device
 
 DRIVE_TOKEN_WITH_COLON_LEN = 2
 
@@ -23,15 +30,18 @@ def _wait_for_device_present(prompt: str) -> ApricornDevice:
         print(prompt)
     while dut is None:
         dut = find_apricorn_device()
+    print(f"Tracking Apricorn device: {device_identity(dut)}")
     return dut
 
 
-def _wait_for_device_removed(prompt: str) -> None:
-    dut = find_apricorn_device()
-    if dut is not None:
-        print(prompt)
-    while dut is not None:
-        dut = find_apricorn_device()
+def _wait_for_device_removed(expected: ApricornDevice, prompt: str) -> None:
+    payload = get_usb_payload()
+    devices = list_apricorn_devices(payload) if payload else []
+    if any(is_same_device(expected, device) for device in devices):
+        print(f"{prompt} Waiting on {device_identity(expected)}")
+    while any(is_same_device(expected, device) for device in devices):
+        payload = get_usb_payload()
+        devices = list_apricorn_devices(payload) if payload else []
 
 
 def _cleanup_test_file(path: str) -> None:
@@ -116,9 +126,10 @@ async def _run_max_io(part_number: str, report_path: Path) -> None:
 
     try:
         target_dir = _normalize_drive_target(dut.driveLetter)
+        benchmark_file = benchmark.benchmark_file_path(target_dir, "benchmark_file.dat")
         write_ret = await benchmark.run_fio(target_dir, "write", 10, 100)
         read_ret = await benchmark.run_fio(target_dir, "read", 10, 100)
-        _cleanup_test_file(os.path.join(target_dir, "benchmark_file.dat"))
+        _cleanup_test_file(benchmark_file)
         _report_benchmark_results(write_ret, read_ret)
     except Exception as exc:
         print(f"Critical error during Max IO benchmark: {exc}")
@@ -129,7 +140,7 @@ async def _run_max_io(part_number: str, report_path: Path) -> None:
         parsed_csv_path = tektronix.save_measurements(csv_path)
         tektronix.backup_session(artifact_file(part_number, "Windows", "Max IO", f"{device_label}.png"))
         _write_measurement_backup(report_path, parsed_csv_path, "Max IO")
-        _wait_for_device_removed("Remove Apricorn device..")
+        _wait_for_device_removed(dut, "Remove Apricorn device..")
         print("")
 
 

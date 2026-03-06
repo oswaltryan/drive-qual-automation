@@ -2,6 +2,7 @@ import asyncio
 import os
 import shutil
 import sys
+from pathlib import PureWindowsPath
 
 # Verify fio is available on PATH (Windows version)
 FIO_TOOL = shutil.which("fio.exe") or shutil.which("tools/fio.exe")
@@ -14,11 +15,31 @@ DISKSPD_TOOL = shutil.which("diskspd.exe") or shutil.which("tools/diskspd.exe")
 if DISKSPD_TOOL is None:
     raise FileNotFoundError("diskspd not found in PATH. Download it and add to system PATH")
 DISKSPD_TOOL_STR = DISKSPD_TOOL
+DRIVE_TOKEN_LEN = 1
+DRIVE_TOKEN_WITH_COLON_LEN = 2
+
+
+def benchmark_directory(target_dir: str) -> str:
+    token = target_dir.strip()
+    if len(token) == DRIVE_TOKEN_LEN and token.isalpha():
+        return f"{token}:\\"
+    if len(token) == DRIVE_TOKEN_WITH_COLON_LEN and token[1] == ":" and token[0].isalpha():
+        return f"{token}\\"
+    return token
+
+
+def benchmark_file_path(target_dir: str, filename: str) -> str:
+    if sys.platform != "win32":
+        return os.path.join(target_dir, filename)
+    return str(PureWindowsPath(benchmark_directory(target_dir)) / filename)
 
 
 async def run_fio(target_dir: str, test_type: str, size_mb: int, loops: int) -> int:
     """Run fio benchmark with specific parameters"""
-    test_file = os.path.join(target_dir, "benchmark_file.dat")
+    work_dir = benchmark_directory(target_dir)
+    test_file = (
+        "benchmark_file.dat" if sys.platform == "win32" else benchmark_file_path(target_dir, "benchmark_file.dat")
+    )
     engine: str
     if sys.platform == "darwin":
         engine = ""
@@ -58,6 +79,7 @@ async def run_fio(target_dir: str, test_type: str, size_mb: int, loops: int) -> 
         *cmd,
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
+        cwd=work_dir if sys.platform == "win32" else None,
     )
 
     stdout, stderr = await process.communicate()
@@ -80,7 +102,8 @@ async def run_diskspd(target_dir: str, test_type: str) -> int:
     Executes diskspd.exe with fixed parameters:
       - 1GB file, 1M block size, 1 thread, 8 outstanding I/Os, 5s duration.
     """
-    test_file = os.path.join(target_dir, "testfile.dat")
+    work_dir = benchmark_directory(target_dir)
+    test_file = "testfile.dat" if sys.platform == "win32" else benchmark_file_path(target_dir, "testfile.dat")
     if sys.platform in ("darwin", "linux"):
         raise RuntimeError("diskspd is only supported on Windows.")
     if sys.platform != "win32":
@@ -101,6 +124,7 @@ async def run_diskspd(target_dir: str, test_type: str) -> int:
         *cmd,
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
+        cwd=work_dir if sys.platform == "win32" else None,
     )
 
     stdout, stderr = await process.communicate()

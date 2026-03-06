@@ -2,16 +2,19 @@ README.md
 pyproject.toml
 src/drive_qual/__init__.py
 src/drive_qual/__main__.py
+src/drive_qual/apricorn_usb_cli.py
 src/drive_qual/benchmark.py
 src/drive_qual/drive_info_prompt.py
 src/drive_qual/equipment_prompt.py
 src/drive_qual/io_utils.py
 src/drive_qual/post_process_measurements.py
+src/drive_qual/power_measurements.py
+src/drive_qual/power_measurements_step.py
 src/drive_qual/report_session.py
 src/drive_qual/report_workflow.py
 src/drive_qual/setup_directories.py
+src/drive_qual/storage_paths.py
 src/drive_qual/tektronix.py
-src/drive_qual/usb_tool.py
 src/drive_qual/watlow.py
 src/drive_qual/win_diskspd.py
 src/drive_qual/win_fio.py
@@ -21,4 +24,5 @@ src/drive_qual_automation.egg-info/dependency_links.txt
 src/drive_qual_automation.egg-info/entry_points.txt
 src/drive_qual_automation.egg-info/requires.txt
 src/drive_qual_automation.egg-info/top_level.txt
+tests/test_power_measurements_paths.py
 tests/test_smoke.py
