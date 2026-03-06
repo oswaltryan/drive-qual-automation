@@ -21,6 +21,13 @@ if FIO_TOOL is None:
 FIO_TOOL_STR = FIO_TOOL
 
 
+def _device_type_for_scope_name(product_name: str | None) -> str:
+    product = (product_name or "").strip().lower()
+    if "dt" in product:
+        return "DT"
+    return "generic"
+
+
 def dut_enumeration(unlock_dut: bool = True) -> None:
     global device, dut_type
     if unlock_dut:
@@ -28,7 +35,7 @@ def dut_enumeration(unlock_dut: bool = True) -> None:
         while device is None:
             device = find_apricorn_device()
         assert device is not None
-        dut_type = "Secure Key" if device.iProduct == "Secure Key 3.0" else "Portable"
+        dut_type = _device_type_for_scope_name(device.iProduct)
         print(f"Found device: {device.iProduct}")
     else:
         # device = None
@@ -88,7 +95,7 @@ async def run_fio_benchmark(target_dir: str, test_type: str, size_mb: int, loops
 
 async def in_rush_current() -> None:
     global device, dut_type
-    recall_setup(setup_type="InRush", device_type=dut_type or "Portable")  # Initialize Tektronix equipment
+    recall_setup(setup_type="InRush", device_type=dut_type or "generic")  # Initialize Tektronix equipment
     mk_dir(artifact_dir(part_number, "Windows", "In Rush Current"))
 
     time.sleep(3)

@@ -5,16 +5,16 @@ from pathlib import Path
 
 sys.path.append(str(Path(__file__).resolve().parents[1] / "src"))
 
-from drive_qual import usb_tool
+from drive_qual import apricorn_usb_cli
 
 
 def main() -> int:
-    payload = usb_tool.get_usb_payload()
+    payload = apricorn_usb_cli.get_usb_payload()
     if payload is None:
         print("usb --json did not return parseable JSON.")
         return 1
 
-    device = usb_tool.find_apricorn_device()
+    device = apricorn_usb_cli.find_apricorn_device()
     if device is None:
         print("Apricorn device not detected by wrapper.")
         return 0

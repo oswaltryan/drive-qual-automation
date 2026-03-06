@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from _pytest.monkeypatch import MonkeyPatch
+from pytest import CaptureFixture
 
 from drive_qual.apricorn_usb_cli import (
     ApricornDevice,
@@ -10,7 +11,7 @@ from drive_qual.apricorn_usb_cli import (
     list_apricorn_devices,
     select_apricorn_device,
 )
-from drive_qual.power_measurements_step import _wait_for_device_removed
+from drive_qual.power_measurements_step import _wait_for_device_present, _wait_for_device_removed
 
 
 def test_list_apricorn_devices_filters_non_apricorn_entries() -> None:
@@ -60,12 +61,34 @@ def test_is_same_device_prefers_serial_number() -> None:
     assert is_same_device(expected, different) is False
 
 
-def test_wait_for_device_removed_tracks_specific_device(monkeypatch: MonkeyPatch, capsys) -> None:
+def test_wait_for_device_removed_tracks_specific_device(monkeypatch: MonkeyPatch, capsys: CaptureFixture[str]) -> None:
     expected = ApricornDevice(iProduct="Secure Key 3.0", iSerial="ABC123", driveLetter="D:")
     polls = iter(
         [
-            {"devices": [{"usb0": {"iManufacturer": "Apricorn", "iProduct": "Secure Key 3.0", "iSerial": "ABC123", "driveLetter": "D:"}}]},
-            {"devices": [{"usb0": {"iManufacturer": "Apricorn", "iProduct": "Secure Key 3.0", "iSerial": "OTHER", "driveLetter": "E:"}}]},
+            {
+                "devices": [
+                    {
+                        "usb0": {
+                            "iManufacturer": "Apricorn",
+                            "iProduct": "Secure Key 3.0",
+                            "iSerial": "ABC123",
+                            "driveLetter": "D:",
+                        }
+                    }
+                ]
+            },
+            {
+                "devices": [
+                    {
+                        "usb0": {
+                            "iManufacturer": "Apricorn",
+                            "iProduct": "Secure Key 3.0",
+                            "iSerial": "OTHER",
+                            "driveLetter": "E:",
+                        }
+                    }
+                ]
+            },
         ]
     )
     monkeypatch.setattr("drive_qual.power_measurements_step.get_usb_payload", lambda: next(polls))
@@ -76,7 +99,50 @@ def test_wait_for_device_removed_tracks_specific_device(monkeypatch: MonkeyPatch
     assert "Remove Apricorn device.. Waiting on Secure Key 3.0, serial=ABC123, drive=D:" in captured.out
 
 
-def test_select_apricorn_device_prompts_with_numbered_list(monkeypatch: MonkeyPatch, capsys) -> None:
+def test_wait_for_device_present_requires_same_device_reconnect(
+    monkeypatch: MonkeyPatch, capsys: CaptureFixture[str]
+) -> None:
+    expected = ApricornDevice(iProduct="Secure Key 3.0", iSerial="ABC123", driveLetter="D:")
+    polls = iter(
+        [
+            {
+                "devices": [
+                    {
+                        "usb0": {
+                            "iManufacturer": "Apricorn",
+                            "iProduct": "Secure Key 3.0",
+                            "iSerial": "OTHER",
+                            "driveLetter": "E:",
+                        }
+                    }
+                ]
+            },
+            {
+                "devices": [
+                    {
+                        "usb0": {
+                            "iManufacturer": "Apricorn",
+                            "iProduct": "Secure Key 3.0",
+                            "iSerial": "ABC123",
+                            "driveLetter": "D:",
+                        }
+                    }
+                ]
+            },
+        ]
+    )
+    monkeypatch.setattr("drive_qual.power_measurements_step.get_usb_payload", lambda: next(polls))
+
+    device = _wait_for_device_present("Reconnect Apricorn device..", expected=expected)
+
+    captured = capsys.readouterr()
+    assert "Reconnect Apricorn device.. Waiting on Secure Key 3.0, serial=ABC123, drive=D:" in captured.out
+    assert device.iSerial == "ABC123"
+
+
+def test_select_apricorn_device_prompts_with_numbered_list(
+    monkeypatch: MonkeyPatch, capsys: CaptureFixture[str]
+) -> None:
     devices = [
         ApricornDevice(iProduct="Secure Key 3.0", iSerial="ABC123", driveLetter="D:"),
         ApricornDevice(iProduct="Secure Key 3.0", iSerial="XYZ999", driveLetter="E:"),

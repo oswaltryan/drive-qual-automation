@@ -27,6 +27,10 @@ DUT_ALIASES: dict[str, str] = {
 }
 
 
+def _display_path(path: str | Path) -> str:
+    return PureWindowsPath(str(path)).as_posix()
+
+
 def _to_float(value: object) -> float | None:
     if value is None:
         return None
@@ -68,7 +72,7 @@ def _measurement_rows(csv_path: Path) -> list[dict[str, str]]:
     try:
         lines = csv_path.read_text(encoding="utf-8").splitlines()
     except OSError as exc:
-        print(f"Failed to read measurements CSV {csv_path}: {exc}")
+        print(f"Failed to read measurements CSV {_display_path(csv_path)}: {exc}")
         return []
 
     header_index = next((i for i, line in enumerate(lines) if line.startswith("Name,")), None)
@@ -151,7 +155,7 @@ def _apply_csv_to_power(power: dict[str, Any], csv_path: Path) -> bool:
     dut_name = csv_path.stem
     dut_key = _resolve_dut_key(power, dut_name)
     if dut_key is None:
-        print(f"Skipping CSV {csv_path}; could not map DUT '{dut_name}' in report power section.")
+        print(f"Skipping CSV {_display_path(csv_path)}; could not map DUT '{dut_name}' in report power section.")
         return False
 
     fields = power.get(dut_key)
@@ -237,7 +241,7 @@ def update_report_power_from_csv_path(csv_path: str) -> bool:
         return False
     path, report_path, data, power = resolved
     if not _wait_for_csv(path):
-        print(f"Failed to read measurements CSV {path}: file did not appear on host.")
+        print(f"Failed to read measurements CSV {_display_path(path)}: file did not appear on host.")
         return False
 
     changed = _apply_csv_to_power(power, path)
@@ -245,7 +249,7 @@ def update_report_power_from_csv_path(csv_path: str) -> bool:
         return False
 
     save_report(report_path, data)
-    print(f"Updated power measurements in {report_path}")
+    print(f"Updated power measurements in {_display_path(report_path)}")
     return True
 
 
@@ -276,4 +280,4 @@ def update_power_measurements_from_saved_csvs(part_number: str | None = None) ->
         return
 
     save_report(report_path, data)
-    print(f"Updated power measurements in {report_path}")
+    print(f"Updated power measurements in {_display_path(report_path)}")

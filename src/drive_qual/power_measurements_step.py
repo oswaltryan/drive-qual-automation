@@ -4,7 +4,7 @@ import asyncio
 import json
 import os
 from datetime import datetime
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 from typing import Any
 
 from drive_qual import benchmark, tektronix
@@ -24,12 +24,31 @@ from drive_qual.storage_paths import artifact_dir, artifact_file
 DRIVE_TOKEN_WITH_COLON_LEN = 2
 
 
-def _wait_for_device_present(prompt: str) -> ApricornDevice:
-    dut = find_apricorn_device()
+def _display_path(path: str | Path) -> str:
+    return PureWindowsPath(str(path)).as_posix()
+
+
+def _find_matching_device(expected: ApricornDevice | None) -> ApricornDevice | None:
+    if expected is None:
+        return find_apricorn_device()
+
+    payload = get_usb_payload()
+    devices = list_apricorn_devices(payload) if payload else []
+    for device in devices:
+        if is_same_device(expected, device):
+            return device
+    return None
+
+
+def _wait_for_device_present(prompt: str, expected: ApricornDevice | None = None) -> ApricornDevice:
+    dut = _find_matching_device(expected)
     if dut is None:
-        print(prompt)
+        if expected is None:
+            print(prompt)
+        else:
+            print(f"{prompt} Waiting on {device_identity(expected)}")
     while dut is None:
-        dut = find_apricorn_device()
+        dut = _find_matching_device(expected)
     print(f"Tracking Apricorn device: {device_identity(dut)}")
     return dut
 
@@ -72,9 +91,9 @@ def _report_benchmark_results(write_ret: int, read_ret: int) -> None:
 
 def _device_type_for_scope(dut: ApricornDevice) -> str:
     product = (dut.iProduct or "").strip().lower()
-    if "secure key" in product:
-        return "Secure Key"
-    return "Portable"
+    if "dt" in product:
+        return "DT"
+    return "generic"
 
 
 def _dut_label(dut: ApricornDevice) -> str:
@@ -116,10 +135,10 @@ def _write_measurement_backup(report_path: Path, csv_path: str, measurement_grou
         payload["captures"] = captures
     captures.append(entry)
     backup_path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
-    print(f"Wrote capture backup entry to {backup_path}")
+    print(f"Wrote capture backup entry to {_display_path(backup_path)}")
 
 
-async def _run_max_io(part_number: str, report_path: Path) -> None:
+async def _run_max_io(part_number: str, report_path: Path) -> ApricornDevice:
     dut = _wait_for_device_present("Unlock Apricorn device..")
     tektronix.recall_setup(setup_type="Max IO", device_type=_device_type_for_scope(dut))
     mk_dir(artifact_dir(part_number, "Windows", "Max IO"))
@@ -142,15 +161,15 @@ async def _run_max_io(part_number: str, report_path: Path) -> None:
         _write_measurement_backup(report_path, parsed_csv_path, "Max IO")
         _wait_for_device_removed(dut, "Remove Apricorn device..")
         print("")
+    return dut
 
 
-async def _run_in_rush(part_number: str, report_path: Path) -> None:
-    probe = find_apricorn_device()
-    device_type = _device_type_for_scope(probe) if probe else "Portable"
+async def _run_in_rush(part_number: str, report_path: Path, expected_dut: ApricornDevice) -> None:
+    device_type = _device_type_for_scope(expected_dut)
     tektronix.recall_setup(setup_type="InRush", device_type=device_type)
     mk_dir(artifact_dir(part_number, "Windows", "In Rush Current"))
 
-    dut = _wait_for_device_present("Unlock Apricorn device..")
+    dut = _wait_for_device_present("Reconnect Apricorn device..", expected=expected_dut)
     device_label = _dut_label(dut)
     csv_path = artifact_file(part_number, "Windows", "In Rush Current", f"{device_label}.csv")
     tektronix.stop_run()
@@ -163,8 +182,8 @@ def run_power_measurements_step() -> None:
     folder_name = resolve_folder_name(None)
     part_number, report_path = _load_part_number_and_report(folder_name)
 
-    asyncio.run(_run_max_io(part_number, report_path))
-    asyncio.run(_run_in_rush(part_number, report_path))
+    dut = asyncio.run(_run_max_io(part_number, report_path))
+    asyncio.run(_run_in_rush(part_number, report_path, dut))
 
     # Final pass re-reads all CSVs to ensure report JSON is consistent.
     update_power_measurements_from_saved_csvs(part_number=part_number)

@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+from _pytest.monkeypatch import MonkeyPatch
+
 from drive_qual.benchmark import benchmark_directory, benchmark_file_path
 
 
-def test_benchmark_file_path_normalizes_windows_drive_roots(monkeypatch) -> None:
+def test_benchmark_file_path_normalizes_windows_drive_roots(monkeypatch: MonkeyPatch) -> None:
     monkeypatch.setattr("drive_qual.benchmark.sys.platform", "win32")
 
     assert benchmark_directory("D") == "D:\\"

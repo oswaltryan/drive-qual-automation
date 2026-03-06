@@ -1,6 +1,6 @@
 [project]
 name = "drive-qual-automation"
-version = "0.2.0"
+version = "0.2.1"
 description = "An end-to-end storage qualification suite"
 readme = "README.md"
 requires-python = ">=3.12"

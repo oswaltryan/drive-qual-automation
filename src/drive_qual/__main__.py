@@ -14,6 +14,13 @@ part_number = input("Enter the Apricorn Part Number: ")
 print("")
 
 
+def _device_type_for_scope_name(product_name: str | None) -> str:
+    product = (product_name or "").strip().lower()
+    if "dt" in product:
+        return "DT"
+    return "generic"
+
+
 def _select_device_type() -> str:
     print("Available device types:")
     print("                         1) Portables")
@@ -85,7 +92,7 @@ async def in_rush() -> None:
         _wait_for_device_removed("Remove Apricorn device..")
 
         tektronix.recall_setup(
-            setup_type="InRush", device_type=device_type or "Portable"
+            setup_type="InRush", device_type=_device_type_for_scope_name(device_type)
         )  # Initialize Tektronix equipment
         mk_dir(artifact_dir(part_number, "Windows", "In Rush Current"))
 
@@ -105,7 +112,7 @@ async def in_rush() -> None:
 async def max_io() -> None:
     dut = _wait_for_device_present("Unlock Apricorn device..")
 
-    tektronix.recall_setup(setup_type="Max IO", device_type=device_type or "Portable")
+    tektronix.recall_setup(setup_type="Max IO", device_type=_device_type_for_scope_name(device_type))
 
     try:
         await _run_benchmarks(dut)

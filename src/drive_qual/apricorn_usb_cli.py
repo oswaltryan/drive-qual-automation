@@ -85,9 +85,7 @@ def _is_apricorn_device(raw: dict[str, Any]) -> bool:
     if isinstance(scb_part_number, str) and scb_part_number.strip():
         return True
     model_id = raw.get("modelID")
-    if isinstance(model_id, str) and model_id.strip():
-        return True
-    return False
+    return isinstance(model_id, str) and bool(model_id.strip())
 
 
 def _extract_json(payload: str) -> dict[str, Any] | None:
@@ -166,9 +164,13 @@ def is_same_device(expected: ApricornDevice, current: ApricornDevice) -> bool:
         return expected.physicalDriveNum == current.physicalDriveNum
     if expected.driveLetter and current.driveLetter:
         return expected.driveLetter == current.driveLetter
-    if expected.busNumber is not None and current.busNumber is not None:
-        if expected.deviceAddress is not None and current.deviceAddress is not None:
-            return expected.busNumber == current.busNumber and expected.deviceAddress == current.deviceAddress
+    if (
+        expected.busNumber is not None
+        and current.busNumber is not None
+        and expected.deviceAddress is not None
+        and current.deviceAddress is not None
+    ):
+        return expected.busNumber == current.busNumber and expected.deviceAddress == current.deviceAddress
     return (
         expected.idVendor == current.idVendor
         and expected.idProduct == current.idProduct

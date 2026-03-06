@@ -15,8 +15,9 @@ PORT = 5025  # SCPI socket port
 SCOPE_FILE_PARTS_MIN = 5
 
 # These are base paths for the setup files stored on the Scope's internal C: drive
-inrush_path = "C:/Drive Qual In-Rush Current Voltage"
-maxio_path = "C:/Drive Qual IO Current Voltage"
+inrush_path = "C:/in_rush"
+maxio_path = "C:/max_io_generic"
+maxio_dt_path = "C:/max_io_dt"
 
 
 # FUNCTIONS
@@ -193,14 +194,14 @@ def tektronix_list_dir(remote_path: str = "") -> str | None:
     return response
 
 
-def recall_setup(setup_type: str = "Max IO", device_type: str = "Portable") -> None:
+def recall_setup(setup_type: str = "Max IO", device_type: str = "") -> None:
     """
     Recalls a saved setup on the instrument.
     """
     if setup_type == "Max IO":
-        path = maxio_path
+        path = maxio_dt_path if device_type.strip().casefold() == "dt" else maxio_path
     elif setup_type == "InRush":
-        path = inrush_path + " Secure Keys" if device_type == "Secure Key" else inrush_path + " Portables"
+        path = inrush_path
     else:
         raise ValueError("Invalid setup_type. Choose 'Max IO' or 'InRush'.")
 
