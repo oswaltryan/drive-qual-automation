@@ -7,7 +7,6 @@ from drive_qual.drive_info_prompt import run_drive_info_prompt
 from drive_qual.equipment_prompt import run_equipment_prompt
 from drive_qual.power_measurements_step import run_power_measurements_step
 
-
 STEP_ORDER: tuple[str, ...] = ("drive_info", "equipment", "power_measurements")
 StepRunner = Callable[[], None]
 

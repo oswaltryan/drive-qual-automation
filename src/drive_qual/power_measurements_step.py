@@ -14,6 +14,8 @@ from drive_qual.report_session import load_report, report_path_for, resolve_fold
 from drive_qual.storage_paths import artifact_dir, artifact_file
 from drive_qual.usb_tool import ApricornDevice, find_apricorn_device
 
+DRIVE_TOKEN_WITH_COLON_LEN = 2
+
 
 def _wait_for_device_present(prompt: str) -> ApricornDevice:
     dut = find_apricorn_device()
@@ -46,7 +48,7 @@ def _normalize_drive_target(raw: str | None) -> str:
     token = raw.strip()
     if len(token) == 1 and token.isalpha():
         return f"{token}:\\"
-    if len(token) == 2 and token[1] == ":" and token[0].isalpha():
+    if len(token) == DRIVE_TOKEN_WITH_COLON_LEN and token[1] == ":" and token[0].isalpha():
         return f"{token}\\"
     return token
 

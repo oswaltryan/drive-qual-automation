@@ -12,6 +12,7 @@ from .storage_paths import SCOPE_ARTIFACT_ROOT
 #################################################
 HOST = "10.10.10.3"  # Instrument IP
 PORT = 5025  # SCPI socket port
+SCOPE_FILE_PARTS_MIN = 5
 
 # These are base paths for the setup files stored on the Scope's internal C: drive
 inrush_path = "C:/Drive Qual In-Rush Current Voltage"
@@ -149,7 +150,7 @@ def _mkdir_scope(path: str) -> None:
 
 def _parts_from_scope_file(path: str) -> tuple[str, str, str, str] | None:
     parts = PureWindowsPath(path.replace("/", "\\")).parts
-    if len(parts) < 5:
+    if len(parts) < SCOPE_FILE_PARTS_MIN:
         return None
     return parts[1], parts[2], parts[3], parts[-1]
 

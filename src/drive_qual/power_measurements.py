@@ -4,11 +4,19 @@ import csv
 import re
 import time
 from pathlib import Path, PureWindowsPath
-from typing import Any
+from typing import Any, cast
 
 from drive_qual.report_session import load_report, report_path_for, resolve_folder_name, sanitize_dir_name, save_report
 from drive_qual.storage_paths import SCOPE_ARTIFACT_ROOT
 
+PATH_PARTS_MIN = 5
+VALUE_AND_UNIT_PARTS = 2
+DUT_PATH_PART_NUMBER_INDEX = 1
+UNIT_SCALE_MA = {
+    "a": 1000.0,
+    "ma": 1.0,
+    "ua": 0.001,
+}
 DUT_ALIASES: dict[str, str] = {
     "secure key 3 0": "Padlock DT",
     "secure key 3": "Padlock DT",
@@ -25,25 +33,35 @@ def _to_float(value: object) -> float | None:
     text = str(value).strip()
     if not text:
         return None
-    parts = text.split()
-    if len(parts) == 2:
-        raw_value, unit = parts
-        try:
-            magnitude = float(raw_value)
-        except ValueError:
-            return None
-        normalized_unit = unit.casefold()
-        if normalized_unit == "a":
-            return magnitude * 1000.0
-        if normalized_unit == "ma":
-            return magnitude
-        if normalized_unit == "ua":
-            return magnitude / 1000.0
-        return None
+
+    numeric_value = _parse_numeric_value(text)
+    if numeric_value is not None:
+        return numeric_value
+
+    return _parse_value_with_unit(text)
+
+
+def _parse_numeric_value(text: str) -> float | None:
     try:
         return float(text)
-    except (TypeError, ValueError):
+    except ValueError:
         return None
+
+
+def _parse_value_with_unit(text: str) -> float | None:
+    parts = text.split()
+    if len(parts) != VALUE_AND_UNIT_PARTS:
+        return None
+
+    raw_value, unit = parts
+    try:
+        magnitude = float(raw_value)
+    except ValueError:
+        return None
+    unit_scale = UNIT_SCALE_MA.get(unit.casefold())
+    if unit_scale is None:
+        return None
+    return magnitude * unit_scale
 
 
 def _measurement_rows(csv_path: Path) -> list[dict[str, str]]:
@@ -64,7 +82,9 @@ def _measurement_rows(csv_path: Path) -> list[dict[str, str]]:
         name = row.get("Name", "").strip()
         if not name:
             continue
-        rows.append({str(key): str(value).strip() for key, value in row.items() if key is not None and value is not None})
+        rows.append(
+            {str(key): str(value).strip() for key, value in row.items() if key is not None and value is not None}
+        )
     return rows
 
 
@@ -118,11 +138,12 @@ def _resolve_dut_key(power: dict[str, Any], dut_name: str) -> str | None:
 
 
 def _ensure_windows_slot(fields: dict[str, Any], key: str) -> dict[str, Any]:
-    slot = fields.setdefault(key, {"linux": None, "macos": None, "windows": None})
+    default_slot = {"linux": None, "macos": None, "windows": None}
+    slot = fields.setdefault(key, default_slot)
     if not isinstance(slot, dict):
-        slot = {"linux": None, "macos": None, "windows": None}
+        slot = default_slot.copy()
         fields[key] = slot
-    return slot
+    return cast(dict[str, Any], slot)
 
 
 def _apply_csv_to_power(power: dict[str, Any], csv_path: Path) -> bool:
@@ -190,27 +211,33 @@ def _resolve_csv_root(data: dict[str, Any], folder_name: str, requested_part_num
     return Path(SCOPE_ARTIFACT_ROOT) / part_number / "windows"
 
 
-def update_report_power_from_csv_path(csv_path: str) -> bool:
+def _report_power_data(csv_path: str) -> tuple[Path, Path, dict[str, Any], dict[str, Any]] | None:
     win_path = PureWindowsPath(csv_path)
-    if len(win_path.parts) < 5:
-        return False
-    part_number = win_path.parts[1]
+    if len(win_path.parts) < PATH_PARTS_MIN:
+        return None
+    part_number = win_path.parts[DUT_PATH_PART_NUMBER_INDEX]
     folder_name = sanitize_dir_name(part_number)
     if not folder_name:
-        return False
+        return None
 
     report_path = report_path_for(folder_name)
     if not report_path.exists():
-        return False
+        return None
 
     data = load_report(report_path)
     power = data.get("power")
     if not isinstance(power, dict) or not power:
-        return False
+        return None
+    return Path(win_path), report_path, data, power
 
-    path = Path(win_path)
+
+def update_report_power_from_csv_path(csv_path: str) -> bool:
+    resolved = _report_power_data(csv_path)
+    if resolved is None:
+        return False
+    path, report_path, data, power = resolved
     if not _wait_for_csv(path):
-        print(f"Failed to read measurements CSV {path}: file did not appear on host after copy.")
+        print(f"Failed to read measurements CSV {path}: file did not appear on host.")
         return False
 
     changed = _apply_csv_to_power(power, path)
