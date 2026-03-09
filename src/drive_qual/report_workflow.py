@@ -6,8 +6,9 @@ from collections.abc import Callable
 from drive_qual.drive_info_prompt import run_drive_info_prompt
 from drive_qual.equipment_prompt import run_equipment_prompt
 from drive_qual.power_measurements_step import run_power_measurements_step
+from drive_qual.software_step import run_software_step
 
-STEP_ORDER: tuple[str, ...] = ("drive_info", "equipment", "power_measurements")
+STEP_ORDER: tuple[str, ...] = ("drive_info", "equipment", "power_measurements", "performance")
 StepRunner = Callable[[], None]
 
 
@@ -22,6 +23,7 @@ def run_report_workflow(
         "drive_info": run_drive_info_prompt,
         "equipment": lambda: run_equipment_prompt(part_number=part_number, scope_profile=scope_profile),
         "power_measurements": run_power_measurements_step,
+        "performance": lambda: run_software_step(part_number=part_number),
     }
     for step in selected:
         runner = step_runners.get(step)

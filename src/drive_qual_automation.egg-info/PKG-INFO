@@ -7,6 +7,8 @@ Description-Content-Type: text/markdown
 Requires-Dist: requests
 Requires-Dist: pyyaml
 Requires-Dist: pymodbus
+Requires-Dist: pywinauto>=0.6.9
+Requires-Dist: pillow>=12.1.1
 Provides-Extra: dev
 Requires-Dist: mypy; extra == "dev"
 Requires-Dist: pytest; extra == "dev"

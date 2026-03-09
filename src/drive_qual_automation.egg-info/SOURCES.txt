@@ -6,6 +6,7 @@ src/drive_qual/apricorn_usb_cli.py
 src/drive_qual/benchmark.py
 src/drive_qual/drive_info_prompt.py
 src/drive_qual/equipment_prompt.py
+src/drive_qual/inspect_cdi.py
 src/drive_qual/io_utils.py
 src/drive_qual/post_process_measurements.py
 src/drive_qual/power_measurements.py
@@ -13,6 +14,7 @@ src/drive_qual/power_measurements_step.py
 src/drive_qual/report_session.py
 src/drive_qual/report_workflow.py
 src/drive_qual/setup_directories.py
+src/drive_qual/software_step.py
 src/drive_qual/storage_paths.py
 src/drive_qual/tektronix.py
 src/drive_qual/watlow.py
@@ -27,4 +29,5 @@ src/drive_qual_automation.egg-info/top_level.txt
 tests/test_apricorn_usb_cli.py
 tests/test_benchmark_paths.py
 tests/test_power_measurements_paths.py
+tests/test_power_measurements_step.py
 tests/test_smoke.py

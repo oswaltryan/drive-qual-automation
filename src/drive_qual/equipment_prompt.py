@@ -15,24 +15,35 @@ FORM_FACTOR_PRODUCTS: dict[str, list[str]] = {
 
 HOST_DEFAULTS: dict[str, dict[str, Any]] = {
     "windows_host": {
-        "hardware": "",
-        "os_version": "",
-        "software": [],
+        "hardware": "ASUS PRIME Z270-K, i5-7400K",
+        "os_version": "Windows 10 Pro 22H2, 19045.6646",
+        "software": [
+            {"name": "CrystalDiskInfo", "version": "8.8.9"},
+            {"name": "CrystalDiskMark", "version": "7.0.0"},
+            {"name": "disk_tester", "version": "0.3.3"},
+            {"name": "ATTO", "version": "4.0.0f1"},
+        ],
     },
     "usb_if_host": {
-        "hardware": "",
-        "os_version": "",
-        "software": [],
+        "hardware": "ASROCK Z790 Pro RS, i7-12700K",
+        "os_version": "Windows 11 Pro 24H2, 26100.4652",
+        "software": [
+            {"name": "USB-IF CV Suite", "version": "3.1.2.0"},
+        ],
     },
     "linux_host": {
-        "hardware": "",
-        "os_version": "",
-        "software": [],
+        "hardware": "NUC8i3BEK1",
+        "os_version": "Ubuntu 18.04.6 LTS, 5.0.4-150-generic",
+        "software": [
+            {"name": "Disks (native)", "version": None},
+        ],
     },
     "macos_host": {
-        "hardware": "",
-        "os_version": "",
-        "software": [],
+        "hardware": "Mac Mini M2",
+        "os_version": "OS 15 Sequoia",
+        "software": [
+            {"name": "BlackMagic RAW Speed Test", "version": "4.2"},
+        ],
     },
 }
 
@@ -95,9 +106,8 @@ def _temperature_template() -> dict[str, Any]:
 
 
 def _ensure_dut_sections(data: dict[str, Any], duts: list[str]) -> None:
+    equipment = data.get("equipment", {})
     power = data.setdefault("power", {})
-    if not isinstance(power, dict):
-        raise ValueError("Invalid 'power' section; expected object.")
     if not isinstance(power, dict):
         raise ValueError("Invalid 'power' section; expected object.")
 
@@ -109,6 +119,12 @@ def _ensure_dut_sections(data: dict[str, Any], duts: list[str]) -> None:
     if not isinstance(temperature, dict):
         raise ValueError("Invalid 'temperature' section; expected object.")
 
+    host_map = {
+        "windows_host": "Windows",
+        "linux_host": "Linux",
+        "macos_host": "macOS",
+    }
+
     for dut in duts:
         power.setdefault(
             dut,
@@ -118,17 +134,25 @@ def _ensure_dut_sections(data: dict[str, Any], duts: list[str]) -> None:
                 "rms_read_write_current": {"linux": None, "macos": None, "windows": None},
             },
         )
-        performance.setdefault(
+        perf_dut = performance.setdefault(
             dut,
             {
-                "disks_read": {"linux": None, "macos": None, "windows": None},
-                "disks_write": {"linux": None, "macos": None, "windows": None},
-                "blackmagic_read": None,
-                "blackmagic_write": None,
-                "cdm_read": None,
-                "cdm_write": None,
+                "Windows": {},
+                "Linux": {},
+                "macOS": {},
             },
         )
+        for host_key, os_key in host_map.items():
+            host_data = equipment.get(host_key, {})
+            software_list = host_data.get("software", [])
+            if isinstance(software_list, list):
+                os_perf = perf_dut.setdefault(os_key, {})
+                for sw in software_list:
+                    if isinstance(sw, dict):
+                        sw_name = sw.get("name")
+                        if sw_name:
+                            os_perf.setdefault(sw_name, {"read": None, "write": None})
+
         temperature.setdefault(dut, _temperature_template())
 
 

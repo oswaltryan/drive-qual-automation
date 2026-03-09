@@ -11,7 +11,12 @@ from drive_qual.apricorn_usb_cli import (
     list_apricorn_devices,
     select_apricorn_device,
 )
-from drive_qual.power_measurements_step import _wait_for_device_present, _wait_for_device_removed
+from drive_qual.power_measurements_step import (
+    _confirm_selected_device,
+    _wait_for_confirmed_device_present,
+    _wait_for_device_present,
+    _wait_for_device_removed,
+)
 
 
 def test_list_apricorn_devices_filters_non_apricorn_entries() -> None:
@@ -162,3 +167,28 @@ def test_device_identity_includes_key_fields() -> None:
     device = ApricornDevice(iProduct="Secure Key 3.0", iSerial="ABC123", driveLetter="D:", physicalDriveNum=2)
 
     assert device_identity(device) == "Secure Key 3.0, serial=ABC123, drive=D:, disk=2"
+
+
+def test_confirm_selected_device_accepts_yes(monkeypatch: MonkeyPatch) -> None:
+    device = ApricornDevice(iProduct="Secure Key 3.0", iSerial="ABC123", driveLetter="D:")
+    monkeypatch.setattr("builtins.input", lambda _: "y")
+
+    assert _confirm_selected_device(device) is True
+
+
+def test_wait_for_confirmed_device_present_retries_after_rejection(
+    monkeypatch: MonkeyPatch, capsys: CaptureFixture[str]
+) -> None:
+    first = ApricornDevice(iProduct="Secure Key 3.0", iSerial="ABC123", driveLetter="D:")
+    second = ApricornDevice(iProduct="Secure Key 3.0", iSerial="XYZ999", driveLetter="E:")
+    devices = iter([first, second])
+    confirmations = iter([False, True])
+
+    monkeypatch.setattr("drive_qual.power_measurements_step._wait_for_device_present", lambda prompt: next(devices))
+    monkeypatch.setattr("drive_qual.power_measurements_step._confirm_selected_device", lambda dut: next(confirmations))
+
+    selected = _wait_for_confirmed_device_present("Unlock Apricorn device..")
+
+    captured = capsys.readouterr()
+    assert "Select or connect the correct Apricorn device." in captured.out
+    assert selected == second
