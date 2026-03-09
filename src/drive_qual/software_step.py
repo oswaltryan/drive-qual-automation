@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from PIL import ImageGrab  # type: ignore
-from pywinauto import Application  # type: ignore
+from pywinauto import Application, Desktop  # type: ignore
 
 from drive_qual.apricorn_usb_cli import ApricornDevice, find_apricorn_device
 from drive_qual.io_utils import mk_dir
@@ -15,6 +15,7 @@ from drive_qual.report_session import load_report, report_path_for, resolve_fold
 from drive_qual.storage_paths import artifact_dir
 
 CRYSTAL_DISK_INFO_PATH = Path("C:/Program Files/CrystalDiskInfo/DiskInfo64.exe")
+CRYSTAL_DISK_MARK_PATH = Path("C:/Program Files/CrystalDiskMark8/DiskMark64.exe")
 
 
 def _find_drive_button(main_window: Any, drive_letter: str) -> Any | None:
@@ -40,9 +41,9 @@ def _get_tight_rect(hwnd: int) -> tuple[int, int, int, int]:
     return (rect.left, rect.top, rect.right, rect.bottom)
 
 
-def _capture_window(main_window: Any, part_number: str, dut_name: str) -> None:
+def _capture_window(main_window: Any, part_number: str, dut_name: str, tool_name: str) -> None:
     """Helper to capture and save the window screenshot."""
-    ss_dir = artifact_dir(part_number, "Windows", "CrystalDiskInfo")
+    ss_dir = artifact_dir(part_number, "Windows", tool_name)
     mk_dir(ss_dir)
 
     timestamp = time.strftime("%Y%m%d_%H%M%S")
@@ -85,11 +86,82 @@ def automate_crystal_disk_info(drive_letter: str, part_number: str, dut_name: st
         time.sleep(1)
 
         print("\nCrystalDiskInfo automation successful. Taking screenshot...")
-        _capture_window(main_window, part_number, dut_name)
+        _capture_window(main_window, part_number, dut_name, "CrystalDiskInfo")
         return True
 
     except Exception as e:
         print(f"Error during CrystalDiskInfo automation: {e}")
+        return False
+
+
+def _cdm_select_drive(main_window: Any, drive_letter: str) -> None:
+    """Helper to select the drive in CrystalDiskMark."""
+    drive_combo = main_window.child_window(auto_id="1027", control_type="ComboBox")
+    drive_combo.click_input()
+    time.sleep(0.5)
+
+    try:
+        target_item = drive_combo.child_window(title_re=f"{drive_letter}:.*", control_type="ListItem")
+        target_item.click_input()
+    except Exception:
+        combo_lbox = Desktop(backend="uia").window(class_name="ComboLBox")
+        if combo_lbox.exists():
+            combo_lbox.child_window(title_re=f"{drive_letter}:.*").click_input()
+        else:
+            drive_combo.type_keys(f"{drive_letter}:{{ENTER}}")
+
+
+def _cdm_wait_for_completion(app: Any, all_btn: Any) -> None:
+    """Wait for CrystalDiskMark benchmark to complete."""
+    print("Waiting for benchmark to complete (this may take several minutes)...")
+    start_time = time.time()
+    timeout = 1200
+    while time.time() - start_time < timeout:
+        time.sleep(10)
+        try:
+            main_window = app.window(title_re=".*CrystalDiskMark.*")
+            current_btn = main_window.child_window(title="All", auto_id="1003", control_type="Button")
+            if current_btn.exists() and current_btn.is_enabled() and current_btn.window_text() == "All":
+                break
+        except Exception:
+            continue
+
+
+def automate_crystal_disk_mark(drive_letter: str, part_number: str, dut_name: str) -> bool:
+    """Launch CrystalDiskMark, select drive, run benchmark, and save screenshot."""
+    if not CRYSTAL_DISK_MARK_PATH.exists():
+        print(f"\nCrystalDiskMark not found at {CRYSTAL_DISK_MARK_PATH}")
+        return False
+
+    try:
+        try:
+            app = Application(backend="uia").connect(path="DiskMark64.exe")
+            print("Connected to existing CrystalDiskMark.")
+        except Exception:
+            print(f"Launching CrystalDiskMark from {CRYSTAL_DISK_MARK_PATH}...")
+            app = Application(backend="uia").start(str(CRYSTAL_DISK_MARK_PATH))
+            time.sleep(5)
+
+        main_window = app.window(title_re=".*CrystalDiskMark.*")
+        main_window.wait("visible", timeout=10)
+        main_window.set_focus()
+
+        _cdm_select_drive(main_window, drive_letter)
+
+        all_btn = main_window.child_window(title="All", auto_id="1003", control_type="Button")
+        all_btn.click_input()
+        print("Started CrystalDiskMark 'All' benchmark.")
+
+        _cdm_wait_for_completion(app, all_btn)
+
+        main_window = app.window(title_re=".*CrystalDiskMark.*")
+        main_window.set_focus()
+        time.sleep(1)
+        _capture_window(main_window, part_number, dut_name, "CrystalDiskMark")
+        return True
+
+    except Exception as e:
+        print(f"Error during CrystalDiskMark automation: {e}")
         return False
 
 
@@ -134,33 +206,48 @@ def _load_part_number_and_report(folder_name: str) -> tuple[str, Path]:
     return part_number, report_path
 
 
+def _get_software_flags(equipment: dict[str, Any]) -> tuple[bool, bool]:
+    """Determine which software automations to run."""
+    has_cdi = False
+    has_cdm = False
+    for host_key in ["windows_host", "usb_if_host", "linux_host", "macos_host"]:
+        software_list = equipment.get(host_key, {}).get("software", [])
+        for sw in software_list:
+            if isinstance(sw, dict):
+                name = sw.get("name")
+                if name == "CrystalDiskInfo":
+                    has_cdi = True
+                elif name == "CrystalDiskMark":
+                    has_cdm = True
+    return has_cdi, has_cdm
+
+
 def run_software_step(part_number: str | None = None) -> None:
     folder_name = resolve_folder_name(part_number)
-    actual_part_number, report_path = _load_part_number_and_report(folder_name)
+    actual_pn, report_path = _load_part_number_and_report(folder_name)
     data = load_report(report_path)
 
     equipment = data.get("equipment")
     if not isinstance(equipment, dict):
         raise ValueError("Missing or invalid 'equipment' section.")
 
-    has_cdi = False
-    for host_key in ["windows_host", "usb_if_host", "linux_host", "macos_host"]:
-        software_list = equipment.get(host_key, {}).get("software", [])
-        for sw in software_list:
-            if isinstance(sw, dict) and sw.get("name") == "CrystalDiskInfo":
-                has_cdi = True
+    has_cdi, has_cdm = _get_software_flags(equipment)
 
     _sync_performance_section(data, equipment)
     save_report(report_path, data)
     print(f"\nSync complete. Updated report at {report_path}")
 
-    if has_cdi:
+    if has_cdi or has_cdm:
         prompt = "Please connect the Apricorn device to continue with automation..."
         dut_info = _wait_for_device_present(prompt)
         if dut_info and dut_info.driveLetter:
             letter = dut_info.driveLetter.strip().replace(":", "").replace("\\", "")
             dut_name = (dut_info.iProduct or "unknown_device").strip()
-            automate_crystal_disk_info(letter, actual_part_number, dut_name)
+
+            if has_cdi:
+                automate_crystal_disk_info(letter, actual_pn, dut_name)
+            if has_cdm:
+                automate_crystal_disk_mark(letter, actual_pn, dut_name)
         else:
             print("\nError: Could not determine drive letter for the connected device.")
 
