@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+import ctypes
 import time
+from ctypes import wintypes
 from pathlib import Path
 from typing import Any
 
+from PIL import ImageGrab  # type: ignore
 from pywinauto import Application  # type: ignore
 
 from drive_qual.apricorn_usb_cli import ApricornDevice, find_apricorn_device
@@ -22,6 +25,35 @@ def _find_drive_button(main_window: Any, drive_letter: str) -> Any | None:
         if title and title.strip().endswith(f"{drive_letter}:"):
             return btn
     return None
+
+
+def _get_tight_rect(hwnd: int) -> tuple[int, int, int, int]:
+    """Get the tight window rectangle using DWM (excludes invisible borders/shadows)."""
+    rect = wintypes.RECT()
+    DWMWA_EXTENDED_FRAME_BOUNDS = 9
+    ctypes.windll.dwmapi.DwmGetWindowAttribute(
+        wintypes.HWND(hwnd),
+        wintypes.DWORD(DWMWA_EXTENDED_FRAME_BOUNDS),
+        ctypes.byref(rect),
+        ctypes.sizeof(rect),
+    )
+    return (rect.left, rect.top, rect.right, rect.bottom)
+
+
+def _capture_window(main_window: Any, part_number: str, dut_name: str) -> None:
+    """Helper to capture and save the window screenshot."""
+    ss_dir = artifact_dir(part_number, "Windows", "CrystalDiskInfo")
+    mk_dir(ss_dir)
+
+    timestamp = time.strftime("%Y%m%d_%H%M%S")
+    ss_path = Path(ss_dir) / f"{dut_name}_{timestamp}.png"
+
+    hwnd = main_window.handle
+    rect = _get_tight_rect(hwnd)
+
+    img = ImageGrab.grab(bbox=rect, all_screens=True)
+    img.save(str(ss_path))
+    print(f"Screenshot saved to: {ss_path}")
 
 
 def automate_crystal_disk_info(drive_letter: str, part_number: str, dut_name: str) -> bool:
@@ -43,24 +75,17 @@ def automate_crystal_disk_info(drive_letter: str, part_number: str, dut_name: st
         main_window.wait("visible", timeout=10)
         main_window.set_focus()
 
-        print(f"Searching for drive button for letter: {drive_letter}")
         btn = _find_drive_button(main_window, drive_letter)
-
         if btn is None:
             print(f"Warning: Could not find drive button for {drive_letter}:")
             return False
 
         print(f"Selecting drive button: {btn.window_text().replace('\r\n', ' ')}")
         btn.click_input()
+        time.sleep(1)
 
         print("\nCrystalDiskInfo automation successful. Taking screenshot...")
-        ss_dir = artifact_dir(part_number, "Windows", "CrystalDiskInfo")
-        mk_dir(ss_dir)
-
-        timestamp = time.strftime("%Y%m%d_%H%M%S")
-        ss_path = Path(ss_dir) / f"{dut_name}_{timestamp}.png"
-        main_window.capture_as_image().save(str(ss_path))
-        print(f"Screenshot saved to: {ss_path}")
+        _capture_window(main_window, part_number, dut_name)
         return True
 
     except Exception as e:
@@ -118,17 +143,11 @@ def run_software_step(part_number: str | None = None) -> None:
     if not isinstance(equipment, dict):
         raise ValueError("Missing or invalid 'equipment' section.")
 
-    print("\nCurrent Software Configuration:")
     has_cdi = False
     for host_key in ["windows_host", "usb_if_host", "linux_host", "macos_host"]:
         software_list = equipment.get(host_key, {}).get("software", [])
-        print(f"\n{host_key}:")
-        if not software_list:
-            print("  None")
-        for i, sw in enumerate(software_list):
-            name = sw.get("name")
-            print(f"  {i + 1}. {name} (v{sw.get('version')})")
-            if name == "CrystalDiskInfo":
+        for sw in software_list:
+            if isinstance(sw, dict) and sw.get("name") == "CrystalDiskInfo":
                 has_cdi = True
 
     _sync_performance_section(data, equipment)
