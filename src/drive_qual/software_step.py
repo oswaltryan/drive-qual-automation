@@ -17,6 +17,7 @@ from drive_qual.storage_paths import artifact_dir
 
 CRYSTAL_DISK_INFO_PATH = Path("C:/Program Files/CrystalDiskInfo/DiskInfo64.exe")
 CRYSTAL_DISK_MARK_PATH = Path("C:/Program Files/CrystalDiskMark8/DiskMark64.exe")
+ATTO_PATH = Path("C:/Program Files (x86)/ATTO Technology/Disk Benchmark/ATTODiskBenchmark.exe")
 
 
 def _find_drive_button(main_window: Any, drive_letter: str) -> Any | None:
@@ -130,6 +131,113 @@ def automate_crystal_disk_info(
     except Exception as e:
         print(f"Error during CrystalDiskInfo automation: {e}")
         _update_cdi_json(report_path, data, dut_name, False)
+        return False
+
+
+def _atto_select_drive(main_window: Any, drive_letter: str) -> None:
+    """Helper to select the drive in ATTO."""
+    drive_combo = main_window.child_window(auto_id="1000", control_type="ComboBox")
+    drive_combo.click_input()
+    time.sleep(0.5)
+
+    try:
+        # ATTO uses a standard list box for its combo
+        target_item = drive_combo.child_window(title_re=f".*{drive_letter}:.*", control_type="ListItem")
+        target_item.click_input()
+    except Exception:
+        # Fallback to key sending
+        drive_combo.type_keys(f"{drive_letter}:{{ENTER}}")
+
+
+def _atto_wait_for_completion(app: Any, start_btn: Any) -> None:
+    """Wait for ATTO benchmark to complete."""
+    print("Waiting for ATTO benchmark to complete (this may take several minutes)...")
+    start_time = time.time()
+    timeout = 1800  # 30 minutes for ATTO as it can be slow
+    while time.time() - start_time < timeout:
+        time.sleep(10)
+        try:
+            main_window = app.window(title_re=".*ATTO Disk Benchmark.*")
+            current_btn = main_window.child_window(auto_id="1002", control_type="Button")
+            # When ATTO is running, the button text changes to "Stop"
+            if current_btn.exists() and current_btn.is_enabled() and current_btn.window_text() == "Start":
+                break
+        except Exception:
+            continue
+
+
+def _atto_extract_results(
+    main_window: Any, csv_path: Path, report_path: Path, data: dict[str, Any], dut_name: str
+) -> None:
+    """Extract results from ATTO GUI and save to CSV/JSON."""
+    csv_rows = []
+
+    # ATTO 4.01 rows are roughly 1100-1120 (Label), 1200-1220 (Write), 1300-1320 (Read)
+    for i in range(21):
+        try:
+            label = main_window.child_window(auto_id=str(1100 + i)).window_text().strip()
+            if not label:
+                continue
+            write_val = main_window.child_window(auto_id=str(1200 + i)).window_text().strip()
+            read_val = main_window.child_window(auto_id=str(1300 + i)).window_text().strip()
+            csv_rows.append([label, write_val, read_val])
+        except Exception:
+            break
+
+    with open(csv_path, "w", newline="", encoding="utf-8") as f:
+        writer = csv.writer(f)
+        writer.writerow(["I/O Size", "Write", "Read"])
+        writer.writerows(csv_rows)
+    print(f"ATTO Results saved to: {csv_path}")
+
+    if csv_rows:
+        last_write = csv_rows[-1][1]
+        last_read = csv_rows[-1][2]
+        performance = data.setdefault("performance", {})
+        report_dut_key = _find_report_dut_key(performance, dut_name)
+        if report_dut_key:
+            win_perf = performance[report_dut_key].setdefault("Windows", {})
+            atto_perf = win_perf.setdefault("ATTO", {"read": None, "write": None})
+            atto_perf["read"] = last_read
+            atto_perf["write"] = last_write
+            save_report(report_path, data)
+            print(f"Updated JSON report for '{report_dut_key}' ATTO results: {last_read} / {last_write}")
+
+
+def automate_atto(drive_letter: str, part_number: str, dut_name: str, report_path: Path, data: dict[str, Any]) -> bool:
+    """Launch ATTO, select drive, run benchmark, and save screenshot/CSV."""
+    if not ATTO_PATH.exists():
+        print(f"\nATTO not found at {ATTO_PATH}")
+        return False
+
+    try:
+        app = _launch_or_connect_app(ATTO_PATH, "ATTODiskBenchmark.exe", "ATTO Disk Benchmark")
+        main_window = app.window(title_re=".*ATTO Disk Benchmark.*")
+        main_window.wait("visible", timeout=10)
+        main_window.set_focus()
+
+        _atto_select_drive(main_window, drive_letter)
+
+        start_btn = main_window.child_window(title="Start", auto_id="1002", control_type="Button")
+        start_btn.click_input()
+        print("Started ATTO benchmark.")
+
+        _atto_wait_for_completion(app, start_btn)
+
+        main_window = app.window(title_re=".*ATTO Disk Benchmark.*")
+        main_window.set_focus()
+        time.sleep(1)
+        _capture_window(main_window, part_number, dut_name, "ATTO")
+
+        ss_dir = artifact_dir(part_number, "Windows", "ATTO")
+        mk_dir(ss_dir)
+        timestamp = time.strftime("%Y%m%d_%H%M%S")
+        csv_path = Path(ss_dir) / f"{dut_name}_{timestamp}.csv"
+        _atto_extract_results(main_window, csv_path, report_path, data, dut_name)
+        return True
+
+    except Exception as e:
+        print(f"Error during ATTO automation: {e}")
         return False
 
 
@@ -318,10 +426,11 @@ def _load_part_number_and_report(folder_name: str) -> tuple[str, Path]:
     return part_number, report_path
 
 
-def _get_software_flags(equipment: dict[str, Any]) -> tuple[bool, bool]:
+def _get_software_flags(equipment: dict[str, Any]) -> tuple[bool, bool, bool]:
     """Determine which software automations to run."""
     has_cdi = False
     has_cdm = False
+    has_atto = False
     for host_key in ["windows_host", "usb_if_host", "linux_host", "macos_host"]:
         software_list = equipment.get(host_key, {}).get("software", [])
         for sw in software_list:
@@ -331,7 +440,9 @@ def _get_software_flags(equipment: dict[str, Any]) -> tuple[bool, bool]:
                     has_cdi = True
                 elif name == "CrystalDiskMark":
                     has_cdm = True
-    return has_cdi, has_cdm
+                elif name == "ATTO":
+                    has_atto = True
+    return has_cdi, has_cdm, has_atto
 
 
 def run_software_step(part_number: str | None = None) -> None:
@@ -343,13 +454,13 @@ def run_software_step(part_number: str | None = None) -> None:
     if not isinstance(equipment, dict):
         raise ValueError("Missing or invalid 'equipment' section.")
 
-    has_cdi, has_cdm = _get_software_flags(equipment)
+    has_cdi, has_cdm, has_atto = _get_software_flags(equipment)
 
     _sync_performance_section(data, equipment)
     save_report(report_path, data)
     print(f"\nSync complete. Updated report at {report_path}")
 
-    if has_cdi or has_cdm:
+    if has_cdi or has_cdm or has_atto:
         prompt = "Please connect the Apricorn device to continue with automation..."
         dut_info = _wait_for_device_present(prompt)
         if dut_info and dut_info.driveLetter:
@@ -360,6 +471,8 @@ def run_software_step(part_number: str | None = None) -> None:
                 automate_crystal_disk_info(letter, actual_pn, dut_name, report_path, data)
             if has_cdm:
                 automate_crystal_disk_mark(letter, actual_pn, dut_name, report_path, data)
+            if has_atto:
+                automate_atto(letter, actual_pn, dut_name, report_path, data)
         else:
             print("\nError: Could not determine drive letter for the connected device.")
 
