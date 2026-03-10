@@ -349,6 +349,8 @@ async def _run_max_io(part_number: str, report_path: Path) -> ApricornDevice:
         parsed_csv_path = tektronix.save_measurements(csv_path)
         tektronix.backup_session(artifact_file(part_number, "Windows", "Max IO", f"{device_label}.png"))
         _write_measurement_backup(report_path, parsed_csv_path, "Max IO")
+        if _run_safe_eject_script(dut):
+            _mark_windows_compatibility(report_path, "safely_remove")
         _wait_for_device_removed(dut, "Remove Apricorn device..")
         print("")
     return dut
@@ -367,8 +369,6 @@ async def _run_in_rush(part_number: str, report_path: Path, expected_dut: Aprico
     parsed_csv_path = tektronix.save_measurements(csv_path)
     tektronix.backup_session(artifact_file(part_number, "Windows", "In Rush Current", f"{device_label}.png"))
     _write_measurement_backup(report_path, parsed_csv_path, "In Rush Current")
-    if _run_safe_eject_script(dut):
-        _mark_windows_compatibility(report_path, "safely_remove")
 
 
 def run_power_measurements_step() -> None:

@@ -19,6 +19,9 @@ CRYSTAL_DISK_INFO_PATH = Path("C:/Program Files/CrystalDiskInfo/DiskInfo64.exe")
 CRYSTAL_DISK_MARK_PATH = Path("C:/Program Files/CrystalDiskMark8/DiskMark64.exe")
 ATTO_PATH = Path("C:/Program Files (x86)/ATTO Technology/Disk Benchmark/ATTODiskBenchmark.exe")
 
+ATTO_TIMEOUT = 1800
+CDM_TIMEOUT = 1200
+
 
 def _find_drive_button(main_window: Any, drive_letter: str) -> Any | None:
     """Find the CDI drive button for a specific drive letter."""
@@ -79,6 +82,17 @@ def _launch_or_connect_app(app_path: Path, exe_name: str, app_name: str) -> Any:
         return app
 
 
+def _to_float(val: str | None) -> float | None:
+    """Safely convert a string to a float, returning None if conversion fails."""
+    if val is None:
+        return None
+    try:
+        clean_val = "".join(c for k, c in enumerate(val) if c.isdigit() or c == "." or (c == "-" and k == 0))
+        return float(clean_val)
+    except (ValueError, TypeError):
+        return None
+
+
 def _update_cdi_json(report_path: Path, data: dict[str, Any], dut_name: str, val: bool | None) -> None:
     performance = data.setdefault("performance", {})
     report_dut_key = _find_report_dut_key(performance, dut_name)
@@ -108,7 +122,6 @@ def automate_crystal_disk_info(
 
     try:
         app = _launch_or_connect_app(CRYSTAL_DISK_INFO_PATH, "DiskInfo64.exe", "CrystalDiskInfo")
-
         main_window = app.window(title_re=".*CrystalDiskInfo.*")
         main_window.wait("visible", timeout=10)
         main_window.set_focus()
@@ -119,15 +132,12 @@ def automate_crystal_disk_info(
             _update_cdi_json(report_path, data, dut_name, False)
             return False
 
-        print(f"Selecting drive button: {btn.window_text().replace('\r\n', ' ')}")
         btn.click_input()
         time.sleep(1)
-
-        print("\nCrystalDiskInfo automation successful. Taking screenshot...")
         _capture_window(main_window, part_number, dut_name, "CrystalDiskInfo")
         _update_cdi_json(report_path, data, dut_name, True)
+        app.kill()
         return True
-
     except Exception as e:
         print(f"Error during CrystalDiskInfo automation: {e}")
         _update_cdi_json(report_path, data, dut_name, False)
@@ -139,27 +149,22 @@ def _atto_select_drive(main_window: Any, drive_letter: str) -> None:
     drive_combo = main_window.child_window(auto_id="1000", control_type="ComboBox")
     drive_combo.click_input()
     time.sleep(0.5)
-
     try:
-        # ATTO uses a standard list box for its combo
         target_item = drive_combo.child_window(title_re=f".*{drive_letter}:.*", control_type="ListItem")
         target_item.click_input()
     except Exception:
-        # Fallback to key sending
         drive_combo.type_keys(f"{drive_letter}:{{ENTER}}")
 
 
-def _atto_wait_for_completion(app: Any, start_btn: Any) -> None:
+def _atto_wait_for_completion(app: Any) -> None:
     """Wait for ATTO benchmark to complete."""
     print("Waiting for ATTO benchmark to complete (this may take several minutes)...")
     start_time = time.time()
-    timeout = 1800  # 30 minutes for ATTO as it can be slow
-    while time.time() - start_time < timeout:
+    while time.time() - start_time < ATTO_TIMEOUT:
         time.sleep(10)
         try:
             main_window = app.window(title_re=".*ATTO Disk Benchmark.*")
             current_btn = main_window.child_window(auto_id="1002", control_type="Button")
-            # When ATTO is running, the button text changes to "Stop"
             if current_btn.exists() and current_btn.is_enabled() and current_btn.window_text() == "Start":
                 break
         except Exception:
@@ -171,8 +176,6 @@ def _atto_extract_results(
 ) -> None:
     """Extract results from ATTO GUI and save to CSV/JSON."""
     csv_rows = []
-
-    # ATTO 4.01 rows are roughly 1100-1120 (Label), 1200-1220 (Write), 1300-1320 (Read)
     for i in range(21):
         try:
             label = main_window.child_window(auto_id=str(1100 + i)).window_text().strip()
@@ -188,20 +191,16 @@ def _atto_extract_results(
         writer = csv.writer(f)
         writer.writerow(["I/O Size", "Write", "Read"])
         writer.writerows(csv_rows)
-    print(f"ATTO Results saved to: {csv_path}")
 
     if csv_rows:
-        last_write = csv_rows[-1][1]
-        last_read = csv_rows[-1][2]
         performance = data.setdefault("performance", {})
         report_dut_key = _find_report_dut_key(performance, dut_name)
         if report_dut_key:
             win_perf = performance[report_dut_key].setdefault("Windows", {})
             atto_perf = win_perf.setdefault("ATTO", {"read": None, "write": None})
-            atto_perf["read"] = last_read
-            atto_perf["write"] = last_write
+            atto_perf["read"] = _to_float(csv_rows[-1][2])
+            atto_perf["write"] = _to_float(csv_rows[-1][1])
             save_report(report_path, data)
-            print(f"Updated JSON report for '{report_dut_key}' ATTO results: {last_read} / {last_write}")
 
 
 def automate_atto(drive_letter: str, part_number: str, dut_name: str, report_path: Path, data: dict[str, Any]) -> bool:
@@ -209,33 +208,23 @@ def automate_atto(drive_letter: str, part_number: str, dut_name: str, report_pat
     if not ATTO_PATH.exists():
         print(f"\nATTO not found at {ATTO_PATH}")
         return False
-
     try:
         app = _launch_or_connect_app(ATTO_PATH, "ATTODiskBenchmark.exe", "ATTO Disk Benchmark")
         main_window = app.window(title_re=".*ATTO Disk Benchmark.*")
         main_window.wait("visible", timeout=10)
         main_window.set_focus()
-
         _atto_select_drive(main_window, drive_letter)
-
         start_btn = main_window.child_window(title="Start", auto_id="1002", control_type="Button")
         start_btn.click_input()
-        print("Started ATTO benchmark.")
-
-        _atto_wait_for_completion(app, start_btn)
-
-        main_window = app.window(title_re=".*ATTO Disk Benchmark.*")
+        _atto_wait_for_completion(app)
         main_window.set_focus()
-        time.sleep(1)
         _capture_window(main_window, part_number, dut_name, "ATTO")
-
         ss_dir = artifact_dir(part_number, "Windows", "ATTO")
-        mk_dir(ss_dir)
         timestamp = time.strftime("%Y%m%d_%H%M%S")
         csv_path = Path(ss_dir) / f"{dut_name}_{timestamp}.csv"
         _atto_extract_results(main_window, csv_path, report_path, data, dut_name)
+        app.kill()
         return True
-
     except Exception as e:
         print(f"Error during ATTO automation: {e}")
         return False
@@ -246,7 +235,6 @@ def _cdm_select_drive(main_window: Any, drive_letter: str) -> None:
     drive_combo = main_window.child_window(auto_id="1027", control_type="ComboBox")
     drive_combo.click_input()
     time.sleep(0.5)
-
     try:
         target_item = drive_combo.child_window(title_re=f"{drive_letter}:.*", control_type="ListItem")
         target_item.click_input()
@@ -258,12 +246,11 @@ def _cdm_select_drive(main_window: Any, drive_letter: str) -> None:
             drive_combo.type_keys(f"{drive_letter}:{{ENTER}}")
 
 
-def _cdm_wait_for_completion(app: Any, all_btn: Any) -> None:
+def _cdm_wait_for_completion(app: Any) -> None:
     """Wait for CrystalDiskMark benchmark to complete."""
     print("Waiting for benchmark to complete (this may take several minutes)...")
     start_time = time.time()
-    timeout = 1200
-    while time.time() - start_time < timeout:
+    while time.time() - start_time < CDM_TIMEOUT:
         time.sleep(10)
         try:
             main_window = app.window(title_re=".*CrystalDiskMark.*")
@@ -274,14 +261,6 @@ def _cdm_wait_for_completion(app: Any, all_btn: Any) -> None:
             continue
 
 
-def _save_cdm_csv(csv_path: Path, csv_rows: list[list[str]]) -> None:
-    with open(csv_path, "w", newline="", encoding="utf-8") as f:
-        writer = csv.writer(f)
-        writer.writerow(["Test", "Read", "Write"])
-        writer.writerows(csv_rows)
-    print(f"Results saved to: {csv_path}")
-
-
 def _update_cdm_json(
     report_path: Path, data: dict[str, Any], dut_name: str, first_read: str | None, first_write: str | None
 ) -> None:
@@ -290,12 +269,10 @@ def _update_cdm_json(
     if report_dut_key:
         win_perf = performance[report_dut_key].setdefault("Windows", {})
         cdm_perf = win_perf.setdefault("CrystalDiskMark", {"read": None, "write": None})
-        cdm_perf["read"] = first_read
-        cdm_perf["write"] = first_write
+        cdm_perf["read"] = _to_float(first_read)
+        cdm_perf["write"] = _to_float(first_write)
         save_report(report_path, data)
-        print(f"Updated JSON report for '{report_dut_key}' with results: {first_read} / {first_write}")
-    else:
-        print(f"Warning: Could not find matching DUT key in report for '{dut_name}' to update JSON.")
+        print(f"Updated JSON report for '{report_dut_key}' CDM results: {cdm_perf['read']} / {cdm_perf['write']}")
 
 
 def _cdm_extract_and_save_results(
@@ -306,19 +283,15 @@ def _cdm_extract_and_save_results(
     mk_dir(ss_dir)
     timestamp = time.strftime("%Y%m%d_%H%M%S")
     csv_path = Path(ss_dir) / f"{dut_name}_{timestamp}.csv"
-
-    # auto_id mapping for CDM 8
     rows = [
         {"label_id": "1004", "read_id": "1009", "write_id": "1014"},
         {"label_id": "1005", "read_id": "1010", "write_id": "1015"},
         {"label_id": "1006", "read_id": "1011", "write_id": "1016"},
         {"label_id": "1007", "read_id": "1012", "write_id": "1017"},
     ]
-
     csv_rows = []
     first_read = None
     first_write = None
-
     for r in rows:
         try:
             label = main_window.child_window(auto_id=r["label_id"]).window_text().replace("\r\n", " ")
@@ -327,10 +300,12 @@ def _cdm_extract_and_save_results(
             csv_rows.append([label, read, write])
             if first_read is None:
                 first_read, first_write = read, write
-        except Exception as e:
-            print(f"Warning: Failed to extract row {r['label_id']}: {e}")
-
-    _save_cdm_csv(csv_path, csv_rows)
+        except Exception:
+            continue
+    with open(csv_path, "w", newline="", encoding="utf-8") as f:
+        writer = csv.writer(f)
+        writer.writerow(["Test", "Read", "Write"])
+        writer.writerows(csv_rows)
     _update_cdm_json(report_path, data, dut_name, first_read, first_write)
 
 
@@ -341,38 +316,24 @@ def automate_crystal_disk_mark(
     if not CRYSTAL_DISK_MARK_PATH.exists():
         print(f"\nCrystalDiskMark not found at {CRYSTAL_DISK_MARK_PATH}")
         return False
-
     try:
         try:
             app = Application(backend="uia").connect(path="DiskMark64.exe")
-            print("Connected to existing CrystalDiskMark.")
         except Exception:
-            print(f"Launching CrystalDiskMark from {CRYSTAL_DISK_MARK_PATH}...")
             app = Application(backend="uia").start(str(CRYSTAL_DISK_MARK_PATH))
             time.sleep(5)
-
         main_window = app.window(title_re=".*CrystalDiskMark.*")
         main_window.wait("visible", timeout=10)
         main_window.set_focus()
-
         _cdm_select_drive(main_window, drive_letter)
-
         all_btn = main_window.child_window(title="All", auto_id="1003", control_type="Button")
         all_btn.click_input()
-        print("Started CrystalDiskMark 'All' benchmark.")
-
-        _cdm_wait_for_completion(app, all_btn)
-
-        main_window = app.window(title_re=".*CrystalDiskMark.*")
+        _cdm_wait_for_completion(app)
         main_window.set_focus()
-        time.sleep(1)
         _capture_window(main_window, part_number, dut_name, "CrystalDiskMark")
-
-        # Extract values and save CSV
         _cdm_extract_and_save_results(main_window, part_number, dut_name, report_path, data)
-
+        app.kill()
         return True
-
     except Exception as e:
         print(f"Error during CrystalDiskMark automation: {e}")
         return False
@@ -394,22 +355,20 @@ def _sync_performance_section(data: dict[str, Any], equipment: dict[str, Any]) -
     performance = data.setdefault("performance", {})
     duts = equipment.get("dut", [])
     host_map = {"windows_host": "Windows", "linux_host": "Linux", "macos_host": "macOS"}
-
     for dut in duts:
         perf_dut = performance.setdefault(dut, {"Windows": {}, "Linux": {}, "macOS": {}})
         for host_key, os_key in host_map.items():
             host_data = equipment.get(host_key, {})
-            software_list = host_data.get("software", [])
-            if isinstance(software_list, list):
+            sw_list = host_data.get("software", [])
+            if isinstance(sw_list, list):
                 os_perf = perf_dut.setdefault(os_key, {})
-                for sw in software_list:
+                for sw in sw_list:
                     if isinstance(sw, dict) and sw.get("name"):
                         name = sw.get("name")
                         if name == "CrystalDiskInfo":
                             cdi_dict = os_perf.setdefault(name, {"screenshot": None})
                             cdi_dict.pop("read", None)
                             cdi_dict.pop("write", None)
-                            cdi_dict.setdefault("screenshot", None)
                         else:
                             os_perf.setdefault(name, {"read": None, "write": None})
 
@@ -428,45 +387,37 @@ def _load_part_number_and_report(folder_name: str) -> tuple[str, Path]:
 
 def _get_software_flags(equipment: dict[str, Any]) -> tuple[bool, bool, bool]:
     """Determine which software automations to run."""
-    has_cdi = False
-    has_cdm = False
-    has_atto = False
+    flags = [False, False, False]
     for host_key in ["windows_host", "usb_if_host", "linux_host", "macos_host"]:
-        software_list = equipment.get(host_key, {}).get("software", [])
-        for sw in software_list:
+        sw_list = equipment.get(host_key, {}).get("software", [])
+        for sw in sw_list:
             if isinstance(sw, dict):
                 name = sw.get("name")
                 if name == "CrystalDiskInfo":
-                    has_cdi = True
+                    flags[0] = True
                 elif name == "CrystalDiskMark":
-                    has_cdm = True
+                    flags[1] = True
                 elif name == "ATTO":
-                    has_atto = True
-    return has_cdi, has_cdm, has_atto
+                    flags[2] = True
+    return flags[0], flags[1], flags[2]
 
 
 def run_software_step(part_number: str | None = None) -> None:
     folder_name = resolve_folder_name(part_number)
     actual_pn, report_path = _load_part_number_and_report(folder_name)
     data = load_report(report_path)
-
     equipment = data.get("equipment")
     if not isinstance(equipment, dict):
         raise ValueError("Missing or invalid 'equipment' section.")
-
     has_cdi, has_cdm, has_atto = _get_software_flags(equipment)
-
     _sync_performance_section(data, equipment)
     save_report(report_path, data)
     print(f"\nSync complete. Updated report at {report_path}")
-
     if has_cdi or has_cdm or has_atto:
-        prompt = "Please connect the Apricorn device to continue with automation..."
-        dut_info = _wait_for_device_present(prompt)
+        dut_info = _wait_for_device_present("Connect the Apricorn device to continue...")
         if dut_info and dut_info.driveLetter:
             letter = dut_info.driveLetter.strip().replace(":", "").replace("\\", "")
             dut_name = (dut_info.iProduct or "unknown_device").strip()
-
             if has_cdi:
                 automate_crystal_disk_info(letter, actual_pn, dut_name, report_path, data)
             if has_cdm:
