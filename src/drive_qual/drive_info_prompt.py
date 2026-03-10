@@ -11,6 +11,7 @@ FIELDS: tuple[tuple[str, str], ...] = (
     ("apricorn_part_number", "Apricorn Part Number"),
     ("manufacturer", "Manufacturer"),
     ("manufacturer_part_number", "Manufacturer Part Number"),
+    ("model_id", "Model ID"),
     ("capacity", "Capacity"),
     ("firmware", "Firmware"),
     ("form_factor", "Form Factor"),
@@ -53,9 +54,13 @@ def run_drive_info_prompt() -> None:
     output_path = report_path_for(folder_name)
     output_path.parent.mkdir(parents=True, exist_ok=True)
     save_report(output_path, data)
-    set_current_session(folder_name)
+
+    # Use Model ID as product name, fallback to manufacturer
+    product_name = drive_info.get("model_id") or drive_info.get("manufacturer")
+    set_current_session(folder_name, product_name=product_name)
+
     print(f"Wrote updated template to {output_path}")
-    print(f"Set current session to {folder_name}")
+    print(f"Set current session to {folder_name} (Product: {product_name})")
 
 
 if __name__ == "__main__":

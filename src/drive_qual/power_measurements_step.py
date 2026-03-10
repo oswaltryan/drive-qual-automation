@@ -131,6 +131,12 @@ def _partition_and_format_drive(dut: ApricornDevice) -> bool:
 
 
 def _prompt_disk_management_visible(dut: ApricornDevice) -> bool:
+    print(f"\nLaunching Disk Management for {device_identity(dut)}...")
+    try:
+        subprocess.Popen(["diskmgmt.msc"], shell=True)
+    except Exception as e:
+        print(f"Failed to launch Disk Management: {e}")
+
     prompt = f"Can the drive be seen in Disk Management for {device_identity(dut)}? [true/false]: "
     while True:
         response = input(prompt).strip().casefold()

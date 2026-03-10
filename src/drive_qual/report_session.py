@@ -21,9 +21,13 @@ def sanitize_dir_name(value: str) -> str:
     return "".join(cleaned).strip("_")
 
 
-def set_current_session(folder_name: str) -> None:
+def set_current_session(folder_name: str, product_name: str | None = None) -> None:
     REPORT_ROOT.mkdir(parents=True, exist_ok=True)
-    CURRENT_MARKER.write_text(f"{folder_name}\n", encoding="utf-8")
+    session_data = {
+        "folder": folder_name,
+        "product": product_name,
+    }
+    CURRENT_MARKER.write_text(json.dumps(session_data) + "\n", encoding="utf-8")
 
 
 def resolve_folder_name(part_number: str | None) -> str:
@@ -33,7 +37,14 @@ def resolve_folder_name(part_number: str | None) -> str:
             raise ValueError("Apricorn Part Number produced an empty directory name after sanitizing.")
         return folder_name
     if CURRENT_MARKER.exists():
-        return CURRENT_MARKER.read_text(encoding="utf-8").strip()
+        raw_text = CURRENT_MARKER.read_text(encoding="utf-8").strip()
+        try:
+            data = json.loads(raw_text)
+            if isinstance(data, dict) and "folder" in data:
+                return str(data["folder"])
+        except json.JSONDecodeError:
+            # Fallback for old plain text format
+            return raw_text
     entry = input("Apricorn Part Number (for report folder): ").strip()
     if not entry:
         raise ValueError("Apricorn Part Number is required.")
