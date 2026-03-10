@@ -1,12 +1,13 @@
 from __future__ import annotations
 
+import csv
 import ctypes
 import time
 from ctypes import wintypes
 from pathlib import Path
 from typing import Any
 
-from PIL import ImageGrab  # type: ignore
+from PIL import ImageGrab
 from pywinauto import Application, Desktop  # type: ignore
 
 from drive_qual.apricorn_usb_cli import ApricornDevice, find_apricorn_device
@@ -57,20 +58,55 @@ def _capture_window(main_window: Any, part_number: str, dut_name: str, tool_name
     print(f"Screenshot saved to: {ss_path}")
 
 
-def automate_crystal_disk_info(drive_letter: str, part_number: str, dut_name: str) -> bool:
+def _find_report_dut_key(performance: dict[str, Any], dut_name: str) -> str | None:
+    for k in performance:
+        if k.lower() in dut_name.lower() or dut_name.lower() in k.lower():
+            return k
+    return None
+
+
+def _launch_or_connect_app(app_path: Path, exe_name: str, app_name: str) -> Any:
+    """Helper to connect to an existing app or launch it."""
+    try:
+        app = Application(backend="uia").connect(path=exe_name)
+        print(f"Connected to existing {app_name}.")
+        return app
+    except Exception:
+        print(f"Launching {app_name} from {app_path}...")
+        app = Application(backend="uia").start(str(app_path))
+        time.sleep(5)
+        return app
+
+
+def _update_cdi_json(report_path: Path, data: dict[str, Any], dut_name: str, val: bool | None) -> None:
+    performance = data.setdefault("performance", {})
+    report_dut_key = _find_report_dut_key(performance, dut_name)
+    if report_dut_key:
+        win_perf = performance[report_dut_key].setdefault("Windows", {})
+        cdi_perf = win_perf.setdefault("CrystalDiskInfo", {"screenshot": None})
+        cdi_perf["screenshot"] = val
+        save_report(report_path, data)
+        print(f"Updated JSON report for '{report_dut_key}' CDI screenshot: {val}")
+
+
+def automate_crystal_disk_info(
+    drive_letter: str, part_number: str, dut_name: str, report_path: Path, data: dict[str, Any]
+) -> bool:
     """Launch CrystalDiskInfo, select the specific drive, and save a screenshot."""
+    is_ask3 = "ASK3" in dut_name.upper()
+
+    if is_ask3:
+        print(f"Skipping CrystalDiskInfo for {dut_name} (ASK3 device).")
+        _update_cdi_json(report_path, data, dut_name, False)
+        return False
+
     if not CRYSTAL_DISK_INFO_PATH.exists():
         print(f"\nCrystalDiskInfo not found at {CRYSTAL_DISK_INFO_PATH}")
+        _update_cdi_json(report_path, data, dut_name, False)
         return False
 
     try:
-        try:
-            app = Application(backend="uia").connect(path="DiskInfo64.exe")
-            print("Connected to existing CrystalDiskInfo.")
-        except Exception:
-            print(f"Launching CrystalDiskInfo from {CRYSTAL_DISK_INFO_PATH}...")
-            app = Application(backend="uia").start(str(CRYSTAL_DISK_INFO_PATH))
-            time.sleep(5)
+        app = _launch_or_connect_app(CRYSTAL_DISK_INFO_PATH, "DiskInfo64.exe", "CrystalDiskInfo")
 
         main_window = app.window(title_re=".*CrystalDiskInfo.*")
         main_window.wait("visible", timeout=10)
@@ -79,6 +115,7 @@ def automate_crystal_disk_info(drive_letter: str, part_number: str, dut_name: st
         btn = _find_drive_button(main_window, drive_letter)
         if btn is None:
             print(f"Warning: Could not find drive button for {drive_letter}:")
+            _update_cdi_json(report_path, data, dut_name, False)
             return False
 
         print(f"Selecting drive button: {btn.window_text().replace('\r\n', ' ')}")
@@ -87,10 +124,12 @@ def automate_crystal_disk_info(drive_letter: str, part_number: str, dut_name: st
 
         print("\nCrystalDiskInfo automation successful. Taking screenshot...")
         _capture_window(main_window, part_number, dut_name, "CrystalDiskInfo")
+        _update_cdi_json(report_path, data, dut_name, True)
         return True
 
     except Exception as e:
         print(f"Error during CrystalDiskInfo automation: {e}")
+        _update_cdi_json(report_path, data, dut_name, False)
         return False
 
 
@@ -127,8 +166,70 @@ def _cdm_wait_for_completion(app: Any, all_btn: Any) -> None:
             continue
 
 
-def automate_crystal_disk_mark(drive_letter: str, part_number: str, dut_name: str) -> bool:
-    """Launch CrystalDiskMark, select drive, run benchmark, and save screenshot."""
+def _save_cdm_csv(csv_path: Path, csv_rows: list[list[str]]) -> None:
+    with open(csv_path, "w", newline="", encoding="utf-8") as f:
+        writer = csv.writer(f)
+        writer.writerow(["Test", "Read", "Write"])
+        writer.writerows(csv_rows)
+    print(f"Results saved to: {csv_path}")
+
+
+def _update_cdm_json(
+    report_path: Path, data: dict[str, Any], dut_name: str, first_read: str | None, first_write: str | None
+) -> None:
+    performance = data.setdefault("performance", {})
+    report_dut_key = _find_report_dut_key(performance, dut_name)
+    if report_dut_key:
+        win_perf = performance[report_dut_key].setdefault("Windows", {})
+        cdm_perf = win_perf.setdefault("CrystalDiskMark", {"read": None, "write": None})
+        cdm_perf["read"] = first_read
+        cdm_perf["write"] = first_write
+        save_report(report_path, data)
+        print(f"Updated JSON report for '{report_dut_key}' with results: {first_read} / {first_write}")
+    else:
+        print(f"Warning: Could not find matching DUT key in report for '{dut_name}' to update JSON.")
+
+
+def _cdm_extract_and_save_results(
+    main_window: Any, part_number: str, dut_name: str, report_path: Path, data: dict[str, Any]
+) -> None:
+    """Extract results from CDM GUI, save to CSV, and update JSON report."""
+    ss_dir = artifact_dir(part_number, "Windows", "CrystalDiskMark")
+    mk_dir(ss_dir)
+    timestamp = time.strftime("%Y%m%d_%H%M%S")
+    csv_path = Path(ss_dir) / f"{dut_name}_{timestamp}.csv"
+
+    # auto_id mapping for CDM 8
+    rows = [
+        {"label_id": "1004", "read_id": "1009", "write_id": "1014"},
+        {"label_id": "1005", "read_id": "1010", "write_id": "1015"},
+        {"label_id": "1006", "read_id": "1011", "write_id": "1016"},
+        {"label_id": "1007", "read_id": "1012", "write_id": "1017"},
+    ]
+
+    csv_rows = []
+    first_read = None
+    first_write = None
+
+    for r in rows:
+        try:
+            label = main_window.child_window(auto_id=r["label_id"]).window_text().replace("\r\n", " ")
+            read = main_window.child_window(auto_id=r["read_id"]).window_text()
+            write = main_window.child_window(auto_id=r["write_id"]).window_text()
+            csv_rows.append([label, read, write])
+            if first_read is None:
+                first_read, first_write = read, write
+        except Exception as e:
+            print(f"Warning: Failed to extract row {r['label_id']}: {e}")
+
+    _save_cdm_csv(csv_path, csv_rows)
+    _update_cdm_json(report_path, data, dut_name, first_read, first_write)
+
+
+def automate_crystal_disk_mark(
+    drive_letter: str, part_number: str, dut_name: str, report_path: Path, data: dict[str, Any]
+) -> bool:
+    """Launch CrystalDiskMark, select drive, run benchmark, and save screenshot/CSV."""
     if not CRYSTAL_DISK_MARK_PATH.exists():
         print(f"\nCrystalDiskMark not found at {CRYSTAL_DISK_MARK_PATH}")
         return False
@@ -158,6 +259,10 @@ def automate_crystal_disk_mark(drive_letter: str, part_number: str, dut_name: st
         main_window.set_focus()
         time.sleep(1)
         _capture_window(main_window, part_number, dut_name, "CrystalDiskMark")
+
+        # Extract values and save CSV
+        _cdm_extract_and_save_results(main_window, part_number, dut_name, report_path, data)
+
         return True
 
     except Exception as e:
@@ -191,7 +296,14 @@ def _sync_performance_section(data: dict[str, Any], equipment: dict[str, Any]) -
                 os_perf = perf_dut.setdefault(os_key, {})
                 for sw in software_list:
                     if isinstance(sw, dict) and sw.get("name"):
-                        os_perf.setdefault(sw.get("name"), {"read": None, "write": None})
+                        name = sw.get("name")
+                        if name == "CrystalDiskInfo":
+                            cdi_dict = os_perf.setdefault(name, {"screenshot": None})
+                            cdi_dict.pop("read", None)
+                            cdi_dict.pop("write", None)
+                            cdi_dict.setdefault("screenshot", None)
+                        else:
+                            os_perf.setdefault(name, {"read": None, "write": None})
 
 
 def _load_part_number_and_report(folder_name: str) -> tuple[str, Path]:
@@ -245,9 +357,9 @@ def run_software_step(part_number: str | None = None) -> None:
             dut_name = (dut_info.iProduct or "unknown_device").strip()
 
             if has_cdi:
-                automate_crystal_disk_info(letter, actual_pn, dut_name)
+                automate_crystal_disk_info(letter, actual_pn, dut_name, report_path, data)
             if has_cdm:
-                automate_crystal_disk_mark(letter, actual_pn, dut_name)
+                automate_crystal_disk_mark(letter, actual_pn, dut_name, report_path, data)
         else:
             print("\nError: Could not determine drive letter for the connected device.")
 

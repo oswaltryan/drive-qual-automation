@@ -42,6 +42,7 @@ repos:
         # Add types-* packages here as needed
         -   types-requests
         -   types-PyYAML
+        -   types-Pillow
         # Add testing deps so mypy can check tests too
         -   pytest
         -   pytest-asyncio
