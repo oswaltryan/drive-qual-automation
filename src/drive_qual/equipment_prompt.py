@@ -20,7 +20,6 @@ HOST_DEFAULTS: dict[str, dict[str, Any]] = {
         "software": [
             {"name": "CrystalDiskInfo", "version": "8.8.9"},
             {"name": "CrystalDiskMark", "version": "7.0.0"},
-            {"name": "disk_tester", "version": "0.3.3"},
             {"name": "ATTO", "version": "4.0.0f1"},
         ],
     },
