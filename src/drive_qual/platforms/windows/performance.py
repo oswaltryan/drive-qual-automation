@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import csv
 import ctypes
+import importlib
 import sys
 import time
 from ctypes import wintypes
@@ -9,7 +10,6 @@ from pathlib import Path
 from typing import Any
 
 from PIL import ImageGrab
-from pywinauto import Application, Desktop  # type: ignore
 
 from drive_qual.core.io_utils import mk_dir
 from drive_qual.core.report_session import load_report, report_path_for, resolve_folder_name, save_report
@@ -22,6 +22,20 @@ ATTO_PATH = Path("C:/Program Files (x86)/ATTO Technology/Disk Benchmark/ATTODisk
 
 ATTO_TIMEOUT = 1800
 CDM_TIMEOUT = 1200
+
+
+def _pywinauto_module() -> Any:
+    if sys.platform != "win32":
+        raise RuntimeError("pywinauto is only available on Windows.")
+    return importlib.import_module("pywinauto")
+
+
+def _pywinauto_application_class() -> Any:
+    return _pywinauto_module().Application
+
+
+def _pywinauto_desktop_class() -> Any:
+    return _pywinauto_module().Desktop
 
 
 def _find_drive_button(main_window: Any, drive_letter: str) -> Any | None:
@@ -78,12 +92,12 @@ def _find_report_dut_key(performance: dict[str, Any], dut_name: str) -> str | No
 def _launch_or_connect_app(app_path: Path, exe_name: str, app_name: str) -> Any:
     """Helper to connect to an existing app or launch it."""
     try:
-        app = Application(backend="uia").connect(path=exe_name)
+        app = _pywinauto_application_class()(backend="uia").connect(path=exe_name)
         print(f"Connected to existing {app_name}.")
         return app
     except Exception:
         print(f"Launching {app_name} from {app_path}...")
-        app = Application(backend="uia").start(str(app_path))
+        app = _pywinauto_application_class()(backend="uia").start(str(app_path))
         time.sleep(5)
         return app
 
@@ -245,7 +259,7 @@ def _cdm_select_drive(main_window: Any, drive_letter: str) -> None:
         target_item = drive_combo.child_window(title_re=f"{drive_letter}:.*", control_type="ListItem")
         target_item.click_input()
     except Exception:
-        combo_lbox = Desktop(backend="uia").window(class_name="ComboLBox")
+        combo_lbox = _pywinauto_desktop_class()(backend="uia").window(class_name="ComboLBox")
         if combo_lbox.exists():
             combo_lbox.child_window(title_re=f"{drive_letter}:.*").click_input()
         else:
@@ -324,9 +338,9 @@ def automate_crystal_disk_mark(
         return False
     try:
         try:
-            app = Application(backend="uia").connect(path="DiskMark64.exe")
+            app = _pywinauto_application_class()(backend="uia").connect(path="DiskMark64.exe")
         except Exception:
-            app = Application(backend="uia").start(str(CRYSTAL_DISK_MARK_PATH))
+            app = _pywinauto_application_class()(backend="uia").start(str(CRYSTAL_DISK_MARK_PATH))
             time.sleep(5)
         main_window = app.window(title_re=".*CrystalDiskMark.*")
         main_window.wait("visible", timeout=10)

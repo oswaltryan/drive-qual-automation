@@ -40,12 +40,12 @@ def test_run_report_workflow_imports_performance_step_lazily(monkeypatch: Monkey
     module = importlib.import_module("drive_qual.workflows.report")
 
     calls: list[str | None] = []
-    fake_software_step = ModuleType("drive_qual.platforms.windows.performance")
 
-    def run_software_step(*, part_number: str | None = None) -> None:
-        calls.append(part_number)
+    class FakePerformanceModule(ModuleType):
+        def run_software_step(self, *, part_number: str | None = None) -> None:
+            calls.append(part_number)
 
-    fake_software_step.run_software_step = run_software_step  # type: ignore[attr-defined]
+    fake_software_step = FakePerformanceModule("drive_qual.platforms.windows.performance")
     monkeypatch.setitem(sys.modules, "drive_qual.platforms.windows.performance", fake_software_step)
 
     module.run_report_workflow(["performance"], part_number="69-420")

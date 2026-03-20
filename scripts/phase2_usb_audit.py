@@ -5,7 +5,7 @@ from pathlib import Path
 
 sys.path.append(str(Path(__file__).resolve().parents[1] / "src"))
 
-from drive_qual import apricorn_usb_cli
+from drive_qual.integrations.apricorn import usb_cli as apricorn_usb_cli
 
 
 def main() -> int:

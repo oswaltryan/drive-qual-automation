@@ -160,7 +160,7 @@ current report-oriented workflow is centered on `drive-qual-report`.
 To prepare or validate the qualification data drive structure:
 
 ```bash
-uv run python src/drive_qual/setup_directories.py
+uv run python -m drive_qual.workflows.setup_directories
 ```
 
 This script:
@@ -175,7 +175,7 @@ This script:
 To extract current values from saved scope CSV output:
 
 ```bash
-uv run python src/drive_qual/post_process_measurements.py
+uv run python -m drive_qual.cli.post_process_measurements
 ```
 
 This is a helper-oriented script for turning measurement CSV rows into a
@@ -206,27 +206,26 @@ The Windows measurement/performance phases generally do the following:
 
 Important files and modules:
 
-- `src/drive_qual/report_workflow.py`
-  orchestration for the named report steps and the `drive-qual-report` CLI
-- `src/drive_qual/drive_info_prompt.py`
+- `src/drive_qual/workflows/report.py`
+  orchestration for the named report steps and the maintained `drive-qual-report` CLI
+- `src/drive_qual/workflows/drive_info.py`
   prompts for drive metadata and creates the per-part-number report
-- `src/drive_qual/equipment_prompt.py`
+- `src/drive_qual/workflows/equipment.py`
   fills host/scope defaults and ensures DUT-related report sections exist
-- `src/drive_qual/power_measurements_step.py`
+- `src/drive_qual/platforms/windows/power_measurements.py`
   Windows-oriented measurement workflow, device tracking, safe eject, fio
   execution, and report updates
-- `src/drive_qual/software_step.py`
+- `src/drive_qual/platforms/windows/performance.py`
   Windows GUI automation for CrystalDiskInfo, CrystalDiskMark, and ATTO
-- `src/drive_qual/benchmark.py`
-  cross-platform benchmark wrapper for `fio`, plus Windows-only `diskspd`
-  support
-- `src/drive_qual/setup_directories.py`
+- `src/drive_qual/benchmarks/`
+  split benchmark helpers for shared path handling plus `fio` and Windows-only `diskspd` execution
+- `src/drive_qual/workflows/setup_directories.py`
   data-drive scaffolding and progress tracker initialization
-- `src/drive_qual/post_process_measurements.py`
+- `src/drive_qual/cli/post_process_measurements.py`
   ad hoc CSV-to-JSON helper for saved measurements
-- `src/drive_qual/report_session.py`
+- `src/drive_qual/core/report_session.py`
   session marker and report path helpers
-- `src/drive_qual/storage_paths.py`
+- `src/drive_qual/core/storage_paths.py`
   artifact path construction for the scope share
 
 ## External Dependencies and Lab Assumptions
@@ -327,11 +326,11 @@ Keep these constraints in mind when changing the workflow:
 
 If you are new to the project, start here:
 
-1. `src/drive_qual/report_workflow.py`
-2. `src/drive_qual/drive_info_prompt.py`
-3. `src/drive_qual/equipment_prompt.py`
-4. `src/drive_qual/power_measurements_step.py`
-5. `src/drive_qual/software_step.py`
+1. `src/drive_qual/workflows/report.py`
+2. `src/drive_qual/workflows/drive_info.py`
+3. `src/drive_qual/workflows/equipment.py`
+4. `src/drive_qual/platforms/windows/power_measurements.py`
+5. `src/drive_qual/platforms/windows/performance.py`
 
 That path will get you from top-level orchestration down into the actual
 Windows workflow implementation.

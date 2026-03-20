@@ -75,6 +75,7 @@ max-bool-expr = 4
 [tool.mypy]
 python_version = "3.12"
 strict = true
+mypy_path = ["src"]
 
 
 [tool.pytest.ini_options]

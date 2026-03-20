@@ -1,11 +1,17 @@
 from __future__ import annotations
 
+import importlib
+import sys
 import time
 from typing import Any
 
-from pywinauto import Application  # type: ignore
-
 from drive_qual.integrations.apricorn.usb_cli import find_apricorn_device
+
+
+def _pywinauto_application_class() -> Any:
+    if sys.platform != "win32":
+        raise RuntimeError("pywinauto is only available on Windows.")
+    return importlib.import_module("pywinauto").Application
 
 
 def _find_and_click_drive(main_window: Any, drive_letter: str) -> bool:
@@ -23,11 +29,11 @@ def _find_and_click_drive(main_window: Any, drive_letter: str) -> bool:
 def inspect_crystal_disk_info(drive_letter: str) -> None:
     """Inspect and interact with CrystalDiskInfo GUI."""
     try:
-        app = Application(backend="uia").connect(path="DiskInfo64.exe")
+        app = _pywinauto_application_class()(backend="uia").connect(path="DiskInfo64.exe")
         print("Connected to existing CrystalDiskInfo.")
     except Exception:
         print("Launching CrystalDiskInfo...")
-        app = Application(backend="uia").start(r"C:\Program Files\CrystalDiskInfo\DiskInfo64.exe")
+        app = _pywinauto_application_class()(backend="uia").start(r"C:\Program Files\CrystalDiskInfo\DiskInfo64.exe")
         time.sleep(5)
 
     try:

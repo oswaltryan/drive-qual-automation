@@ -1,20 +1,27 @@
 from __future__ import annotations
 
+import importlib
+import sys
 import time
-
-from pywinauto import Application  # type: ignore
+from typing import Any
 
 from drive_qual.integrations.apricorn.usb_cli import find_apricorn_device
+
+
+def _pywinauto_application_class() -> Any:
+    if sys.platform != "win32":
+        raise RuntimeError("pywinauto is only available on Windows.")
+    return importlib.import_module("pywinauto").Application
 
 
 def inspect_atto(drive_letter: str) -> None:
     """Inspect ATTO Disk Benchmark GUI."""
     try:
-        app = Application(backend="uia").connect(path="ATTODiskBenchmark.exe")
+        app = _pywinauto_application_class()(backend="uia").connect(path="ATTODiskBenchmark.exe")
         print("Connected to existing ATTO.")
     except Exception:
         print("Launching ATTO...")
-        app = Application(backend="uia").start(
+        app = _pywinauto_application_class()(backend="uia").start(
             r"C:\Program Files (x86)\ATTO Technology\Disk Benchmark\ATTODiskBenchmark.exe"
         )
         time.sleep(5)

@@ -5,10 +5,10 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
-from drive_qual import watlow  # noqa: E402
-
 
 def main() -> None:
+    from drive_qual.integrations.instruments import watlow
+
     parser = argparse.ArgumentParser(description="Watlow Modbus RTU smoke test.")
     parser.add_argument("--port", default=watlow.PORT)
     parser.add_argument("--baudrate", type=int, default=watlow.BAUDRATE)

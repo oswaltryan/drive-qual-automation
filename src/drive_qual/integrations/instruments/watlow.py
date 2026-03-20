@@ -1,12 +1,28 @@
 from __future__ import annotations
 
 import contextlib
+import importlib
 import struct
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from dataclasses import dataclass
-from typing import Literal
+from typing import Literal, Protocol, cast
 
-from pymodbus.client import ModbusSerialClient  # type: ignore[import-not-found]
+
+class ModbusResponse(Protocol):
+    registers: list[int]
+
+    def isError(self) -> bool: ...
+
+
+class ModbusClient(Protocol):
+    def connect(self) -> bool: ...
+    def close(self) -> object: ...
+    def read_holding_registers(self, *, address: int, count: int, device_id: int) -> ModbusResponse: ...
+
+
+class ModbusSerialClientConstructor(Protocol):
+    def __call__(self, *args: object, **kwargs: object) -> ModbusClient: ...
+
 
 # CONFIG
 #################################################
@@ -27,6 +43,11 @@ POINTER_REGISTER_BASE = 40
 WORKING_REGISTER_BASE = 200
 POINTER_COUNT = 40
 REGISTERS_PER_POINTER = 2
+
+
+def _modbus_serial_client_class() -> ModbusSerialClientConstructor:
+    client_module = importlib.import_module("pymodbus.client")
+    return cast(ModbusSerialClientConstructor, client_module.ModbusSerialClient)
 
 
 @dataclass(frozen=True)
@@ -134,9 +155,9 @@ def watlow_client(
     port: str = PORT,
     *,
     settings: SerialSettings | None = None,
-) -> Iterator[ModbusSerialClient]:
+) -> Iterator[ModbusClient]:
     resolved = settings or SerialSettings()
-    client = ModbusSerialClient(
+    client = _modbus_serial_client_class()(
         port=port,
         baudrate=resolved.baudrate,
         bytesize=resolved.bytesize,
@@ -150,11 +171,13 @@ def watlow_client(
             raise ConnectionError(f"Failed to connect to Watlow controller on {port}.")
         yield client
     finally:
-        client.close()
+        close_fn = cast(Callable[[], object] | None, getattr(client, "close", None))
+        if close_fn is not None:
+            close_fn()
 
 
 def read_holding_registers(
-    client: ModbusSerialClient,
+    client: ModbusClient,
     address: int,
     count: int,
     *,
@@ -177,7 +200,7 @@ def read_holding_registers(
 
 
 def read_default_assembly(
-    client: ModbusSerialClient,
+    client: ModbusClient,
     *,
     unit_id: int = UNIT_ID,
     address_offset: int = 0,
@@ -204,7 +227,7 @@ def read_default_assembly(
 
 
 def read_default_assembly_by_name(
-    client: ModbusSerialClient,
+    client: ModbusClient,
     *,
     unit_id: int = UNIT_ID,
     address_offset: int = 0,
