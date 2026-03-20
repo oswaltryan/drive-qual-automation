@@ -17,7 +17,14 @@ from drive_qual import benchmarks as benchmark
 from drive_qual.core import native_disk_ops
 from drive_qual.core.io_utils import mk_dir
 from drive_qual.core.power_measurements import extract_power_values_from_csv, update_power_measurements_from_saved_csvs
-from drive_qual.core.report_session import load_report, report_path_for, resolve_folder_name, save_report
+from drive_qual.core.report_session import (
+    load_report,
+    report_path_for,
+    resolve_folder_name,
+    sanitize_dir_name,
+    save_report,
+    set_current_session,
+)
 from drive_qual.core.storage_paths import artifact_dir, artifact_file, localize_windows_path
 from drive_qual.integrations.apricorn.usb_cli import (
     ApricornDevice,
@@ -376,14 +383,11 @@ async def _run_max_io_benchmark(dut: ApricornDevice, report_path: Path) -> Apric
 
     benchmark_file = benchmark.benchmark_file_path(target_dir, "benchmark_file.dat")
     write_ret = await benchmark.run_fio(target_dir, "write", 10, 100)
-    if write_ret == 0:
-        _mark_current_host_compatibility(report_path, "copy_to_drive")
+    _set_current_host_compatibility(report_path, "copy_to_drive", write_ret == 0)
     read_ret = await benchmark.run_fio(target_dir, "read", 10, 100)
-    if read_ret == 0:
-        _mark_current_host_compatibility(report_path, "copy_from_drive")
+    _set_current_host_compatibility(report_path, "copy_from_drive", read_ret == 0)
     cleanup_ok = _cleanup_test_file(benchmark_file)
-    if cleanup_ok:
-        _mark_current_host_compatibility(report_path, "delete_data")
+    _set_current_host_compatibility(report_path, "delete_data", cleanup_ok)
     _report_benchmark_results(write_ret, read_ret)
     return refreshed_dut
 
@@ -393,10 +397,21 @@ def _load_part_number_and_report(folder_name: str) -> tuple[str, Path]:
     data = load_report(report_path)
     drive_info = data.get("drive_info")
     part_number = folder_name
+    report_folder = folder_name
     if isinstance(drive_info, dict):
         raw = drive_info.get("apricorn_part_number")
         if isinstance(raw, str) and raw.strip():
             part_number = raw.strip()
+            sanitized = sanitize_dir_name(part_number)
+            if sanitized:
+                report_folder = sanitized
+
+    canonical_report_path = report_path_for(report_folder)
+    if canonical_report_path != report_path:
+        save_report(canonical_report_path, data)
+        set_current_session(report_folder)
+        report_path = canonical_report_path
+
     return part_number, report_path
 
 

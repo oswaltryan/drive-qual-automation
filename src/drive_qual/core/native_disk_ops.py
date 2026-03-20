@@ -10,7 +10,13 @@ import time
 from dataclasses import dataclass
 from typing import Any
 
-from drive_qual.integrations.apricorn.usb_cli import ApricornDevice, device_identity
+from drive_qual.integrations.apricorn.usb_cli import (
+    ApricornDevice,
+    device_identity,
+    get_usb_payload,
+    is_same_device,
+    list_apricorn_devices,
+)
 
 LINUX_FILESYSTEM = "ext4"
 LINUX_PARTITION_TABLE = "gpt"
@@ -77,6 +83,7 @@ def _prepare_linux_device(device: ApricornDevice) -> PreparedBenchmarkTarget:
         _with_linux_privilege(["mkfs", f"-t{LINUX_FILESYSTEM}", "-F", "-L", LINUX_VOLUME_LABEL, partition_path])
     )
     mount_point = _linux_mount_partition(partition_path)
+    _linux_take_mount_ownership(mount_point)
     return PreparedBenchmarkTarget(candidate.disk_path, partition_path, mount_point)
 
 
@@ -101,7 +108,7 @@ def _prepare_macos_device(device: ApricornDevice) -> PreparedBenchmarkTarget:
 def _safe_remove_linux_device(device: ApricornDevice) -> bool:
     candidate = _select_linux_candidate(device)
     _linux_unmount_disk(candidate.disk_path)
-    result = _run_command(["udisksctl", "power-off", "-b", candidate.disk_path], check=False)
+    result = _run_command(_with_linux_privilege(["udisksctl", "power-off", "-b", candidate.disk_path]), check=False)
     return result.returncode == 0
 
 
@@ -133,8 +140,8 @@ def _run_command(
 
 
 def _select_linux_candidate(device: ApricornDevice) -> NativeDiskCandidate:
-    candidates = _linux_candidates()
-    return _select_candidate(candidates, device)
+    disk_path = _linux_disk_path_for_device(device)
+    return _linux_candidate_for_path(disk_path)
 
 
 def _select_macos_candidate(device: ApricornDevice) -> NativeDiskCandidate:
@@ -225,6 +232,41 @@ def _linux_candidates() -> list[NativeDiskCandidate]:
     return candidates
 
 
+def _linux_disk_path_for_device(device: ApricornDevice) -> str:
+    if device.blockDevice:
+        return device.blockDevice
+
+    payload = get_usb_payload()
+    devices = list_apricorn_devices(payload) if payload else []
+    for detected in devices:
+        if is_same_device(device, detected) and detected.blockDevice:
+            return detected.blockDevice
+
+    raise RuntimeError(f"Could not resolve Linux block device from usb --json for {device_identity(device)}.")
+
+
+def _linux_candidate_for_path(disk_path: str) -> NativeDiskCandidate:
+    result = _run_command(
+        ["lsblk", "-J", "-o", "PATH,SERIAL,MODEL,TRAN,RM,HOTPLUG,TYPE", disk_path],
+        capture_output=True,
+    )
+    payload = json.loads(result.stdout)
+    devices = payload.get("blockdevices", [])
+    if not isinstance(devices, list) or not devices:
+        raise RuntimeError(f"Could not inspect Linux disk device {disk_path}.")
+
+    entry = devices[0]
+    if not isinstance(entry, dict):
+        raise RuntimeError(f"Invalid Linux disk entry for {disk_path}.")
+    if entry.get("type") != "disk":
+        raise RuntimeError(f"Resolved Linux block device is not a disk: {disk_path}.")
+
+    serial = _string_or_none(entry.get("serial"))
+    model = _string_or_none(entry.get("model"))
+    description = " ".join(part for part in (disk_path, model, serial) if part)
+    return NativeDiskCandidate(disk_path=disk_path, description=description, serial=serial, model=model)
+
+
 def _linux_is_external_disk(entry: dict[str, Any]) -> bool:
     transport = _normalized(_string_or_none(entry.get("tran")))
     if transport == "usb":
@@ -253,23 +295,22 @@ def _linux_partitions(disk_path: str) -> list[dict[str, Any]]:
 
 
 def _linux_unmount_disk(disk_path: str) -> None:
-    for partition in _linux_partitions(disk_path):
-        partition_path = _string_or_none(partition.get("path"))
-        if not partition_path:
-            continue
-        mount_points = partition.get("mountpoints") or []
-        if not isinstance(mount_points, list) or not any(isinstance(value, str) and value for value in mount_points):
-            continue
-        _run_command(["udisksctl", "unmount", "-b", partition_path], check=False)
+    partition_path = _linux_partition_path(disk_path)
+    partition = _linux_partition_info(partition_path)
+    if partition is None:
+        return
+    mount_points = partition.get("mountpoints") or []
+    if not isinstance(mount_points, list) or not any(isinstance(value, str) and value for value in mount_points):
+        return
+    _run_command(["udisksctl", "unmount", "-b", partition_path], check=False)
 
 
 def _linux_wait_for_partition(disk_path: str) -> str:
+    partition_path = _linux_partition_path(disk_path)
     for _ in range(POLL_ATTEMPTS):
-        partitions = _linux_partitions(disk_path)
-        if partitions:
-            partition_path = _string_or_none(partitions[0].get("path"))
-            if partition_path:
-                return partition_path
+        partition = _linux_partition_info(partition_path)
+        if partition is not None:
+            return partition_path
         time.sleep(POLL_DELAY_SECONDS)
     raise RuntimeError(f"Timed out waiting for Linux partition on {disk_path}.")
 
@@ -277,9 +318,8 @@ def _linux_wait_for_partition(disk_path: str) -> str:
 def _linux_mount_partition(partition_path: str) -> str:
     _run_command(["udisksctl", "mount", "-b", partition_path])
     for _ in range(POLL_ATTEMPTS):
-        for partition in _linux_partitions(_linux_parent_disk(partition_path)):
-            if _string_or_none(partition.get("path")) != partition_path:
-                continue
+        partition = _linux_partition_info(partition_path)
+        if partition is not None:
             mount_points = partition.get("mountpoints") or []
             if isinstance(mount_points, list):
                 for value in mount_points:
@@ -287,6 +327,41 @@ def _linux_mount_partition(partition_path: str) -> str:
                         return value
         time.sleep(POLL_DELAY_SECONDS)
     raise RuntimeError(f"Timed out waiting for mount point on {partition_path}.")
+
+
+def _linux_partition_path(disk_path: str) -> str:
+    if disk_path.startswith("/dev/nvme") or disk_path.startswith("/dev/mmcblk"):
+        return f"{disk_path}p1"
+    return f"{disk_path}1"
+
+
+def _linux_take_mount_ownership(mount_point: str) -> None:
+    uid = os.getuid()
+    gid = os.getgid()
+    _run_command(_with_linux_privilege(["chown", f"{uid}:{gid}", mount_point]))
+
+
+def _linux_partition_info(partition_path: str) -> dict[str, Any] | None:
+    result = _run_command(
+        ["lsblk", "-J", "-o", "PATH,TYPE,MOUNTPOINTS", partition_path],
+        check=False,
+        capture_output=True,
+    )
+    if result.returncode != 0:
+        return None
+    payload = json.loads(result.stdout)
+    devices = payload.get("blockdevices", [])
+    if not isinstance(devices, list):
+        return None
+    for entry in devices:
+        if not isinstance(entry, dict):
+            continue
+        if _string_or_none(entry.get("path")) != partition_path:
+            continue
+        if entry.get("type") != "part":
+            return None
+        return entry
+    return None
 
 
 def _linux_parent_disk(partition_path: str) -> str:

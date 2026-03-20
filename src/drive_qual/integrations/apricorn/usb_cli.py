@@ -30,6 +30,7 @@ class ApricornDevice:
     modelID: str | None = None
     mcuFW: str | None = None
     driveLetter: str | None = None
+    blockDevice: str | None = None
 
     @classmethod
     def from_dict(cls, raw: dict[str, Any], drive_letter: str | None = None) -> ApricornDevice:
@@ -57,6 +58,7 @@ class ApricornDevice:
             modelID=raw.get("modelID"),
             mcuFW=raw.get("mcuFW"),
             driveLetter=drive_letter or normalized_drive_letter,
+            blockDevice=raw.get("blockDevice"),
         )
 
 
@@ -70,6 +72,8 @@ def device_identity(device: ApricornDevice) -> str:
         details.append(f"drive={device.driveLetter}")
     if device.physicalDriveNum is not None:
         details.append(f"disk={device.physicalDriveNum}")
+    if device.blockDevice:
+        details.append(f"block={device.blockDevice}")
     if device.busNumber is not None and device.deviceAddress is not None:
         details.append(f"usb={device.busNumber}:{device.deviceAddress}")
     if not details:
@@ -162,6 +166,8 @@ def is_same_device(expected: ApricornDevice, current: ApricornDevice) -> bool:
         return expected.iSerial == current.iSerial
     if expected.physicalDriveNum is not None and current.physicalDriveNum is not None:
         return expected.physicalDriveNum == current.physicalDriveNum
+    if expected.blockDevice and current.blockDevice:
+        return expected.blockDevice == current.blockDevice
     if expected.driveLetter and current.driveLetter:
         return expected.driveLetter == current.driveLetter
     if (

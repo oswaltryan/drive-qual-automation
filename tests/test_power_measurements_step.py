@@ -8,7 +8,11 @@ from typing import Any
 from _pytest.monkeypatch import MonkeyPatch
 
 from drive_qual.integrations.apricorn.usb_cli import ApricornDevice
-from drive_qual.platforms.windows.power_measurements import _run_in_rush, _run_max_io
+from drive_qual.platforms.windows.power_measurements import (
+    _load_part_number_and_report,
+    _run_in_rush,
+    _run_max_io,
+)
 
 
 def _write_report(report_path: Path) -> None:
@@ -103,7 +107,7 @@ def test_run_max_io_marks_windows_compatibility_fields(monkeypatch: MonkeyPatch,
     assert compatibility["safely_remove"]["windows"] is True
 
 
-def test_run_max_io_leaves_delete_data_unset_when_cleanup_fails(monkeypatch: MonkeyPatch, tmp_path: Path) -> None:
+def test_run_max_io_marks_delete_data_false_when_cleanup_fails(monkeypatch: MonkeyPatch, tmp_path: Path) -> None:
     report_path = tmp_path / "drive_qualification_report_atomic_tests.json"
     _write_report(report_path)
 
@@ -138,7 +142,7 @@ def test_run_max_io_leaves_delete_data_unset_when_cleanup_fails(monkeypatch: Mon
     assert compatibility["device_manager_disk_mgmt"]["windows"] is False
     assert compatibility["copy_to_drive"]["windows"] is True
     assert compatibility["copy_from_drive"]["windows"] is True
-    assert compatibility["delete_data"]["windows"] is None
+    assert compatibility["delete_data"]["windows"] is False
     assert compatibility["safely_remove"]["windows"] is True
 
 
@@ -232,6 +236,45 @@ def test_run_max_io_marks_linux_compatibility_fields(  # noqa: PLR0915
     assert compatibility["recognized_by_os"]["windows"] is None
 
 
+def test_run_max_io_marks_linux_copy_actions_false_when_benchmark_fails(
+    monkeypatch: MonkeyPatch, tmp_path: Path
+) -> None:
+    report_path = tmp_path / "drive_qualification_report_atomic_tests.json"
+    benchmark_file = tmp_path / "missing.dat"
+    _write_report(report_path)
+
+    dut = ApricornDevice(iProduct="Secure Key DT", iSerial="ABC123")
+    _setup_common_mocks(monkeypatch, dut, artifact_os="Linux")
+    monkeypatch.setattr("drive_qual.platforms.windows.power_measurements.sys.platform", "linux")
+    monkeypatch.setattr(
+        "drive_qual.platforms.windows.power_measurements.native_disk_ops.prepare_device_for_benchmark",
+        lambda dut: type("Prepared", (), {"mount_point": str(tmp_path)})(),
+    )
+    monkeypatch.setattr(
+        "drive_qual.platforms.windows.power_measurements.native_disk_ops.safe_remove_device", lambda dut: True
+    )
+    monkeypatch.setattr(
+        "drive_qual.platforms.windows.power_measurements.benchmark.benchmark_file_path",
+        lambda *args: str(benchmark_file),
+    )
+
+    async def fake_run_fio(*args: Any, **kwargs: Any) -> int:
+        return 1
+
+    monkeypatch.setattr("drive_qual.platforms.windows.power_measurements.benchmark.run_fio", fake_run_fio)
+
+    asyncio.run(_run_max_io("69-420", report_path))
+
+    data = json.loads(report_path.read_text(encoding="utf-8"))
+    compatibility = data["compatibility"]
+    assert compatibility["partition_drive"]["linux"] is True
+    assert compatibility["format_drive"]["linux"] is True
+    assert compatibility["copy_to_drive"]["linux"] is False
+    assert compatibility["copy_from_drive"]["linux"] is False
+    assert compatibility["delete_data"]["linux"] is False
+    assert compatibility["safely_remove"]["linux"] is True
+
+
 def test_run_max_io_marks_macos_compatibility_fields(monkeypatch: MonkeyPatch, tmp_path: Path) -> None:
     report_path = tmp_path / "drive_qualification_report_atomic_tests.json"
     benchmark_file = tmp_path / "benchmark_file.dat"
@@ -308,3 +351,34 @@ def test_run_in_rush_marks_hot_pluggable(monkeypatch: MonkeyPatch, tmp_path: Pat
 
     data = json.loads(report_path.read_text(encoding="utf-8"))
     assert data["compatibility"]["hot_pluggable"]["windows"] is True
+
+
+def test_load_part_number_and_report_uses_canonical_part_number_report_path(monkeypatch: MonkeyPatch) -> None:
+    source_report = Path("/tmp/legacy-folder.json")
+    canonical_report = Path("/tmp/69-420.json")
+    saved: list[tuple[Path, dict[str, Any]]] = []
+    sessions: list[tuple[str, str | None]] = []
+
+    monkeypatch.setattr(
+        "drive_qual.platforms.windows.power_measurements.report_path_for",
+        lambda folder_name: canonical_report if folder_name == "69-420" else source_report,
+    )
+    monkeypatch.setattr(
+        "drive_qual.platforms.windows.power_measurements.load_report",
+        lambda report_path: {"drive_info": {"apricorn_part_number": "69-420"}},
+    )
+    monkeypatch.setattr(
+        "drive_qual.platforms.windows.power_measurements.save_report",
+        lambda report_path, data: saved.append((report_path, data)),
+    )
+    monkeypatch.setattr(
+        "drive_qual.platforms.windows.power_measurements.set_current_session",
+        lambda folder_name, product_name=None: sessions.append((folder_name, product_name)),
+    )
+
+    part_number, report_path = _load_part_number_and_report("legacy-folder")
+
+    assert part_number == "69-420"
+    assert report_path == canonical_report
+    assert saved == [(canonical_report, {"drive_info": {"apricorn_part_number": "69-420"}})]
+    assert sessions == [("69-420", None)]

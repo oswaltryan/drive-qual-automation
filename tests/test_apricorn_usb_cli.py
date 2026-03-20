@@ -29,6 +29,7 @@ def test_list_apricorn_devices_filters_non_apricorn_entries() -> None:
                     "iProduct": "Secure Key 3.0",
                     "iSerial": "ABC123",
                     "driveLetter": "D:",
+                    "blockDevice": "/dev/sda",
                 }
             },
         ]
@@ -39,6 +40,7 @@ def test_list_apricorn_devices_filters_non_apricorn_entries() -> None:
     assert len(devices) == 1
     assert devices[0].iProduct == "Secure Key 3.0"
     assert devices[0].driveLetter == "D:"
+    assert devices[0].blockDevice == "/dev/sda"
 
 
 def test_find_apricorn_device_returns_first_filtered_apricorn(monkeypatch: MonkeyPatch) -> None:
@@ -58,9 +60,18 @@ def test_find_apricorn_device_returns_first_filtered_apricorn(monkeypatch: Monke
 
 
 def test_is_same_device_prefers_serial_number() -> None:
-    expected = ApricornDevice(iProduct="Secure Key 3.0", iSerial="ABC123", driveLetter="D:")
-    same = ApricornDevice(iProduct="Secure Key 3.0", iSerial="ABC123", driveLetter="E:")
-    different = ApricornDevice(iProduct="Secure Key 3.0", iSerial="XYZ999", driveLetter="D:")
+    expected = ApricornDevice(iProduct="Secure Key 3.0", iSerial="ABC123", driveLetter="D:", blockDevice="/dev/sda")
+    same = ApricornDevice(iProduct="Secure Key 3.0", iSerial="ABC123", driveLetter="E:", blockDevice="/dev/sdb")
+    different = ApricornDevice(iProduct="Secure Key 3.0", iSerial="XYZ999", driveLetter="D:", blockDevice="/dev/sda")
+
+    assert is_same_device(expected, same) is True
+    assert is_same_device(expected, different) is False
+
+
+def test_is_same_device_uses_block_device_when_present() -> None:
+    expected = ApricornDevice(iProduct="Secure Key 3.0", blockDevice="/dev/sda")
+    same = ApricornDevice(iProduct="Secure Key 3.0", blockDevice="/dev/sda")
+    different = ApricornDevice(iProduct="Secure Key 3.0", blockDevice="/dev/sdb")
 
     assert is_same_device(expected, same) is True
     assert is_same_device(expected, different) is False
