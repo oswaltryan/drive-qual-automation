@@ -234,8 +234,8 @@ Lab/tooling assumptions for Windows workflow runs:
 
 Scope networking note:
 
-The scope LAN setup is expected to stay on the default `169.254.8.xxx`
-subnet. Machines that talk to the scope need compatible manual IPv4 settings.
+The current Tektronix integration defaults to `10.10.10.3`. Verify the actual
+lab network configuration before changing instrument connectivity settings.
 
 ## Reports and Artifacts
 
