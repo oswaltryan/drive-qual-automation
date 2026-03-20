@@ -1,0 +1,23 @@
+[paths]
+windows = "Z:/"
+macos = "/Volumes/QUAL_DATA"
+linux = "/mnt/QUAL_DATA"
+
+[tektronix]
+host = "10.10.10.3"
+port = 5025
+inrush_path = "C:/in_rush"
+max_io_path = "C:/max_io_generic"
+max_io_dt_path = "C:/max_io_dt"
+
+[watlow]
+port = "COM3"
+baudrate = 9600
+bytesize = 8
+parity = "N"
+stopbits = 1
+unit_id = 1
+timeout_s = 5.0
+retries = 3
+word_order = "low-high"
+data_map = 1

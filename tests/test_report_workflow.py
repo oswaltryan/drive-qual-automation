@@ -51,3 +51,10 @@ def test_run_report_workflow_imports_performance_step_lazily(monkeypatch: Monkey
     module.run_report_workflow(["performance"], part_number="69-420")
 
     assert calls == ["69-420"]
+
+
+def test_default_steps_include_all_workflow_steps() -> None:
+    sys.modules.pop("drive_qual.workflows.report", None)
+    module = importlib.import_module("drive_qual.workflows.report")
+
+    assert module._default_steps() == EXPECTED_STEP_ORDER

@@ -7,6 +7,10 @@ STEP_ORDER: tuple[str, ...] = ("drive_info", "equipment", "power_measurements", 
 StepRunner = Callable[[], None]
 
 
+def _default_steps() -> tuple[str, ...]:
+    return STEP_ORDER
+
+
 def _run_drive_info_step() -> None:
     from drive_qual.workflows.drive_info import run_drive_info_prompt
 
@@ -37,7 +41,7 @@ def run_report_workflow(
     part_number: str | None = None,
     scope_profile: str | None = None,
 ) -> None:
-    selected = steps or list(STEP_ORDER)
+    selected = steps or list(_default_steps())
     step_runners: dict[str, StepRunner] = {
         "drive_info": _run_drive_info_step,
         "equipment": lambda: _run_equipment_step(part_number=part_number, scope_profile=scope_profile),
@@ -62,7 +66,7 @@ def run_report_workflow_cli() -> None:
     parser = argparse.ArgumentParser(description="Run drive qualification report workflow steps.")
     parser.add_argument(
         "--steps",
-        help="Comma-separated list of steps to run (default: drive_info,equipment,power_measurements).",
+        help="Comma-separated list of steps to run (default: drive_info,equipment,power_measurements,performance).",
     )
     parser.add_argument(
         "--list-steps",
@@ -79,7 +83,7 @@ def run_report_workflow_cli() -> None:
             print(f"  - {step}")
         return
 
-    steps = _parse_steps(args.steps) if args.steps else list(STEP_ORDER)
+    steps = _parse_steps(args.steps) if args.steps else list(_default_steps())
     run_report_workflow(steps, part_number=args.part_number, scope_profile=args.scope_profile)
 
 

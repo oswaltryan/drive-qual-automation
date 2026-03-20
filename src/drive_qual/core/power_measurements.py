@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import csv
 import re
+import sys
 import time
 from pathlib import Path, PureWindowsPath
 from typing import Any, cast
@@ -13,15 +14,26 @@ from drive_qual.core.report_session import (
     sanitize_dir_name,
     save_report,
 )
-from drive_qual.core.storage_paths import SCOPE_ARTIFACT_ROOT
+from drive_qual.core.storage_paths import SCOPE_ARTIFACT_ROOT, localize_windows_path
 
 PATH_PARTS_MIN = 5
 VALUE_AND_UNIT_PARTS = 2
 DUT_PATH_PART_NUMBER_INDEX = 1
+DUT_PATH_OS_INDEX = 2
 UNIT_SCALE_MA = {
     "a": 1000.0,
     "ma": 1.0,
     "ua": 0.001,
+}
+ARTIFACT_OS_NAME_BY_PLATFORM = {
+    "win32": "Windows",
+    "darwin": "macOS",
+    "linux": "Linux",
+}
+REPORT_OS_KEY_BY_ARTIFACT = {
+    "windows": "windows",
+    "macos": "macos",
+    "linux": "linux",
 }
 DUT_ALIASES: dict[str, str] = {
     "secure key 3 0": "Padlock DT",
@@ -35,6 +47,16 @@ DUT_ALIASES: dict[str, str] = {
 
 def _display_path(path: str | Path) -> str:
     return PureWindowsPath(str(path)).as_posix()
+
+
+def _current_artifact_os_name() -> str:
+    if sys.platform.startswith("linux"):
+        return "Linux"
+    return ARTIFACT_OS_NAME_BY_PLATFORM.get(sys.platform, "Windows")
+
+
+def _report_os_key_from_artifact_name(name: str) -> str | None:
+    return REPORT_OS_KEY_BY_ARTIFACT.get(name.strip().casefold())
 
 
 def _to_float(value: object) -> float | None:
@@ -147,7 +169,7 @@ def _resolve_dut_key(power: dict[str, Any], dut_name: str) -> str | None:
     return None
 
 
-def _ensure_windows_slot(fields: dict[str, Any], key: str) -> dict[str, Any]:
+def _ensure_os_slot(fields: dict[str, Any], key: str) -> dict[str, Any]:
     default_slot = {"linux": None, "macos": None, "windows": None}
     slot = fields.setdefault(key, default_slot)
     if not isinstance(slot, dict):
@@ -156,12 +178,17 @@ def _ensure_windows_slot(fields: dict[str, Any], key: str) -> dict[str, Any]:
     return cast(dict[str, Any], slot)
 
 
-def _apply_csv_to_power(power: dict[str, Any], csv_path: Path) -> bool:
+def _apply_csv_to_power(power: dict[str, Any], csv_path: Path) -> bool:  # noqa: PLR0912, PLR0915
     measurement_group = csv_path.parent.name.casefold()
     dut_name = csv_path.stem
     dut_key = _resolve_dut_key(power, dut_name)
     if dut_key is None:
         print(f"Skipping CSV {_display_path(csv_path)}; could not map DUT '{dut_name}' in report power section.")
+        return False
+
+    report_os_key = _report_os_key_from_artifact_name(csv_path.parent.parent.name)
+    if report_os_key is None:
+        print(f"Skipping CSV {_display_path(csv_path)}; could not determine OS bucket from artifact path.")
         return False
 
     fields = power.get(dut_key)
@@ -173,28 +200,28 @@ def _apply_csv_to_power(power: dict[str, Any], csv_path: Path) -> bool:
     if measurement_group == "in rush current":
         max_inrush = _extract_measurement(csv_path, "Meas1", "Accum-Max")
         if max_inrush is not None:
-            slot = _ensure_windows_slot(fields, "max_inrush_current")
-            if slot.get("windows") != max_inrush:
-                slot["windows"] = max_inrush
+            slot = _ensure_os_slot(fields, "max_inrush_current")
+            if slot.get(report_os_key) != max_inrush:
+                slot[report_os_key] = max_inrush
                 changed = True
     elif measurement_group == "max io":
         max_rw = _extract_measurement(csv_path, "Meas1", "Accum-Max")
         rms_rw = _extract_measurement(csv_path, "Meas3", "Accum-Mean")
         if max_rw is not None:
-            slot = _ensure_windows_slot(fields, "max_read_write_current")
-            if slot.get("windows") != max_rw:
-                slot["windows"] = max_rw
+            slot = _ensure_os_slot(fields, "max_read_write_current")
+            if slot.get(report_os_key) != max_rw:
+                slot[report_os_key] = max_rw
                 changed = True
         if rms_rw is not None:
-            slot = _ensure_windows_slot(fields, "rms_read_write_current")
-            if slot.get("windows") != rms_rw:
-                slot["windows"] = rms_rw
+            slot = _ensure_os_slot(fields, "rms_read_write_current")
+            if slot.get(report_os_key) != rms_rw:
+                slot[report_os_key] = rms_rw
                 changed = True
     return changed
 
 
 def extract_power_values_from_csv(csv_path: str) -> dict[str, float | None]:
-    path = Path(csv_path)
+    path = localize_windows_path(Path(csv_path))
     measurement_group = path.parent.name.casefold()
     values: dict[str, float | None] = {
         "max_inrush_current": None,
@@ -218,7 +245,8 @@ def _resolve_csv_root(data: dict[str, Any], folder_name: str, requested_part_num
             part_number = raw_part_number.strip()
     if not part_number:
         part_number = folder_name
-    return Path(SCOPE_ARTIFACT_ROOT) / part_number / "windows"
+    windows_root = PureWindowsPath(SCOPE_ARTIFACT_ROOT, part_number, _current_artifact_os_name())
+    return localize_windows_path(Path(str(windows_root)))
 
 
 def _report_power_data(csv_path: str) -> tuple[Path, Path, dict[str, Any], dict[str, Any]] | None:
@@ -231,14 +259,15 @@ def _report_power_data(csv_path: str) -> tuple[Path, Path, dict[str, Any], dict[
         return None
 
     report_path = report_path_for(folder_name)
-    if not report_path.exists():
+    try:
+        data = load_report(report_path)
+    except FileNotFoundError:
         return None
 
-    data = load_report(report_path)
     power = data.get("power")
     if not isinstance(power, dict) or not power:
         return None
-    return Path(win_path), report_path, data, power
+    return localize_windows_path(Path(str(win_path))), report_path, data, power
 
 
 def update_report_power_from_csv_path(csv_path: str) -> bool:

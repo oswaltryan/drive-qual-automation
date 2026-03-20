@@ -5,19 +5,26 @@ import socket
 from pathlib import PureWindowsPath
 from typing import Literal, overload
 
+from drive_qual.core.config import (
+    tektronix_host,
+    tektronix_inrush_path,
+    tektronix_max_io_dt_path,
+    tektronix_max_io_path,
+    tektronix_port,
+)
 from drive_qual.core.power_measurements import update_report_power_from_csv_path
 from drive_qual.core.storage_paths import SCOPE_ARTIFACT_ROOT
 
 # CONFIG
 #################################################
-HOST = "10.10.10.3"  # Instrument IP
-PORT = 5025  # SCPI socket port
+HOST = tektronix_host()  # Instrument IP
+PORT = tektronix_port()  # SCPI socket port
 SCOPE_FILE_PARTS_MIN = 5
 
 # These are base paths for the setup files stored on the Scope's internal C: drive
-inrush_path = "C:/in_rush"
-maxio_path = "C:/max_io_generic"
-maxio_dt_path = "C:/max_io_dt"
+inrush_path = tektronix_inrush_path()
+maxio_path = tektronix_max_io_path()
+maxio_dt_path = tektronix_max_io_dt_path()
 
 
 # FUNCTIONS

@@ -120,6 +120,29 @@ def test_apply_csv_to_power_uses_alias_mapping_for_max_io() -> None:
     shutil.rmtree(workspace_tmp)
 
 
+def test_apply_csv_to_power_updates_linux_bucket() -> None:
+    workspace_tmp = Path("tests/.tmp/test_apply_csv_linux")
+    if workspace_tmp.exists():
+        shutil.rmtree(workspace_tmp)
+    csv_path = workspace_tmp / "Z" / "69-420" / "Linux" / "Max IO" / "Secure Key 3.0.csv"
+    csv_path.parent.mkdir(parents=True)
+    _write_max_io_csv(csv_path)
+
+    power: dict[str, dict[str, dict[str, float | None]]] = {
+        "Padlock DT": {
+            "max_read_write_current": {"linux": None, "macos": None, "windows": None},
+            "rms_read_write_current": {"linux": None, "macos": None, "windows": None},
+        }
+    }
+
+    changed = power_measurements._apply_csv_to_power(power, csv_path)
+
+    assert changed is True
+    assert power["Padlock DT"]["max_read_write_current"]["linux"] == EXPECTED_MAX_RW_CURRENT
+    assert power["Padlock DT"]["rms_read_write_current"]["linux"] == EXPECTED_RMS_RW_CURRENT
+    shutil.rmtree(workspace_tmp)
+
+
 def test_update_report_power_from_csv_path_aborts_when_share_file_missing(monkeypatch: MonkeyPatch) -> None:
     workspace_tmp = Path("tests/.tmp/test_update_report_power_missing")
     if workspace_tmp.exists():

@@ -46,6 +46,12 @@ HOST_DEFAULTS: dict[str, dict[str, Any]] = {
     },
 }
 
+PROFILE_SECTIONS: dict[str, tuple[str, ...]] = {
+    "scope": ("model", "version", "serial_number"),
+    "probe_current": ("model", "channel", "serial_number"),
+    "probe_voltage": ("model", "channel", "serial_number"),
+}
+
 
 def _prompt(label: str, current: str) -> str:
     if current:
@@ -97,6 +103,22 @@ def _ensure_hosts(equipment: dict[str, Any]) -> None:
         for field_key, field_value in defaults.items():
             if field_key not in current or current[field_key] is None:
                 current[field_key] = field_value
+
+
+def _has_value(value: Any) -> bool:
+    if isinstance(value, str):
+        return bool(value.strip())
+    return value is not None
+
+
+def _has_scope_profile_data(equipment: dict[str, Any]) -> bool:
+    for section_name, fields in PROFILE_SECTIONS.items():
+        section = equipment.get(section_name)
+        if not isinstance(section, dict):
+            return False
+        if not all(_has_value(section.get(field_name)) for field_name in fields):
+            return False
+    return True
 
 
 def _temperature_template() -> dict[str, Any]:
@@ -163,9 +185,13 @@ def run_equipment_prompt(part_number: str | None = None, scope_profile: str | No
     if not isinstance(equipment, dict):
         raise ValueError("Missing or invalid 'equipment' section in report.")
 
-    resolved_scope_profile = scope_profile or _prompt("Scope profile (tektronix/rigol)", "")
+    resolved_scope_profile = scope_profile
     if resolved_scope_profile:
         apply_scope_profile(equipment, resolved_scope_profile)
+    elif not _has_scope_profile_data(equipment):
+        resolved_scope_profile = _prompt("Scope profile (tektronix/rigol)", "")
+        if resolved_scope_profile:
+            apply_scope_profile(equipment, resolved_scope_profile)
 
     _ensure_hosts(equipment)
 

@@ -7,6 +7,19 @@ from collections.abc import Callable, Iterator
 from dataclasses import dataclass
 from typing import Literal, Protocol, cast
 
+from drive_qual.core.config import (
+    watlow_baudrate,
+    watlow_bytesize,
+    watlow_data_map,
+    watlow_parity,
+    watlow_port,
+    watlow_retries,
+    watlow_stopbits,
+    watlow_timeout_s,
+    watlow_unit_id,
+    watlow_word_order,
+)
+
 
 class ModbusResponse(Protocol):
     registers: list[int]
@@ -26,17 +39,17 @@ class ModbusSerialClientConstructor(Protocol):
 
 # CONFIG
 #################################################
-PORT = "COM3"
+PORT = watlow_port()
 # Modbus RTU defaults (pmpmintegrated.pdf pages 150-151).
-BAUDRATE = 9600
-BYTESIZE = 8
-PARITY = "N"
-STOPBITS = 1
-UNIT_ID = 1
-TIMEOUT_S = 5.0
-RETRIES = 3
-WORD_ORDER: Literal["low-high", "high-low"] = "low-high"
-DATA_MAP = 1
+BAUDRATE = watlow_baudrate()
+BYTESIZE = watlow_bytesize()
+PARITY = watlow_parity()
+STOPBITS = watlow_stopbits()
+UNIT_ID = watlow_unit_id()
+TIMEOUT_S = watlow_timeout_s()
+RETRIES = watlow_retries()
+WORD_ORDER: Literal["low-high", "high-low"] = cast(Literal["low-high", "high-low"], watlow_word_order())
+DATA_MAP = watlow_data_map()
 
 # Default assembly layout (pmpmintegrated.pdf pages 237-238)
 POINTER_REGISTER_BASE = 40

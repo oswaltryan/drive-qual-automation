@@ -16,14 +16,14 @@ def _write_report(report_path: Path) -> None:
         json.dumps(
             {
                 "compatibility": {
-                    "recognized_by_os": {"windows": None},
-                    "hot_pluggable": {"windows": None},
-                    "safely_remove": {"windows": None},
-                    "copy_to_drive": {"windows": None},
-                    "copy_from_drive": {"windows": None},
-                    "delete_data": {"windows": None},
-                    "partition_drive": {"windows": None},
-                    "format_drive": {"windows": None},
+                    "recognized_by_os": {"linux": None, "macos": None, "windows": None},
+                    "hot_pluggable": {"linux": None, "macos": None, "windows": None},
+                    "safely_remove": {"linux": None, "macos": None, "windows": None},
+                    "copy_to_drive": {"linux": None, "macos": None, "windows": None},
+                    "copy_from_drive": {"linux": None, "macos": None, "windows": None},
+                    "delete_data": {"linux": None, "macos": None, "windows": None},
+                    "partition_drive": {"linux": None, "macos": None, "windows": None},
+                    "format_drive": {"linux": None, "macos": None, "windows": None},
                     "device_manager_disk_mgmt": {"windows": None},
                 }
             }
@@ -32,7 +32,7 @@ def _write_report(report_path: Path) -> None:
     )
 
 
-def _setup_common_mocks(monkeypatch: MonkeyPatch, dut: ApricornDevice) -> None:
+def _setup_common_mocks(monkeypatch: MonkeyPatch, dut: ApricornDevice, artifact_os: str = "Windows") -> None:
     monkeypatch.setattr(
         "drive_qual.platforms.windows.power_measurements._wait_for_confirmed_device_present", lambda prompt: dut
     )
@@ -41,11 +41,12 @@ def _setup_common_mocks(monkeypatch: MonkeyPatch, dut: ApricornDevice) -> None:
     )
     monkeypatch.setattr("drive_qual.platforms.windows.power_measurements.mk_dir", lambda path: None)
     monkeypatch.setattr(
-        "drive_qual.platforms.windows.power_measurements.artifact_dir", lambda *args: "Z:/69-420/Windows/Max IO"
+        "drive_qual.platforms.windows.power_measurements.artifact_dir",
+        lambda *args: f"Z:/69-420/{artifact_os}/Max IO",
     )
     monkeypatch.setattr(
         "drive_qual.platforms.windows.power_measurements.artifact_file",
-        lambda *args: "Z:/69-420/Windows/Max IO/DUT.csv",
+        lambda *args: f"Z:/69-420/{artifact_os}/Max IO/DUT.csv",
     )
     monkeypatch.setattr(
         "drive_qual.platforms.windows.power_measurements.tektronix.recall_setup",
@@ -70,6 +71,7 @@ def test_run_max_io_marks_windows_compatibility_fields(monkeypatch: MonkeyPatch,
 
     dut = ApricornDevice(iProduct="Secure Key DT", iSerial="ABC123", driveLetter="D:")
     _setup_common_mocks(monkeypatch, dut)
+    monkeypatch.setattr("drive_qual.platforms.windows.power_measurements.sys.platform", "win32")
 
     monkeypatch.setattr(
         "drive_qual.platforms.windows.power_measurements.benchmark.benchmark_file_path",
@@ -107,6 +109,7 @@ def test_run_max_io_leaves_delete_data_unset_when_cleanup_fails(monkeypatch: Mon
 
     dut = ApricornDevice(iProduct="Secure Key DT", iSerial="ABC123", driveLetter="D:")
     _setup_common_mocks(monkeypatch, dut)
+    monkeypatch.setattr("drive_qual.platforms.windows.power_measurements.sys.platform", "win32")
 
     monkeypatch.setattr("drive_qual.platforms.windows.power_measurements._partition_and_format_drive", lambda dut: True)
     monkeypatch.setattr("drive_qual.platforms.windows.power_measurements._refresh_device_after_format", lambda dut: dut)
@@ -145,6 +148,7 @@ def test_run_max_io_marks_ops_fail(monkeypatch: MonkeyPatch, tmp_path: Path) -> 
 
     dut = ApricornDevice(iProduct="Secure Key DT", iSerial="ABC123", driveLetter="D:")
     _setup_common_mocks(monkeypatch, dut)
+    monkeypatch.setattr("drive_qual.platforms.windows.power_measurements.sys.platform", "win32")
 
     monkeypatch.setattr(
         "drive_qual.platforms.windows.power_measurements._partition_and_format_drive", lambda dut: False
@@ -161,11 +165,118 @@ def test_run_max_io_marks_ops_fail(monkeypatch: MonkeyPatch, tmp_path: Path) -> 
     assert compatibility["safely_remove"]["windows"] is True
 
 
+def test_run_max_io_marks_linux_compatibility_fields(  # noqa: PLR0915
+    monkeypatch: MonkeyPatch, tmp_path: Path
+) -> None:
+    report_path = tmp_path / "drive_qualification_report_atomic_tests.json"
+    benchmark_file = tmp_path / "benchmark_file.dat"
+    benchmark_file.write_text("probe", encoding="utf-8")
+    _write_report(report_path)
+
+    dut = ApricornDevice(iProduct="Secure Key DT", iSerial="ABC123")
+    _setup_common_mocks(monkeypatch, dut, artifact_os="Linux")
+    monkeypatch.setattr("drive_qual.platforms.windows.power_measurements.sys.platform", "linux")
+    monkeypatch.setattr(
+        "drive_qual.platforms.windows.power_measurements.native_disk_ops.prepare_device_for_benchmark",
+        lambda dut: type("Prepared", (), {"mount_point": str(tmp_path)})(),
+    )
+    monkeypatch.setattr(
+        "drive_qual.platforms.windows.power_measurements.native_disk_ops.safe_remove_device", lambda dut: True
+    )
+    monkeypatch.setattr(
+        "drive_qual.platforms.windows.power_measurements.benchmark.benchmark_file_path",
+        lambda *args: str(benchmark_file),
+    )
+
+    def fail_windows_only(*args: Any, **kwargs: Any) -> Any:
+        raise AssertionError("Windows-only helper should not be called on Linux.")
+
+    monkeypatch.setattr(
+        "drive_qual.platforms.windows.power_measurements._partition_and_format_drive",
+        fail_windows_only,
+    )
+    monkeypatch.setattr(
+        "drive_qual.platforms.windows.power_measurements._prompt_disk_management_visible",
+        fail_windows_only,
+    )
+    monkeypatch.setattr(
+        "drive_qual.platforms.windows.power_measurements._run_safe_eject_script",
+        fail_windows_only,
+    )
+    monkeypatch.setattr(
+        "drive_qual.platforms.windows.power_measurements._prompt_benchmark_target_directory",
+        fail_windows_only,
+    )
+    monkeypatch.setattr(
+        "drive_qual.platforms.windows.power_measurements._confirm_safe_removal_non_windows",
+        fail_windows_only,
+    )
+
+    async def fake_run_fio(*args: Any, **kwargs: Any) -> int:
+        return 0
+
+    monkeypatch.setattr("drive_qual.platforms.windows.power_measurements.benchmark.run_fio", fake_run_fio)
+
+    asyncio.run(_run_max_io("69-420", report_path))
+
+    data = json.loads(report_path.read_text(encoding="utf-8"))
+    compatibility = data["compatibility"]
+    assert compatibility["recognized_by_os"]["linux"] is True
+    assert compatibility["partition_drive"]["linux"] is True
+    assert compatibility["format_drive"]["linux"] is True
+    assert compatibility["copy_to_drive"]["linux"] is True
+    assert compatibility["copy_from_drive"]["linux"] is True
+    assert compatibility["delete_data"]["linux"] is True
+    assert compatibility["safely_remove"]["linux"] is True
+    assert compatibility["device_manager_disk_mgmt"]["windows"] is None
+    assert compatibility["recognized_by_os"]["windows"] is None
+
+
+def test_run_max_io_marks_macos_compatibility_fields(monkeypatch: MonkeyPatch, tmp_path: Path) -> None:
+    report_path = tmp_path / "drive_qualification_report_atomic_tests.json"
+    benchmark_file = tmp_path / "benchmark_file.dat"
+    benchmark_file.write_text("probe", encoding="utf-8")
+    _write_report(report_path)
+
+    dut = ApricornDevice(iProduct="Secure Key DT", iSerial="ABC123")
+    _setup_common_mocks(monkeypatch, dut, artifact_os="macOS")
+    monkeypatch.setattr("drive_qual.platforms.windows.power_measurements.sys.platform", "darwin")
+    monkeypatch.setattr(
+        "drive_qual.platforms.windows.power_measurements.native_disk_ops.prepare_device_for_benchmark",
+        lambda dut: type("Prepared", (), {"mount_point": str(tmp_path)})(),
+    )
+    monkeypatch.setattr(
+        "drive_qual.platforms.windows.power_measurements.native_disk_ops.safe_remove_device", lambda dut: True
+    )
+    monkeypatch.setattr(
+        "drive_qual.platforms.windows.power_measurements.benchmark.benchmark_file_path",
+        lambda *args: str(benchmark_file),
+    )
+
+    async def fake_run_fio(*args: Any, **kwargs: Any) -> int:
+        return 0
+
+    monkeypatch.setattr("drive_qual.platforms.windows.power_measurements.benchmark.run_fio", fake_run_fio)
+
+    asyncio.run(_run_max_io("69-420", report_path))
+
+    data = json.loads(report_path.read_text(encoding="utf-8"))
+    compatibility = data["compatibility"]
+    assert compatibility["recognized_by_os"]["macos"] is True
+    assert compatibility["partition_drive"]["macos"] is True
+    assert compatibility["format_drive"]["macos"] is True
+    assert compatibility["copy_to_drive"]["macos"] is True
+    assert compatibility["copy_from_drive"]["macos"] is True
+    assert compatibility["delete_data"]["macos"] is True
+    assert compatibility["safely_remove"]["macos"] is True
+
+
 def test_run_in_rush_marks_hot_pluggable(monkeypatch: MonkeyPatch, tmp_path: Path) -> None:
     report_path = tmp_path / "drive_qualification_report_atomic_tests.json"
     _write_report(report_path)
 
     dut = ApricornDevice(iProduct="Secure Key 3.0", iSerial="ABC123", driveLetter="D:")
+    monkeypatch.setattr("drive_qual.platforms.windows.power_measurements.sys.platform", "win32")
 
     monkeypatch.setattr(
         "drive_qual.platforms.windows.power_measurements._wait_for_device_present", lambda prompt, expected=None: dut
