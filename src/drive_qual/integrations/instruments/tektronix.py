@@ -5,8 +5,8 @@ import socket
 from pathlib import PureWindowsPath
 from typing import Literal, overload
 
-from .power_measurements import update_report_power_from_csv_path
-from .storage_paths import SCOPE_ARTIFACT_ROOT
+from drive_qual.core.power_measurements import update_report_power_from_csv_path
+from drive_qual.core.storage_paths import SCOPE_ARTIFACT_ROOT
 
 # CONFIG
 #################################################

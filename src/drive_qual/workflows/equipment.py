@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from drive_qual.report_session import load_report, report_path_for, resolve_folder_name, save_report
+from drive_qual.core.report_session import load_report, report_path_for, resolve_folder_name, save_report
 
 FORM_FACTOR_PRODUCTS: dict[str, list[str]] = {
     "2.5": ["Fortress", "Fortress L3", "Padlock 3.0"],

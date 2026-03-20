@@ -22,97 +22,316 @@ Requires-Dist: types-PyYAML; extra == "dev"
 
 # Drive Qualification Automation
 
-This project automates Apricorn drive qualification workflows using a Tektronix
-scope, benchmark tools, and a signed `usb` discovery CLI. It is designed as a
-scripted, interactive CLI experience for technicians running repeatable tests.
+Drive Qualification Automation is a Python-based qualification and report
+generation project for Apricorn devices. It combines:
 
-## Inventory and Baseline
+- interactive report-building steps
+- USB device discovery
+- Tektronix scope integration
+- benchmark execution
+- Windows GUI automation for performance tools
+- JSON report updates and post-processing helpers
 
-Scripts and CLI entry points:
-- `drive-qual` CLI -> `src/drive_qual/__main__.py`
-- Standalone runners: `src/drive_qual/win_fio.py`, `src/drive_qual/win_diskspd.py`
-- Data setup helper: `src/drive_qual/setup_directories.py`
-- Post-processing helper: `src/drive_qual/post_process_measurements.py`
+The important distinction is that the repository is intended to be cross-platform
+at the code and test level, but not every workflow is cross-platform today.
+Shared logic should run on Windows, Linux, and macOS. Some technician-facing
+steps depend on Windows-only tools such as PowerShell, `pywinauto`,
+CrystalDiskInfo, CrystalDiskMark, ATTO, and `diskspd.exe`.
 
-External tools and integrations:
-- Signed `usb` CLI (`usb --json`) for device discovery (must be on PATH).
-- Tektronix scope over SCPI/TCP at `169.254.8.130:5025`.
-- Benchmark binaries: `fio.exe` and `diskspd.exe` (from `tools/` or PATH).
-- PowerShell disk tooling (`Get-Disk`, `Get-Partition`, `Get-Volume`, `wmic`).
+Cross-platform behavior is a hard engineering requirement, not an aspiration.
+Shared CLI entrypoints, metadata-only commands, report/session helpers, and
+other common modules must import and run without requiring Windows-only
+dependencies. Platform-specific integrations belong behind runtime-gated or
+lazy imports inside the Windows-only execution paths that actually need them.
 
-Hardware dependencies:
-- Tektronix scope with saved setups for InRush and Max IO.
-- Apricorn devices (Portables and Secure Key).
-- Scope-visible artifact share mounted at `Z:\`.
+## What This Repo Does
 
-Environment assumptions:
-- Windows host with drive letters and PowerShell available.
-- Python 3.12 and `uv` installed for running the CLI.
-- Network access to the scope and permissions to query disks.
+At a high level, the project supports two related jobs:
 
-Expected outputs and file artifacts:
-- Measurements CSVs: `Z:\{part_number}\Windows\In Rush Current\{iProduct}.csv` and `Z:\{part_number}\Windows\Max IO\{iProduct}.csv`
-- Scope screenshots: matching `.png` files in the same folders as the CSVs.
-- Temporary benchmark files on the DUT: `benchmark_file.dat` (fio) or `testfile.dat` (diskspd), deleted after runs.
-- Data drive structure and tracker: `<project>\Linux`, `<project>\macOS`, `<project>\Windows`, and `progress_tracker.json`.
-- Post-processing output (when run): `current_measurements.json`.
+1. Create and enrich a qualification report JSON for a specific Apricorn part
+   number.
+2. Run measurement and performance steps that collect artifacts and write
+   results back into that report.
 
-## Phase 1: End-to-End Workflow
+The report workflow is driven from a sequence of named steps:
 
-Step-by-step operator flow (current scripts):
-1) Run `uv run drive-qual`.
-2) Enter the Apricorn part number when prompted.
-3) Select device type (Portables or Secure Key) if running `drive-qual`.
-4) Remove the Apricorn device when prompted; script waits until no device is detected.
-5) In Rush Current: recall the InRush scope setup, create the output directory, then unlock/connect the device.
-6) Save the In Rush Current measurements and screenshot, then stop acquisition.
-7) Max IO: unlock/connect the device, recall the Max IO setup, run benchmarks, then delete the benchmark file.
-8) Save the Max IO measurements and screenshot, stop acquisition, and remove the device.
+- `drive_info`
+- `equipment`
+- `power_measurements`
+- `performance`
 
-Device states the scripts handle:
-- Connected vs removed (polling `usb --json` until the state changes).
+You can list them directly with:
 
-Inputs and outputs by step:
-- Inputs: part number, device type (in `drive-qual`), device connect/remove actions, scope network access, `usb` CLI.
-- Benchmark inputs: target drive letter, test type, size/loops (fio) or fixed diskspd params.
-- Outputs: CSV measurements, PNG screenshots, stdout benchmark logs, and a deleted benchmark temp file.
-
-Artifacts, locations, and naming conventions:
-- In Rush outputs: `Z:\{part_number}\Windows\In Rush Current\{iProduct}.csv` and `.png`.
-- Max IO outputs: `Z:\{part_number}\Windows\Max IO\{iProduct}.csv` and `.png`.
-- Benchmark temp files: `{drive}\benchmark_file.dat` (fio) or `{drive}\testfile.dat` (diskspd).
-- Data drive scaffold: `<project>\Linux`, `<project>\macOS`, `<project>\Windows`, plus `progress_tracker.json`.
-
-## Setup (uv)
-
-This repo uses `uv` to manage dependencies and the virtual environment.
-
-**Note:** The scope's LAN implementation is brittle and only supports its default IPv4 address; manually setting a different scope IP will cause issues. Any machine that interfaces with the scope must be configured with a manual IPv4 address on the same subnet `169.254.8.xxx`.
-
-## Create the venv and install deps
-
+```bash
+uv run drive-qual-report --list-steps
 ```
+
+## Platform Support
+
+- Cross-platform:
+  report-session helpers, report generation, path normalization logic,
+  post-processing, a large portion of the benchmark wrapper logic, and the test
+  suite.
+- Windows-only:
+  the full technician workflow, scope-assisted measurement flow, PowerShell
+  disk operations, GUI automation via `pywinauto`, CrystalDiskInfo,
+  CrystalDiskMark, ATTO, and `diskspd`.
+- Mixed:
+  `benchmark.py` supports `fio` on Windows, Linux, and macOS, while `diskspd`
+  is Windows-only.
+- Engineering rule:
+  cross-platform commands such as `uv run drive-qual-report --list-steps` must
+  not fail because a shared import path eagerly pulls in Windows-only modules.
+
+## Quick Start
+
+### Prerequisites
+
+- Python 3.12
+- `uv`
+- For Windows workflow runs:
+  `usb` CLI on `PATH`, access to the Tektronix scope, and the required Windows
+  benchmark/GUI tools installed
+
+### Install Dependencies
+
+```bash
 uv venv
 uv sync --group dev
 ```
 
-## Run tools
+### Common Commands
 
-```
+```bash
 uv run pre-commit install
 uv run pre-commit run --all-files
+uv run pytest
+uv run drive-qual-report --list-steps
 ```
 
-## Run CLI
+## Main Workflows
 
+### 1. Report Workflow
+
+This is the main structured workflow for building or updating a report:
+
+```bash
+uv run drive-qual-report
 ```
+
+You can also run only selected steps:
+
+```bash
+uv run drive-qual-report --steps drive_info,equipment
+uv run drive-qual-report --steps power_measurements,performance --part-number 69-420
+```
+
+Available workflow steps:
+
+1. `drive_info`
+   Prompts for core drive metadata, creates the report directory, writes the
+   initial report JSON, and sets the current session marker.
+2. `equipment`
+   Fills host and scope metadata, derives DUT families from form factor, and
+   ensures the report has the expected `power`, `performance`, and
+   `temperature` sections.
+3. `power_measurements`
+   Runs the In Rush and Max IO scope/measurement flow, updates compatibility
+   flags, saves measurement CSVs, and updates report power fields.
+4. `performance`
+   Runs Windows software automation for CrystalDiskInfo, CrystalDiskMark, and
+   ATTO, captures screenshots, writes CSV exports where supported, and updates
+   the report.
+
+### 2. Legacy CLI
+
+There is also a `drive-qual` CLI:
+
+```bash
 uv run drive-qual
 ```
 
-## Windows USB tool note
+This entry point is older and Windows-focused. It coordinates device prompts,
+Tektronix setup recall, fio-based benchmarking, and artifact capture. The
+current report-oriented workflow is centered on `drive-qual-report`.
 
-The signed `usb` CLI must be available on `PATH`.
+### 3. Data Drive Setup
 
-## Benchmark binaries
+To prepare or validate the qualification data drive structure:
 
-Windows benchmarks use `tools/fio.exe` and `tools/diskspd.exe` (or copies available on `PATH`).
+```bash
+uv run python src/drive_qual/setup_directories.py
+```
+
+This script:
+
+- detects the current OS
+- finds the mounted `QUAL_DATA` volume
+- creates missing `Linux`, `macOS`, and `Windows` directories
+- initializes or merges `progress_tracker.json`
+
+### 4. Post-Process Measurements
+
+To extract current values from saved scope CSV output:
+
+```bash
+uv run python src/drive_qual/post_process_measurements.py
+```
+
+This is a helper-oriented script for turning measurement CSV rows into a
+smaller JSON summary.
+
+## Step-by-Step Report Flow
+
+If you are trying to understand the intended operator flow, this is the
+current sequence across the main report workflow:
+
+1. Run `drive_info` to create the report for the Apricorn part number.
+2. Run `equipment` to populate lab host metadata, scope metadata, DUT mapping,
+   and report sections.
+3. Run `power_measurements` on a Windows host connected to the scope and target
+   device.
+4. Run `performance` on a Windows host with the required GUI tools installed.
+5. Review the generated report JSON and collected CSV/PNG artifacts.
+
+The Windows measurement/performance phases generally do the following:
+
+1. detect or confirm the target Apricorn device
+2. wait for disconnect/reconnect events when required
+3. prepare scope state or benchmark state
+4. collect CSV/screenshot artifacts
+5. update the report JSON with compatibility, power, and performance results
+
+## Project Layout
+
+Important files and modules:
+
+- `src/drive_qual/report_workflow.py`
+  orchestration for the named report steps and the `drive-qual-report` CLI
+- `src/drive_qual/drive_info_prompt.py`
+  prompts for drive metadata and creates the per-part-number report
+- `src/drive_qual/equipment_prompt.py`
+  fills host/scope defaults and ensures DUT-related report sections exist
+- `src/drive_qual/power_measurements_step.py`
+  Windows-oriented measurement workflow, device tracking, safe eject, fio
+  execution, and report updates
+- `src/drive_qual/software_step.py`
+  Windows GUI automation for CrystalDiskInfo, CrystalDiskMark, and ATTO
+- `src/drive_qual/benchmark.py`
+  cross-platform benchmark wrapper for `fio`, plus Windows-only `diskspd`
+  support
+- `src/drive_qual/setup_directories.py`
+  data-drive scaffolding and progress tracker initialization
+- `src/drive_qual/post_process_measurements.py`
+  ad hoc CSV-to-JSON helper for saved measurements
+- `src/drive_qual/report_session.py`
+  session marker and report path helpers
+- `src/drive_qual/storage_paths.py`
+  artifact path construction for the scope share
+
+## External Dependencies and Lab Assumptions
+
+The repo depends on a mix of Python packages and lab-specific tooling.
+
+Python/runtime dependencies:
+
+- `requests`
+- `pyyaml`
+- `pymodbus`
+- `pywinauto`
+- `pillow`
+
+Lab/tooling assumptions for Windows workflow runs:
+
+- signed `usb` CLI available on `PATH`
+- Tektronix scope reachable over SCPI/TCP
+- scope-visible artifact share mounted at `Z:\`
+- `fio` available on `PATH` for cross-platform benchmarking
+- `diskspd.exe` available on Windows when that path is used
+- CrystalDiskInfo installed at
+  `C:/Program Files/CrystalDiskInfo/DiskInfo64.exe`
+- CrystalDiskMark installed at
+  `C:/Program Files/CrystalDiskMark8/DiskMark64.exe`
+- ATTO installed at
+  `C:/Program Files (x86)/ATTO Technology/Disk Benchmark/ATTODiskBenchmark.exe`
+
+Scope networking note:
+
+The scope LAN setup is expected to stay on the default `169.254.8.xxx`
+subnet. Machines that talk to the scope need compatible manual IPv4 settings.
+
+## Reports and Artifacts
+
+The project writes two broad categories of output:
+
+- report JSON under the configured report root
+- measurement and performance artifacts under the scope artifact root
+
+Examples:
+
+- report JSON:
+  `Z:\69-420\drive_qualification_report_atomic_tests.json`
+- In Rush Current CSV:
+  `Z:\69-420\Windows\In Rush Current\Secure Key 3.0.csv`
+- Max IO CSV:
+  `Z:\69-420\Windows\Max IO\Secure Key 3.0.csv`
+- CrystalDiskInfo screenshot:
+  `Z:\69-420\Windows\CrystalDiskInfo\Secure Key 3.0_YYYYMMDD_HHMMSS.png`
+- CrystalDiskMark outputs:
+  `Z:\69-420\Windows\CrystalDiskMark\...`
+- ATTO outputs:
+  `Z:\69-420\Windows\ATTO\...`
+
+The report content is progressively enriched by each step rather than generated
+all at once.
+
+## Development Notes
+
+### Testing
+
+Run the test suite with:
+
+```bash
+uv run pytest
+```
+
+The tests cover a meaningful amount of cross-platform path/report logic and
+mocked workflow behavior. They do not replace lab validation for Windows GUI
+automation or instrument integration.
+
+### Linting and Type Checking
+
+Use:
+
+```bash
+uv run pre-commit run --all-files
+```
+
+This runs formatting, linting, mypy, and pytest through the configured
+pre-commit hooks.
+
+### Cross-Platform Development Rule
+
+Keep these constraints in mind when changing the workflow:
+
+- Shared CLI paths must remain importable on Windows, Linux, and macOS.
+- Commands that only inspect metadata or configuration, such as
+  `drive-qual-report --list-steps`, must not import Windows-only GUI or device
+  automation dependencies at module import time.
+- Windows-only packages such as `pywinauto` belong inside Windows-only code
+  paths, not in shared top-level imports.
+- If a non-Windows machine cannot run a supposedly shared command because of a
+  Windows-only import chain, treat that as a bug.
+
+### Where to Start Reading
+
+If you are new to the project, start here:
+
+1. `src/drive_qual/report_workflow.py`
+2. `src/drive_qual/drive_info_prompt.py`
+3. `src/drive_qual/equipment_prompt.py`
+4. `src/drive_qual/power_measurements_step.py`
+5. `src/drive_qual/software_step.py`
+
+That path will get you from top-level orchestration down into the actual
+Windows workflow implementation.

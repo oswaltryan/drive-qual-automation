@@ -1,3 +1,3 @@
 [console_scripts]
-drive-qual = drive_qual.__main__:main
-drive-qual-report = drive_qual.report_workflow:run_report_workflow_cli
+drive-qual = drive_qual.cli.legacy:main
+drive-qual-report = drive_qual.cli.report:run_report_workflow_cli

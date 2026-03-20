@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from drive_qual.report_session import report_path_for, sanitize_dir_name, save_report, set_current_session
+from drive_qual.core.report_session import report_path_for, sanitize_dir_name, save_report, set_current_session
 
 DEFAULT_TEMPLATE = Path("tests/drive_qualification_report_atomic_tests.json")
 

@@ -5,7 +5,7 @@ from typing import Any
 
 from pywinauto import Application  # type: ignore
 
-from drive_qual.apricorn_usb_cli import find_apricorn_device
+from drive_qual.integrations.apricorn.usb_cli import find_apricorn_device
 
 
 def _find_and_click_drive(main_window: Any, drive_letter: str) -> bool:

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import csv
 import ctypes
+import sys
 import time
 from ctypes import wintypes
 from pathlib import Path
@@ -10,10 +11,10 @@ from typing import Any
 from PIL import ImageGrab
 from pywinauto import Application, Desktop  # type: ignore
 
-from drive_qual.apricorn_usb_cli import ApricornDevice, find_apricorn_device
-from drive_qual.io_utils import mk_dir
-from drive_qual.report_session import load_report, report_path_for, resolve_folder_name, save_report
-from drive_qual.storage_paths import artifact_dir
+from drive_qual.core.io_utils import mk_dir
+from drive_qual.core.report_session import load_report, report_path_for, resolve_folder_name, save_report
+from drive_qual.core.storage_paths import artifact_dir
+from drive_qual.integrations.apricorn.usb_cli import ApricornDevice, find_apricorn_device
 
 CRYSTAL_DISK_INFO_PATH = Path("C:/Program Files/CrystalDiskInfo/DiskInfo64.exe")
 CRYSTAL_DISK_MARK_PATH = Path("C:/Program Files/CrystalDiskMark8/DiskMark64.exe")
@@ -35,9 +36,14 @@ def _find_drive_button(main_window: Any, drive_letter: str) -> Any | None:
 
 def _get_tight_rect(hwnd: int) -> tuple[int, int, int, int]:
     """Get the tight window rectangle using DWM (excludes invisible borders/shadows)."""
+    if sys.platform != "win32":
+        raise RuntimeError("Tight window capture is only supported on Windows.")
     rect = wintypes.RECT()
     DWMWA_EXTENDED_FRAME_BOUNDS = 9
-    ctypes.windll.dwmapi.DwmGetWindowAttribute(
+    windll = getattr(ctypes, "windll", None)
+    if windll is None:
+        raise RuntimeError("ctypes.windll is unavailable on this platform.")
+    windll.dwmapi.DwmGetWindowAttribute(
         wintypes.HWND(hwnd),
         wintypes.DWORD(DWMWA_EXTENDED_FRAME_BOUNDS),
         ctypes.byref(rect),

@@ -1,10 +1,10 @@
 from __future__ import annotations
 
 import json
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 from typing import Any
 
-from drive_qual.storage_paths import SCOPE_ARTIFACT_ROOT
+from drive_qual.core.storage_paths import SCOPE_ARTIFACT_ROOT
 
 REPORT_ROOT = Path(SCOPE_ARTIFACT_ROOT)
 CURRENT_MARKER = REPORT_ROOT / ".current"
@@ -55,7 +55,7 @@ def resolve_folder_name(part_number: str | None) -> str:
 
 
 def report_path_for(folder_name: str) -> Path:
-    return REPORT_ROOT / folder_name / TEMPLATE_NAME
+    return Path(str(PureWindowsPath(SCOPE_ARTIFACT_ROOT, folder_name, TEMPLATE_NAME)))
 
 
 def load_report(report_path: Path) -> dict[str, Any]:

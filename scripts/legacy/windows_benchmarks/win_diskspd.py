@@ -4,21 +4,23 @@ import shutil
 import time
 from typing import Any
 
-from .apricorn_usb_cli import find_apricorn_device
-from .benchmark import benchmark_file_path
-from .io_utils import mk_dir
-from .storage_paths import artifact_dir, artifact_file
-from .tektronix import backup_session, recall_setup, save_measurements, stop_run
+from drive_qual.benchmarks import benchmark_file_path
+from drive_qual.core.io_utils import mk_dir
+from drive_qual.core.storage_paths import artifact_dir, artifact_file
+from drive_qual.integrations.apricorn.usb_cli import find_apricorn_device
+from drive_qual.integrations.instruments.tektronix import backup_session, recall_setup, save_measurements, stop_run
 
 part_number = input("Enter the Apricorn P/N for this drive: ")
 device: Any | None = None
 dut_type: str | None = None
 
-# Verify fio is available on PATH (Windows version)
-FIO_TOOL = shutil.which("fio.exe") or shutil.which("tools/fio.exe")
-if FIO_TOOL is None:
-    raise FileNotFoundError("fio not found in PATH. Download from https://bsdio.com/fio/ and add to system PATH")
-FIO_TOOL_STR = FIO_TOOL
+# Verify diskspd is available on PATH (Windows version)
+DISKSPD_TOOL = shutil.which("diskspd.exe") or shutil.which("tools/diskspd.exe")
+if DISKSPD_TOOL is None:
+    raise FileNotFoundError("diskspd not found in PATH. Download it and add to system PATH")
+DISKSPD_TOOL_STR = DISKSPD_TOOL
+
+MIN_DISKSPD_PARTS = 4
 
 
 def _device_type_for_scope_name(product_name: str | None) -> str:
@@ -46,34 +48,47 @@ def dut_enumeration(unlock_dut: bool = True) -> None:
             device = find_apricorn_device()
 
 
-async def run_fio_benchmark(target_dir: str, test_type: str, size_mb: int, loops: int) -> int:
-    """Run fio benchmark with Windows-specific parameters"""
-    test_file = benchmark_file_path(target_dir, "benchmark_file.dat")
-    cmd = [
-        FIO_TOOL_STR,
-        "--name",
-        f"{test_type}_test",
-        "--filename",
-        test_file,
-        "--size",
-        f"{size_mb}m",
-        "--rw",
-        test_type,
-        "--ioengine",
-        "windowsaio",  # Windows-specific I/O engine
-        "--buffered",
-        "0",  # Use non-buffered I/O
-        "--bs",
-        "4k",
-        "--numjobs",
-        "1",
-        "--loops",
-        str(loops),
-        "--output-format",
-        "normal",
-    ]
+def parse_diskspd_output(output: str) -> dict[str, str]:
+    """
+    Parse diskspd output to extract key metrics.
+    Looks for a line starting with 'total:' and extracts:
+      - bytes
+      - I/Os
+      - MiB/s
+      - I/O per s
+    """
+    metrics = {}
+    for line in output.splitlines():
+        if line.lower().startswith("total:"):
+            parts = line.split("|")
+            if len(parts) >= MIN_DISKSPD_PARTS:
+                metrics["bytes"] = parts[0].split("total:")[-1].strip()
+                metrics["I/Os"] = parts[1].strip()
+                metrics["MiB/s"] = parts[2].strip()
+                metrics["I/O per s"] = parts[3].strip()
+            break
+    return metrics
 
-    print(f"\nStarting {test_type} benchmark ({loops} passes, {size_mb}MB file)")
+
+async def run_diskspd_benchmark(target_dir: str, test_type: str) -> int:
+    """
+    Run diskspd benchmark.
+    For a write test, uses -w100.
+    For a read test, uses -w0.
+    Executes diskspd.exe with fixed parameters:
+      - 1GB file, 1M block size, 1 thread, 8 outstanding I/Os, 5s duration.
+    """
+    test_file = benchmark_file_path(target_dir, "testfile.dat")
+    if test_type.lower() == "write":
+        w_flag = "-w100"
+    elif test_type.lower() == "read":
+        w_flag = "-w0"
+    else:
+        raise ValueError("Invalid test_type. Expected 'read' or 'write'.")
+
+    cmd = [DISKSPD_TOOL_STR, "-c1g", "-b1M", "-t1", "-o8", w_flag, "-d5", "-Su", test_file]
+
+    print(f"\nStarting {test_type} benchmark (1GB file, 5s duration)")
 
     process = await asyncio.create_subprocess_exec(
         *cmd,
@@ -82,14 +97,20 @@ async def run_fio_benchmark(target_dir: str, test_type: str, size_mb: int, loops
     )
 
     stdout, stderr = await process.communicate()
+    output = stdout.decode().strip()
+    err_output = stderr.decode().strip()
 
-    if stdout:
-        print(stdout.decode().strip())
-    if stderr:
-        print(stderr.decode().strip())
+    if output:
+        print(output)
+    if err_output:
+        print(err_output)
+
+    metrics = parse_diskspd_output(output)
+    if metrics:
+        print(f"Parsed Metrics: {metrics}")
 
     if process.returncode is None:
-        raise RuntimeError("fio process exited without a return code.")
+        raise RuntimeError("diskspd process exited without a return code.")
     return process.returncode
 
 
@@ -108,12 +129,12 @@ async def max_IO() -> None:
     mk_dir(artifact_dir(part_number, "Windows", "Max IO"))
 
     # Run write benchmark
-    write_ret = await run_fio_benchmark(target_directory, "write", 10, 100)
+    write_ret = await run_diskspd_benchmark(target_directory, "write")
     # Run read benchmark
-    read_ret = await run_fio_benchmark(target_directory, "read", 10, 100)
+    read_ret = await run_diskspd_benchmark(target_directory, "read")
 
     # Cleanup test file
-    test_file = benchmark_file_path(target_directory, "benchmark_file.dat")
+    test_file = benchmark_file_path(target_directory, "testfile.dat")
     try:
         os.remove(test_file)
         print(f"\nCleaned up test file: {test_file}")

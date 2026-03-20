@@ -6,9 +6,10 @@ from typing import Any
 
 from _pytest.monkeypatch import MonkeyPatch
 
-from drive_qual import power_measurements, tektronix
-from drive_qual.report_session import report_path_for
-from drive_qual.storage_paths import SCOPE_ARTIFACT_ROOT, artifact_dir, artifact_file
+from drive_qual.core import power_measurements
+from drive_qual.core.report_session import report_path_for
+from drive_qual.core.storage_paths import SCOPE_ARTIFACT_ROOT, artifact_dir, artifact_file
+from drive_qual.integrations.instruments import tektronix
 
 EXPECTED_MAX_RW_CURRENT = 453.56
 EXPECTED_RMS_RW_CURRENT = 258.6

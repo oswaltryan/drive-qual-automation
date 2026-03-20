@@ -3,13 +3,32 @@ from __future__ import annotations
 import argparse
 from collections.abc import Callable
 
-from drive_qual.drive_info_prompt import run_drive_info_prompt
-from drive_qual.equipment_prompt import run_equipment_prompt
-from drive_qual.power_measurements_step import run_power_measurements_step
-from drive_qual.software_step import run_software_step
-
 STEP_ORDER: tuple[str, ...] = ("drive_info", "equipment", "power_measurements", "performance")
 StepRunner = Callable[[], None]
+
+
+def _run_drive_info_step() -> None:
+    from drive_qual.workflows.drive_info import run_drive_info_prompt
+
+    run_drive_info_prompt()
+
+
+def _run_equipment_step(part_number: str | None = None, scope_profile: str | None = None) -> None:
+    from drive_qual.workflows.equipment import run_equipment_prompt
+
+    run_equipment_prompt(part_number=part_number, scope_profile=scope_profile)
+
+
+def _run_power_measurements_step() -> None:
+    from drive_qual.platforms.windows.power_measurements import run_power_measurements_step
+
+    run_power_measurements_step()
+
+
+def _run_performance_step(part_number: str | None = None) -> None:
+    from drive_qual.platforms.windows.performance import run_software_step
+
+    run_software_step(part_number=part_number)
 
 
 def run_report_workflow(
@@ -20,10 +39,10 @@ def run_report_workflow(
 ) -> None:
     selected = steps or list(STEP_ORDER)
     step_runners: dict[str, StepRunner] = {
-        "drive_info": run_drive_info_prompt,
-        "equipment": lambda: run_equipment_prompt(part_number=part_number, scope_profile=scope_profile),
-        "power_measurements": run_power_measurements_step,
-        "performance": lambda: run_software_step(part_number=part_number),
+        "drive_info": _run_drive_info_step,
+        "equipment": lambda: _run_equipment_step(part_number=part_number, scope_profile=scope_profile),
+        "power_measurements": _run_power_measurements_step,
+        "performance": lambda: _run_performance_step(part_number=part_number),
     }
     for step in selected:
         runner = step_runners.get(step)

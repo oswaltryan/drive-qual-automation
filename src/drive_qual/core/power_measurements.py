@@ -6,8 +6,14 @@ import time
 from pathlib import Path, PureWindowsPath
 from typing import Any, cast
 
-from drive_qual.report_session import load_report, report_path_for, resolve_folder_name, sanitize_dir_name, save_report
-from drive_qual.storage_paths import SCOPE_ARTIFACT_ROOT
+from drive_qual.core.report_session import (
+    load_report,
+    report_path_for,
+    resolve_folder_name,
+    sanitize_dir_name,
+    save_report,
+)
+from drive_qual.core.storage_paths import SCOPE_ARTIFACT_ROOT
 
 PATH_PARTS_MIN = 5
 VALUE_AND_UNIT_PARTS = 2

@@ -12,8 +12,12 @@ from pathlib import Path, PureWindowsPath
 from types import ModuleType
 from typing import Any, Protocol, cast
 
-from drive_qual import benchmark, tektronix
-from drive_qual.apricorn_usb_cli import (
+from drive_qual import benchmarks as benchmark
+from drive_qual.core.io_utils import mk_dir
+from drive_qual.core.power_measurements import extract_power_values_from_csv, update_power_measurements_from_saved_csvs
+from drive_qual.core.report_session import load_report, report_path_for, resolve_folder_name, save_report
+from drive_qual.core.storage_paths import artifact_dir, artifact_file
+from drive_qual.integrations.apricorn.usb_cli import (
     ApricornDevice,
     device_identity,
     find_apricorn_device,
@@ -21,14 +25,11 @@ from drive_qual.apricorn_usb_cli import (
     is_same_device,
     list_apricorn_devices,
 )
-from drive_qual.io_utils import mk_dir
-from drive_qual.power_measurements import extract_power_values_from_csv, update_power_measurements_from_saved_csvs
-from drive_qual.report_session import load_report, report_path_for, resolve_folder_name, save_report
-from drive_qual.storage_paths import artifact_dir, artifact_file
+from drive_qual.integrations.instruments import tektronix
 
 DRIVE_TOKEN_WITH_COLON_LEN = 2
 SAFE_EJECT_SCRIPT = Path("tools") / "safe_eject.ps1"
-DISK_OPS_DIR = Path(__file__).resolve().parents[2] / "tools"
+DISK_OPS_DIR = Path(__file__).resolve().parents[4] / "tools"
 DISK_OPS_PATH = DISK_OPS_DIR / "disk_ops.py"
 
 
@@ -53,8 +54,9 @@ def _load_disk_ops_module() -> ModuleType:
     return module
 
 
-_DISK_OPS_MODULE = _load_disk_ops_module()
-FORMAT_DISK = cast(_FormatDiskFn, _DISK_OPS_MODULE._format_disk)
+def _format_disk() -> _FormatDiskFn:
+    module = _load_disk_ops_module()
+    return cast(_FormatDiskFn, module._format_disk)
 
 
 def _display_path(path: str | Path) -> str:
@@ -86,7 +88,7 @@ def _mark_windows_compatibility(report_path: Path, field_name: str) -> None:
 class _DiskOpsAdapter:
     def __init__(self, dut: ApricornDevice) -> None:
         self.dut = dut
-        self.logger: Logger = getLogger("drive_qual.power_measurements.disk_ops")
+        self.logger: Logger = getLogger("drive_qual.platforms.windows.power_measurements.disk_ops")
 
     def _normalize_windows_drive_letter(self, drive_letter: str | None) -> str | None:
         if not drive_letter:
@@ -121,7 +123,7 @@ def _partition_and_format_drive(dut: ApricornDevice) -> bool:
     adapter = _DiskOpsAdapter(dut)
     drive_letter = adapter._normalize_windows_drive_letter(dut.driveLetter)
     return bool(
-        FORMAT_DISK(
+        _format_disk()(
             adapter,
             dut.physicalDriveNum,
             label="DUT",

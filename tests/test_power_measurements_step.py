@@ -7,8 +7,8 @@ from typing import Any
 
 from _pytest.monkeypatch import MonkeyPatch
 
-from drive_qual.apricorn_usb_cli import ApricornDevice
-from drive_qual.power_measurements_step import _run_in_rush, _run_max_io
+from drive_qual.integrations.apricorn.usb_cli import ApricornDevice
+from drive_qual.platforms.windows.power_measurements import _run_in_rush, _run_max_io
 
 
 def _write_report(report_path: Path) -> None:
@@ -33,19 +33,33 @@ def _write_report(report_path: Path) -> None:
 
 
 def _setup_common_mocks(monkeypatch: MonkeyPatch, dut: ApricornDevice) -> None:
-    monkeypatch.setattr("drive_qual.power_measurements_step._wait_for_confirmed_device_present", lambda prompt: dut)
-    monkeypatch.setattr("drive_qual.power_measurements_step._wait_for_device_removed", lambda dut, prompt: None)
-    monkeypatch.setattr("drive_qual.power_measurements_step.mk_dir", lambda path: None)
-    monkeypatch.setattr("drive_qual.power_measurements_step.artifact_dir", lambda *args: "Z:/69-420/Windows/Max IO")
     monkeypatch.setattr(
-        "drive_qual.power_measurements_step.artifact_file",
+        "drive_qual.platforms.windows.power_measurements._wait_for_confirmed_device_present", lambda prompt: dut
+    )
+    monkeypatch.setattr(
+        "drive_qual.platforms.windows.power_measurements._wait_for_device_removed", lambda dut, prompt: None
+    )
+    monkeypatch.setattr("drive_qual.platforms.windows.power_measurements.mk_dir", lambda path: None)
+    monkeypatch.setattr(
+        "drive_qual.platforms.windows.power_measurements.artifact_dir", lambda *args: "Z:/69-420/Windows/Max IO"
+    )
+    monkeypatch.setattr(
+        "drive_qual.platforms.windows.power_measurements.artifact_file",
         lambda *args: "Z:/69-420/Windows/Max IO/DUT.csv",
     )
-    monkeypatch.setattr("drive_qual.power_measurements_step.tektronix.recall_setup", lambda **kwargs: None)
-    monkeypatch.setattr("drive_qual.power_measurements_step.tektronix.stop_run", lambda: None)
-    monkeypatch.setattr("drive_qual.power_measurements_step.tektronix.save_measurements", lambda path: path)
-    monkeypatch.setattr("drive_qual.power_measurements_step.tektronix.backup_session", lambda path: None)
-    monkeypatch.setattr("drive_qual.power_measurements_step._write_measurement_backup", lambda *args: None)
+    monkeypatch.setattr(
+        "drive_qual.platforms.windows.power_measurements.tektronix.recall_setup",
+        lambda **kwargs: None,
+    )
+    monkeypatch.setattr("drive_qual.platforms.windows.power_measurements.tektronix.stop_run", lambda: None)
+    monkeypatch.setattr(
+        "drive_qual.platforms.windows.power_measurements.tektronix.save_measurements", lambda path: path
+    )
+    monkeypatch.setattr(
+        "drive_qual.platforms.windows.power_measurements.tektronix.backup_session",
+        lambda path: None,
+    )
+    monkeypatch.setattr("drive_qual.platforms.windows.power_measurements._write_measurement_backup", lambda *args: None)
 
 
 def test_run_max_io_marks_windows_compatibility_fields(monkeypatch: MonkeyPatch, tmp_path: Path) -> None:
@@ -58,17 +72,20 @@ def test_run_max_io_marks_windows_compatibility_fields(monkeypatch: MonkeyPatch,
     _setup_common_mocks(monkeypatch, dut)
 
     monkeypatch.setattr(
-        "drive_qual.power_measurements_step.benchmark.benchmark_file_path", lambda *args: str(benchmark_file)
+        "drive_qual.platforms.windows.power_measurements.benchmark.benchmark_file_path",
+        lambda *args: str(benchmark_file),
     )
-    monkeypatch.setattr("drive_qual.power_measurements_step._partition_and_format_drive", lambda dut: True)
-    monkeypatch.setattr("drive_qual.power_measurements_step._refresh_device_after_format", lambda dut: dut)
-    monkeypatch.setattr("drive_qual.power_measurements_step._prompt_disk_management_visible", lambda dut: True)
-    monkeypatch.setattr("drive_qual.power_measurements_step._run_safe_eject_script", lambda dut: True)
+    monkeypatch.setattr("drive_qual.platforms.windows.power_measurements._partition_and_format_drive", lambda dut: True)
+    monkeypatch.setattr("drive_qual.platforms.windows.power_measurements._refresh_device_after_format", lambda dut: dut)
+    monkeypatch.setattr(
+        "drive_qual.platforms.windows.power_measurements._prompt_disk_management_visible", lambda dut: True
+    )
+    monkeypatch.setattr("drive_qual.platforms.windows.power_measurements._run_safe_eject_script", lambda dut: True)
 
     async def fake_run_fio(target_dir: str, mode: str, file_size_mb: int, num_passes: int) -> int:
         return 0 if mode in {"write", "read"} else 1
 
-    monkeypatch.setattr("drive_qual.power_measurements_step.benchmark.run_fio", fake_run_fio)
+    monkeypatch.setattr("drive_qual.platforms.windows.power_measurements.benchmark.run_fio", fake_run_fio)
 
     asyncio.run(_run_max_io("69-420", report_path))
 
@@ -91,20 +108,22 @@ def test_run_max_io_leaves_delete_data_unset_when_cleanup_fails(monkeypatch: Mon
     dut = ApricornDevice(iProduct="Secure Key DT", iSerial="ABC123", driveLetter="D:")
     _setup_common_mocks(monkeypatch, dut)
 
-    monkeypatch.setattr("drive_qual.power_measurements_step._partition_and_format_drive", lambda dut: True)
-    monkeypatch.setattr("drive_qual.power_measurements_step._refresh_device_after_format", lambda dut: dut)
-    monkeypatch.setattr("drive_qual.power_measurements_step._prompt_disk_management_visible", lambda dut: False)
+    monkeypatch.setattr("drive_qual.platforms.windows.power_measurements._partition_and_format_drive", lambda dut: True)
+    monkeypatch.setattr("drive_qual.platforms.windows.power_measurements._refresh_device_after_format", lambda dut: dut)
     monkeypatch.setattr(
-        "drive_qual.power_measurements_step.benchmark.benchmark_file_path",
+        "drive_qual.platforms.windows.power_measurements._prompt_disk_management_visible", lambda dut: False
+    )
+    monkeypatch.setattr(
+        "drive_qual.platforms.windows.power_measurements.benchmark.benchmark_file_path",
         lambda *args: str(tmp_path / "missing.dat"),
     )
-    monkeypatch.setattr("drive_qual.power_measurements_step._cleanup_test_file", lambda path: False)
-    monkeypatch.setattr("drive_qual.power_measurements_step._run_safe_eject_script", lambda dut: True)
+    monkeypatch.setattr("drive_qual.platforms.windows.power_measurements._cleanup_test_file", lambda path: False)
+    monkeypatch.setattr("drive_qual.platforms.windows.power_measurements._run_safe_eject_script", lambda dut: True)
 
     async def fake_run_fio(*args: Any, **kwargs: Any) -> int:
         return 0
 
-    monkeypatch.setattr("drive_qual.power_measurements_step.benchmark.run_fio", fake_run_fio)
+    monkeypatch.setattr("drive_qual.platforms.windows.power_measurements.benchmark.run_fio", fake_run_fio)
 
     asyncio.run(_run_max_io("69-420", report_path))
 
@@ -127,8 +146,10 @@ def test_run_max_io_marks_ops_fail(monkeypatch: MonkeyPatch, tmp_path: Path) -> 
     dut = ApricornDevice(iProduct="Secure Key DT", iSerial="ABC123", driveLetter="D:")
     _setup_common_mocks(monkeypatch, dut)
 
-    monkeypatch.setattr("drive_qual.power_measurements_step._partition_and_format_drive", lambda dut: False)
-    monkeypatch.setattr("drive_qual.power_measurements_step._run_safe_eject_script", lambda dut: True)
+    monkeypatch.setattr(
+        "drive_qual.platforms.windows.power_measurements._partition_and_format_drive", lambda dut: False
+    )
+    monkeypatch.setattr("drive_qual.platforms.windows.power_measurements._run_safe_eject_script", lambda dut: True)
 
     asyncio.run(_run_max_io("69-420", report_path))
 
@@ -147,21 +168,30 @@ def test_run_in_rush_marks_hot_pluggable(monkeypatch: MonkeyPatch, tmp_path: Pat
     dut = ApricornDevice(iProduct="Secure Key 3.0", iSerial="ABC123", driveLetter="D:")
 
     monkeypatch.setattr(
-        "drive_qual.power_measurements_step._wait_for_device_present", lambda prompt, expected=None: dut
+        "drive_qual.platforms.windows.power_measurements._wait_for_device_present", lambda prompt, expected=None: dut
     )
-    monkeypatch.setattr("drive_qual.power_measurements_step.mk_dir", lambda path: None)
+    monkeypatch.setattr("drive_qual.platforms.windows.power_measurements.mk_dir", lambda path: None)
     monkeypatch.setattr(
-        "drive_qual.power_measurements_step.artifact_dir", lambda *args: "Z:/69-420/Windows/In Rush Current"
+        "drive_qual.platforms.windows.power_measurements.artifact_dir",
+        lambda *args: "Z:/69-420/Windows/In Rush Current",
     )
     monkeypatch.setattr(
-        "drive_qual.power_measurements_step.artifact_file",
+        "drive_qual.platforms.windows.power_measurements.artifact_file",
         lambda *args: "Z:/69-420/Windows/In Rush Current/Secure Key 3.0.csv",
     )
-    monkeypatch.setattr("drive_qual.power_measurements_step.tektronix.recall_setup", lambda **kwargs: None)
-    monkeypatch.setattr("drive_qual.power_measurements_step.tektronix.stop_run", lambda: None)
-    monkeypatch.setattr("drive_qual.power_measurements_step.tektronix.save_measurements", lambda path: path)
-    monkeypatch.setattr("drive_qual.power_measurements_step.tektronix.backup_session", lambda path: None)
-    monkeypatch.setattr("drive_qual.power_measurements_step._write_measurement_backup", lambda *args: None)
+    monkeypatch.setattr(
+        "drive_qual.platforms.windows.power_measurements.tektronix.recall_setup",
+        lambda **kwargs: None,
+    )
+    monkeypatch.setattr("drive_qual.platforms.windows.power_measurements.tektronix.stop_run", lambda: None)
+    monkeypatch.setattr(
+        "drive_qual.platforms.windows.power_measurements.tektronix.save_measurements", lambda path: path
+    )
+    monkeypatch.setattr(
+        "drive_qual.platforms.windows.power_measurements.tektronix.backup_session",
+        lambda path: None,
+    )
+    monkeypatch.setattr("drive_qual.platforms.windows.power_measurements._write_measurement_backup", lambda *args: None)
 
     asyncio.run(_run_in_rush("69-420", report_path, dut))
 

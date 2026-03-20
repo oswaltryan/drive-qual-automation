@@ -6,7 +6,8 @@ from pathlib import Path
 
 sys.path.append(str(Path(__file__).resolve().parents[1] / "src"))
 
-from drive_qual import io_utils, tektronix
+from drive_qual.core import io_utils
+from drive_qual.integrations.instruments import tektronix
 
 
 def _normalize_scope_path(path: str) -> str:
