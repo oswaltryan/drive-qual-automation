@@ -47,8 +47,6 @@ def _pywinauto_desktop_class() -> Any:
 
 
 def _current_host_key() -> str:
-    if sys.platform.startswith("linux"):
-        return CURRENT_HOST_BY_PLATFORM["linux"]
     if sys.platform == "darwin":
         return CURRENT_HOST_BY_PLATFORM["macos"]
     return CURRENT_HOST_BY_PLATFORM["windows"]

@@ -30,7 +30,7 @@ def _run_power_measurements_step() -> None:
 
 
 def _run_performance_step(part_number: str | None = None) -> None:
-    from drive_qual.platforms.windows.performance import run_software_step
+    from drive_qual.platforms.performance import run_software_step
 
     run_software_step(part_number=part_number)
 

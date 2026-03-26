@@ -45,8 +45,8 @@ def test_run_report_workflow_imports_performance_step_lazily(monkeypatch: Monkey
         def run_software_step(self, *, part_number: str | None = None) -> None:
             calls.append(part_number)
 
-    fake_software_step = FakePerformanceModule("drive_qual.platforms.windows.performance")
-    monkeypatch.setitem(sys.modules, "drive_qual.platforms.windows.performance", fake_software_step)
+    fake_software_step = FakePerformanceModule("drive_qual.platforms.performance")
+    monkeypatch.setitem(sys.modules, "drive_qual.platforms.performance", fake_software_step)
 
     module.run_report_workflow(["performance"], part_number="69-420")
 
