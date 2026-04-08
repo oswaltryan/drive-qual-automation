@@ -114,8 +114,17 @@ def _safe_remove_linux_device(device: ApricornDevice) -> bool:
 
 def _safe_remove_macos_device(device: ApricornDevice) -> bool:
     candidate = _select_macos_candidate(device)
-    result = _run_command(["diskutil", "eject", candidate.disk_path], check=False)
-    return result.returncode == 0
+    eject_result = _run_command(["diskutil", "eject", candidate.disk_path], check=False)
+    if eject_result.returncode == 0:
+        return True
+
+    # Retry with a forced unmount in case Spotlight/Finder is still holding the volume.
+    unmount_result = _run_command(["diskutil", "unmountDisk", "force", candidate.disk_path], check=False)
+    if unmount_result.returncode == 0:
+        return True
+
+    retry_eject = _run_command(["diskutil", "eject", candidate.disk_path], check=False)
+    return retry_eject.returncode == 0
 
 
 def _with_linux_privilege(command: list[str]) -> list[str]:
@@ -415,25 +424,53 @@ def _macos_disk_entry(device_path: str) -> dict[str, Any]:
 def _macos_wait_for_partition(disk_path: str) -> str:
     for _ in range(POLL_ATTEMPTS):
         entry = _macos_disk_entry(disk_path)
-        partitions = entry.get("Partitions", [])
-        if isinstance(partitions, list) and partitions:
-            first_partition = partitions[0]
-            if isinstance(first_partition, dict):
-                identifier = _string_or_none(first_partition.get("DeviceIdentifier"))
-                if identifier:
-                    return f"/dev/{identifier}"
+        partition_path = _macos_data_partition_path(entry)
+        if partition_path is not None:
+            return partition_path
         time.sleep(POLL_DELAY_SECONDS)
     raise RuntimeError(f"Timed out waiting for macOS partition on {disk_path}.")
 
 
 def _macos_wait_for_mount(partition_path: str) -> str:
+    mount_attempted = False
     for _ in range(POLL_ATTEMPTS):
         info = _macos_disk_info(partition_path)
         mount_point = _string_or_none(info.get("MountPoint"))
         if mount_point:
             return mount_point
+        if not mount_attempted:
+            _run_command(["diskutil", "mount", partition_path], check=False)
+            mount_attempted = True
         time.sleep(POLL_DELAY_SECONDS)
     raise RuntimeError(f"Timed out waiting for macOS mount point on {partition_path}.")
+
+
+def _macos_data_partition_path(entry: dict[str, Any]) -> str | None:
+    partitions = entry.get("Partitions", [])
+    if not isinstance(partitions, list) or not partitions:
+        return None
+
+    preferred: str | None = None
+    fallback: str | None = None
+    for partition in partitions:
+        if not isinstance(partition, dict):
+            continue
+        identifier = _string_or_none(partition.get("DeviceIdentifier"))
+        if not identifier:
+            continue
+        partition_path = f"/dev/{identifier}"
+        if fallback is None:
+            fallback = partition_path
+
+        volume_name = _normalized(_string_or_none(partition.get("VolumeName")))
+        if volume_name == _normalized(MACOS_VOLUME_LABEL):
+            return partition_path
+
+        content = _normalized(_string_or_none(partition.get("Content")))
+        if content != "efi" and preferred is None:
+            preferred = partition_path
+
+    return preferred or fallback
 
 
 def _string_or_none(value: object) -> str | None:

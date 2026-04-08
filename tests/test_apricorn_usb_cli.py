@@ -11,7 +11,7 @@ from drive_qual.integrations.apricorn.usb_cli import (
     list_apricorn_devices,
     select_apricorn_device,
 )
-from drive_qual.platforms.windows.power_measurements import (
+from drive_qual.platforms.power_measurements_mixed import (
     _confirm_selected_device,
     _wait_for_confirmed_device_present,
     _wait_for_device_present,
@@ -107,7 +107,7 @@ def test_wait_for_device_removed_tracks_specific_device(monkeypatch: MonkeyPatch
             },
         ]
     )
-    monkeypatch.setattr("drive_qual.platforms.windows.power_measurements.get_usb_payload", lambda: next(polls))
+    monkeypatch.setattr("drive_qual.platforms.power_measurements_mixed.get_usb_payload", lambda: next(polls))
 
     _wait_for_device_removed(expected, "Remove Apricorn device..")
 
@@ -147,7 +147,7 @@ def test_wait_for_device_present_requires_same_device_reconnect(
             },
         ]
     )
-    monkeypatch.setattr("drive_qual.platforms.windows.power_measurements.get_usb_payload", lambda: next(polls))
+    monkeypatch.setattr("drive_qual.platforms.power_measurements_mixed.get_usb_payload", lambda: next(polls))
 
     device = _wait_for_device_present("Reconnect Apricorn device..", expected=expected)
 
@@ -196,10 +196,10 @@ def test_wait_for_confirmed_device_present_retries_after_rejection(
     confirmations = iter([False, True])
 
     monkeypatch.setattr(
-        "drive_qual.platforms.windows.power_measurements._wait_for_device_present", lambda prompt: next(devices)
+        "drive_qual.platforms.power_measurements_mixed._wait_for_device_present", lambda prompt: next(devices)
     )
     monkeypatch.setattr(
-        "drive_qual.platforms.windows.power_measurements._confirm_selected_device", lambda dut: next(confirmations)
+        "drive_qual.platforms.power_measurements_mixed._confirm_selected_device", lambda dut: next(confirmations)
     )
 
     selected = _wait_for_confirmed_device_present("Unlock Apricorn device..")
