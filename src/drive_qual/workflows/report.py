@@ -24,7 +24,7 @@ def _run_equipment_step(part_number: str | None = None, scope_profile: str | Non
 
 
 def _run_power_measurements_step() -> None:
-    from drive_qual.platforms.windows.power_measurements import run_power_measurements_step
+    from drive_qual.platforms.power_measurements import run_power_measurements_step
 
     run_power_measurements_step()
 

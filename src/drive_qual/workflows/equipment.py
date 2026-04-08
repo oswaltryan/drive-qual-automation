@@ -41,7 +41,7 @@ HOST_DEFAULTS: dict[str, dict[str, Any]] = {
         "hardware": "Mac Mini M2",
         "os_version": "OS 15 Sequoia",
         "software": [
-            {"name": "BlackMagic RAW Speed Test", "version": "4.2"},
+            {"name": "Blackmagic Disk Speed Test", "version": "4.2"},
         ],
     },
 }

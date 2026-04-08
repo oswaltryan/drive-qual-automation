@@ -7,7 +7,7 @@ generation project for Apricorn devices. It combines:
 - USB device discovery
 - Tektronix scope integration
 - benchmark execution
-- Windows GUI automation for performance tools
+- platform-specific performance collection
 - JSON report updates and post-processing helpers
 
 The important distinction is that the repository is intended to be cross-platform
@@ -51,12 +51,14 @@ uv run drive-qual-report --list-steps
   post-processing, a large portion of the benchmark wrapper logic, and the test
   suite.
 - Windows-only:
-  the full technician workflow, scope-assisted measurement flow, PowerShell
-  disk operations, GUI automation via `pywinauto`, CrystalDiskInfo,
-  CrystalDiskMark, ATTO, and `diskspd`.
+  GUI automation via `pywinauto`, CrystalDiskInfo, CrystalDiskMark, ATTO, and
+  `diskspd`.
 - Mixed:
-  `benchmark.py` supports `fio` on Windows, Linux, and macOS, while `diskspd`
-  is Windows-only.
+  `power_measurements` shares one mixed-platform implementation with
+  platform-specific Windows, Linux, and macOS branches; `performance`
+  dispatches to Windows, Linux, and macOS implementations; `benchmark.py`
+  supports `fio` on Windows, Linux, and macOS, while `diskspd` is
+  Windows-only.
 - Engineering rule:
   cross-platform commands such as `uv run drive-qual-report --list-steps` must
   not fail because a shared import path eagerly pulls in Windows-only modules.
@@ -117,9 +119,10 @@ Available workflow steps:
    Runs the In Rush and Max IO scope/measurement flow, updates compatibility
    flags, saves measurement CSVs, and updates report power fields.
 4. `performance`
-   Runs Windows software automation for CrystalDiskInfo, CrystalDiskMark, and
-   ATTO, captures screenshots, writes CSV exports where supported, and updates
-   the report.
+   Dispatches by platform:
+   Windows automates CrystalDiskInfo, CrystalDiskMark, and ATTO;
+   Linux records native Disks benchmark results;
+   macOS captures Blackmagic Disk Speed Test screenshot plus JSON/CSV results.
 
 ### 2. Legacy CLI
 
@@ -144,7 +147,7 @@ uv run python -m drive_qual.workflows.setup_directories
 This script:
 
 - detects the current OS
-- finds the mounted `QUAL_DATA` volume
+- uses the configured platform path from `drive_qual.toml`
 - creates missing `Linux`, `macOS`, and `Windows` directories
 - initializes or merges `progress_tracker.json`
 
@@ -159,6 +162,35 @@ uv run python -m drive_qual.cli.post_process_measurements
 This is a helper-oriented script for turning measurement CSV rows into a
 smaller JSON summary.
 
+## macOS Performance Notes
+
+The macOS `performance` step expects a host entry for `Blackmagic Disk Speed
+Test`.
+
+The macOS report/artifact root is not hardcoded in the workflow. It comes from
+`drive_qual.toml`:
+
+```toml
+[paths]
+macos = "/Volumes/..."
+```
+
+For SMB shares, this value must match the actual mounted path shown under
+`/Volumes` on the Mac that is running the workflow.
+
+When you run it on macOS, the workflow:
+
+1. opens Blackmagic Disk Speed Test if possible
+2. waits for you to run the benchmark
+3. captures a screenshot of the Blackmagic window with `screencapture`
+4. prompts for the displayed read/write MB/s values
+5. writes both JSON and CSV result artifacts
+6. updates `performance -> DUT -> macOS`
+
+If macOS blocks screenshot capture, grant the terminal Screen Recording access
+and rerun the step. If macOS blocks window detection, grant Accessibility
+access to the terminal as well.
+
 ## Step-by-Step Report Flow
 
 If you are trying to understand the intended operator flow, this is the
@@ -167,12 +199,16 @@ current sequence across the main report workflow:
 1. Run `drive_info` to create the report for the Apricorn part number.
 2. Run `equipment` to populate lab host metadata, scope metadata, DUT mapping,
    and report sections.
-3. Run `power_measurements` on a Windows host connected to the scope and target
-   device.
-4. Run `performance` on a Windows host with the required GUI tools installed.
+3. Run `power_measurements` on the target host with the scope and Apricorn
+   device attached. Windows, Linux, and macOS are supported through the shared
+   maintained workflow path.
+4. Run `performance` on the target host:
+   Windows uses the GUI benchmark tools,
+   Linux uses the native Disks wrapper,
+   macOS uses Blackmagic Disk Speed Test plus screenshot capture.
 5. Review the generated report JSON and collected CSV/PNG artifacts.
 
-The Windows measurement/performance phases generally do the following:
+The maintained measurement/performance phases generally do the following:
 
 1. detect or confirm the target Apricorn device
 2. wait for disconnect/reconnect events when required
@@ -190,9 +226,15 @@ Important files and modules:
   prompts for drive metadata and creates the per-part-number report
 - `src/drive_qual/workflows/equipment.py`
   fills host/scope defaults and ensures DUT-related report sections exist
+- `src/drive_qual/platforms/power_measurements.py`
+  platform-neutral entrypoint for the mixed-platform power measurements step
 - `src/drive_qual/platforms/windows/power_measurements.py`
-  Windows-oriented measurement workflow, device tracking, safe eject, fio
-  execution, and report updates
+  mixed-platform measurement workflow with Windows-specific disk management and
+  safe-eject branches
+- `src/drive_qual/platforms/performance.py`
+  platform-neutral dispatcher for the performance step
+- `src/drive_qual/platforms/macos/performance.py`
+  macOS Blackmagic Disk Speed Test capture and report writeback
 - `src/drive_qual/platforms/windows/performance.py`
   Windows GUI automation for CrystalDiskInfo, CrystalDiskMark, and ATTO
 - `src/drive_qual/benchmarks/`
@@ -215,14 +257,19 @@ Python/runtime dependencies:
 - `requests`
 - `pyyaml`
 - `pymodbus`
-- `pywinauto`
 - `pillow`
 
-Lab/tooling assumptions for Windows workflow runs:
+Windows-only runtime dependency:
+
+- `pywinauto`
+
+Lab/tooling assumptions for technician workflow runs:
 
 - signed `usb` CLI available on `PATH`
 - Tektronix scope reachable over SCPI/TCP
 - scope-visible artifact share mounted at `Z:\`
+- on macOS, the SMB share mount path in `drive_qual.toml` matches the actual
+  path under `/Volumes`
 - `fio` available on `PATH` for cross-platform benchmarking
 - `diskspd.exe` available on Windows when that path is used
 - CrystalDiskInfo installed at
@@ -231,6 +278,7 @@ Lab/tooling assumptions for Windows workflow runs:
   `C:/Program Files/CrystalDiskMark8/DiskMark64.exe`
 - ATTO installed at
   `C:/Program Files (x86)/ATTO Technology/Disk Benchmark/ATTODiskBenchmark.exe`
+- Blackmagic Disk Speed Test installed on macOS when that path is used
 
 Scope networking note:
 
@@ -243,6 +291,11 @@ The project writes two broad categories of output:
 
 - report JSON under the configured report root
 - measurement and performance artifacts under the scope artifact root
+
+The configured platform roots come from `drive_qual.toml`. On macOS, that means
+the workflow reads and writes through the configured `/Volumes/...` mount path
+while preserving the Windows-style report/artifact contract in the JSON and
+path helpers.
 
 Examples:
 
@@ -258,6 +311,8 @@ Examples:
   `Z:\69-420\Windows\CrystalDiskMark\...`
 - ATTO outputs:
   `Z:\69-420\Windows\ATTO\...`
+- macOS Blackmagic outputs:
+  `Z:\69-420\macOS\Blackmagic Disk Speed Test\...`
 
 The report content is progressively enriched by each step rather than generated
 all at once.
@@ -307,8 +362,11 @@ If you are new to the project, start here:
 1. `src/drive_qual/workflows/report.py`
 2. `src/drive_qual/workflows/drive_info.py`
 3. `src/drive_qual/workflows/equipment.py`
-4. `src/drive_qual/platforms/windows/power_measurements.py`
-5. `src/drive_qual/platforms/windows/performance.py`
+4. `src/drive_qual/platforms/power_measurements.py`
+5. `src/drive_qual/platforms/performance.py`
+6. `src/drive_qual/platforms/windows/power_measurements.py`
+7. `src/drive_qual/platforms/macos/performance.py`
+8. `src/drive_qual/platforms/windows/performance.py`
 
-That path will get you from top-level orchestration down into the actual
-Windows workflow implementation.
+That path will get you from top-level orchestration into the platform-neutral
+dispatch layer and then down into the concrete platform implementations.

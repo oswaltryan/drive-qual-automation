@@ -1,6 +1,6 @@
 [paths]
 windows = "Z:/"
-macos = "/Volumes/QUAL_DATA"
+macos = "/Volumes/test-lab-drive-"
 linux = "/mnt/QUAL_DATA"
 
 [tektronix]

@@ -8,7 +8,7 @@ dependencies = [
     "requests",
     "pyyaml",
     "pymodbus",
-    "pywinauto>=0.6.9",
+    "pywinauto>=0.6.9; sys_platform == 'win32'",
     "pillow>=12.1.1",
 ]
 
