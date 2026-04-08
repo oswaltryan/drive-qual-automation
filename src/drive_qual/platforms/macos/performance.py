@@ -214,7 +214,7 @@ def _write_blackmagic_csv(csv_path: Path, *, read_mb_s: float, write_mb_s: float
         writer.writerow(["Write MB/s", write_mb_s])
 
 
-def run_software_step(part_number: str | None = None) -> None:
+def run_software_step(part_number: str | None = None) -> None:  # noqa: PLR0915
     if sys.platform != "darwin":
         raise RuntimeError("macOS performance step can only run on macOS.")
 

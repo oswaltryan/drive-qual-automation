@@ -135,7 +135,9 @@ def test_prepare_macos_device_creates_no_index_marker(monkeypatch) -> None:  # t
     )
     monkeypatch.setattr(native_disk_ops, "_macos_wait_for_partition", lambda disk_path: "/dev/disk4s2")
     monkeypatch.setattr(native_disk_ops, "_macos_wait_for_mount", lambda partition_path: "/Volumes/DUT")
-    monkeypatch.setattr(native_disk_ops, "_run_command", lambda command, **kwargs: type("Result", (), {"returncode": 0})())
+    monkeypatch.setattr(
+        native_disk_ops, "_run_command", lambda command, **kwargs: type("Result", (), {"returncode": 0})()
+    )
     monkeypatch.setattr(
         native_disk_ops,
         "_mark_macos_volume_no_index",
@@ -200,7 +202,7 @@ def test_macos_wait_for_partition_skips_efi_partition(monkeypatch) -> None:  # t
             ]
         },
     )
-    monkeypatch.setattr(native_disk_ops.time, "sleep", lambda _: None)
+    monkeypatch.setattr("drive_qual.core.native_disk_ops.time.sleep", lambda _: None)
 
     assert native_disk_ops._macos_wait_for_partition("/dev/disk4") == "/dev/disk4s2"
 
@@ -215,7 +217,7 @@ def test_macos_wait_for_mount_attempts_mount_when_not_mounted(monkeypatch) -> No
     commands: list[list[str]] = []
 
     monkeypatch.setattr(native_disk_ops, "_macos_disk_info", lambda partition_path: next(infos))
-    monkeypatch.setattr(native_disk_ops.time, "sleep", lambda _: None)
+    monkeypatch.setattr("drive_qual.core.native_disk_ops.time.sleep", lambda _: None)
 
     def fake_run_command(command: list[str], **kwargs: Any) -> object:
         commands.append(command)

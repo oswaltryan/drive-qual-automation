@@ -14,6 +14,7 @@ from drive_qual.integrations.apricorn.usb_cli import ApricornDevice
 from drive_qual.platforms import performance as performance_dispatch
 from drive_qual.platforms.linux import performance as linux_performance
 from drive_qual.platforms.macos import performance as macos_performance
+from drive_qual.platforms.windows import performance as windows_performance
 
 EXPECTED_LINUX_READ = 123.4
 EXPECTED_LINUX_WRITE = 234.5
@@ -45,6 +46,38 @@ def test_run_software_step_dispatches_to_macos_module(monkeypatch: MonkeyPatch) 
 
     fake_module = FakeMacOSPerformanceModule("drive_qual.platforms.macos.performance")
     monkeypatch.setitem(sys.modules, "drive_qual.platforms.macos.performance", fake_module)
+
+    performance_dispatch.run_software_step(part_number="69-420")
+
+    assert calls == ["69-420"]
+
+
+def test_run_software_step_dispatches_to_linux_module(monkeypatch: MonkeyPatch) -> None:
+    monkeypatch.setattr(sys, "platform", "linux")
+    calls: list[str | None] = []
+
+    class FakeLinuxPerformanceModule(ModuleType):
+        def run_software_step(self, *, part_number: str | None = None) -> None:
+            calls.append(part_number)
+
+    fake_module = FakeLinuxPerformanceModule("drive_qual.platforms.linux.performance")
+    monkeypatch.setitem(sys.modules, "drive_qual.platforms.linux.performance", fake_module)
+
+    performance_dispatch.run_software_step(part_number="69-420")
+
+    assert calls == ["69-420"]
+
+
+def test_run_software_step_dispatches_to_windows_module(monkeypatch: MonkeyPatch) -> None:
+    monkeypatch.setattr(sys, "platform", "win32")
+    calls: list[str | None] = []
+
+    class FakeWindowsPerformanceModule(ModuleType):
+        def run_software_step(self, *, part_number: str | None = None) -> None:
+            calls.append(part_number)
+
+    fake_module = FakeWindowsPerformanceModule("drive_qual.platforms.windows.performance")
+    monkeypatch.setitem(sys.modules, "drive_qual.platforms.windows.performance", fake_module)
 
     performance_dispatch.run_software_step(part_number="69-420")
 
@@ -193,6 +226,137 @@ def test_capture_blackmagic_screenshot_uses_window_bounds(monkeypatch: MonkeyPat
     macos_performance._capture_blackmagic_screenshot(screenshot_path)
 
     assert calls == [["screencapture", "-x", "-R34,44,252,352", str(screenshot_path)]]
+
+
+def test_blackmagic_artifact_paths_use_macos_directory(monkeypatch: MonkeyPatch, tmp_path: Path) -> None:
+    calls: list[tuple[str, str, str]] = []
+    created_dirs: list[Path] = []
+
+    def fake_artifact_dir(part_number: str, os_name: str, category: str) -> str:
+        calls.append((part_number, os_name, category))
+        return str(tmp_path / part_number / os_name / category)
+
+    monkeypatch.setattr(
+        macos_performance,
+        "artifact_dir",
+        fake_artifact_dir,
+    )
+    monkeypatch.setattr(macos_performance, "localize_windows_path", lambda path: path)
+    monkeypatch.setattr(macos_performance, "mk_dir", lambda path: created_dirs.append(path))
+    monkeypatch.setattr("drive_qual.platforms.macos.performance.time.strftime", lambda _fmt: "20260408_093000")
+
+    screenshot_path, json_path, csv_path = macos_performance._blackmagic_artifact_paths("69-420", "Padlock DT")
+    expected_dir = tmp_path / "69-420" / "macOS" / "Blackmagic Disk Speed Test"
+
+    assert calls == [("69-420", "macOS", "Blackmagic Disk Speed Test")]
+    assert created_dirs == [expected_dir]
+    assert screenshot_path == expected_dir / "Padlock DT_20260408_093000.png"
+    assert json_path == expected_dir / "Padlock DT_20260408_093000.json"
+    assert csv_path == expected_dir / "Padlock DT_20260408_093000.csv"
+
+
+def test_linux_disks_artifact_paths_use_linux_directory(monkeypatch: MonkeyPatch, tmp_path: Path) -> None:
+    calls: list[tuple[str, str, str]] = []
+    created_dirs: list[Path] = []
+
+    def fake_artifact_dir(part_number: str, os_name: str, category: str) -> str:
+        calls.append((part_number, os_name, category))
+        return str(tmp_path / part_number / os_name / category)
+
+    monkeypatch.setattr(
+        linux_performance,
+        "artifact_dir",
+        fake_artifact_dir,
+    )
+    monkeypatch.setattr(linux_performance, "localize_windows_path", lambda path: path)
+    monkeypatch.setattr(linux_performance, "mk_dir", lambda path: created_dirs.append(path))
+    monkeypatch.setattr("drive_qual.platforms.linux.performance.time.strftime", lambda _fmt: "20260408_093000")
+
+    json_path, csv_path = linux_performance._linux_disks_artifact_paths("69-420", "Padlock DT")
+    expected_dir = tmp_path / "69-420" / "Linux" / "Disks"
+
+    assert calls == [("69-420", "Linux", "Disks")]
+    assert created_dirs == [expected_dir]
+    assert json_path == expected_dir / "Padlock DT_20260408_093000.json"
+    assert csv_path == expected_dir / "Padlock DT_20260408_093000.csv"
+
+
+def test_capture_window_saves_png_in_windows_artifact_dir(monkeypatch: MonkeyPatch, tmp_path: Path) -> None:
+    created_dirs: list[Path] = []
+    grab_calls: list[tuple[tuple[int, int, int, int], bool]] = []
+    saved_paths: list[str] = []
+
+    class FakeImage:
+        def save(self, path: str) -> None:
+            saved_paths.append(path)
+
+    def fake_grab(*, bbox: tuple[int, int, int, int], all_screens: bool) -> FakeImage:
+        grab_calls.append((bbox, all_screens))
+        return FakeImage()
+
+    fake_image_grab_module = ModuleType("PIL.ImageGrab")
+    fake_image_grab_module.grab = fake_grab  # type: ignore[attr-defined]
+    fake_pil_module = ModuleType("PIL")
+    fake_pil_module.ImageGrab = fake_image_grab_module  # type: ignore[attr-defined]
+    monkeypatch.setitem(sys.modules, "PIL", fake_pil_module)
+    monkeypatch.setitem(sys.modules, "PIL.ImageGrab", fake_image_grab_module)
+
+    monkeypatch.setattr(
+        windows_performance,
+        "artifact_dir",
+        lambda part_number, os_name, tool_name: str(Path(f"Z:/{part_number}/{os_name}/{tool_name}")),
+    )
+    monkeypatch.setattr(
+        windows_performance,
+        "localize_windows_path",
+        lambda path: tmp_path / "69-420" / "Windows" / path.name,
+    )
+    monkeypatch.setattr(windows_performance, "mk_dir", lambda path: created_dirs.append(path))
+    monkeypatch.setattr(windows_performance, "_get_tight_rect", lambda _hwnd: (10, 20, 300, 400))
+    monkeypatch.setattr("drive_qual.platforms.windows.performance.time.strftime", lambda _fmt: "20260408_093000")
+
+    main_window = type("FakeWindow", (), {"handle": 1234})()
+    windows_performance._capture_window(main_window, "69-420", "Padlock DT", "ATTO")
+
+    expected_dir = tmp_path / "69-420" / "Windows" / "ATTO"
+    expected_png = expected_dir / "Padlock DT_20260408_093000.png"
+
+    assert created_dirs == [expected_dir]
+    assert grab_calls == [((10, 20, 300, 400), True)]
+    assert saved_paths == [str(expected_png)]
+
+
+def test_windows_performance_syncs_report_without_running_automation(monkeypatch: MonkeyPatch, tmp_path: Path) -> None:
+    report_path = tmp_path / "drive_qualification_report_atomic_tests.json"
+    payload = _report_payload()
+    payload["equipment"]["windows_host"]["software"] = [
+        {"name": "CrystalDiskInfo", "version": "9.4"},
+        {"name": "CrystalDiskMark", "version": "8.0"},
+        {"name": "ATTO", "version": "4.1"},
+    ]
+    payload["performance"] = {}
+    report_path.write_text(json.dumps(payload), encoding="utf-8")
+
+    monkeypatch.setattr(sys, "platform", "win32")
+    monkeypatch.setattr(windows_performance, "resolve_folder_name", lambda part_number=None: "69-420")
+    monkeypatch.setattr(windows_performance, "load_part_number_and_report", lambda folder_name: ("69-420", report_path))
+    monkeypatch.setattr(windows_performance, "_get_software_flags", lambda equipment: (False, False, False))
+    no_wait_error = "device wait should not run when no automation is enabled"
+    monkeypatch.setattr(
+        windows_performance,
+        "wait_for_device_present",
+        lambda prompt: (_ for _ in ()).throw(AssertionError(no_wait_error)),
+    )
+
+    performance_dispatch.run_software_step(part_number="69-420")
+
+    data = json.loads(report_path.read_text(encoding="utf-8"))
+    dut_perf = data["performance"]["Padlock DT"]
+    assert dut_perf["Windows"]["CrystalDiskInfo"] == {"screenshot": None}
+    assert dut_perf["Windows"]["CrystalDiskMark"] == {"read": None, "write": None}
+    assert dut_perf["Windows"]["ATTO"] == {"read": None, "write": None}
+    assert dut_perf["Linux"]["Disks (native)"] == {"read": None, "write": None}
+    assert dut_perf["macOS"]["Blackmagic Disk Speed Test"] == {"read": None, "write": None}
 
 
 def test_write_linux_disks_csv_writes_metric_rows(tmp_path: Path) -> None:
