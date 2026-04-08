@@ -54,11 +54,11 @@ uv run drive-qual-report --list-steps
   GUI automation via `pywinauto`, CrystalDiskInfo, CrystalDiskMark, ATTO, and
   `diskspd`.
 - Mixed:
-  `power_measurements` shares one mixed-platform implementation with
-  platform-specific Windows, Linux, and macOS branches; `performance`
-  dispatches to Windows, Linux, and macOS implementations; `benchmark.py`
-  supports `fio` on Windows, Linux, and macOS, while `diskspd` is
-  Windows-only.
+  `power_measurements` dispatches through a platform-neutral entrypoint to a
+  shared mixed-platform implementation with Windows-only helpers isolated in a
+  Windows module; `performance` dispatches to Windows, Linux, and macOS
+  implementations; `benchmark.py` supports `fio` on Windows, Linux, and macOS,
+  while `diskspd` is Windows-only.
 - Engineering rule:
   cross-platform commands such as `uv run drive-qual-report --list-steps` must
   not fail because a shared import path eagerly pulls in Windows-only modules.
@@ -122,7 +122,8 @@ Available workflow steps:
    Dispatches by platform:
    Windows automates CrystalDiskInfo, CrystalDiskMark, and ATTO;
    Linux records native Disks benchmark results;
-   macOS captures Blackmagic Disk Speed Test screenshot plus JSON/CSV results.
+   macOS uses a manual-assisted Blackmagic Disk Speed Test flow that captures a
+   screenshot, prompts for MB/s values, and writes JSON/CSV results.
 
 ### 2. Legacy CLI
 
@@ -162,7 +163,7 @@ uv run python -m drive_qual.cli.post_process_measurements
 This is a helper-oriented script for turning measurement CSV rows into a
 smaller JSON summary.
 
-## macOS Performance Notes
+## macOS Performance (Current Manual-Assisted Mode)
 
 The macOS `performance` step expects a host entry for `Blackmagic Disk Speed
 Test`.
@@ -178,18 +179,52 @@ macos = "/Volumes/..."
 For SMB shares, this value must match the actual mounted path shown under
 `/Volumes` on the Mac that is running the workflow.
 
-When you run it on macOS, the workflow:
+Operator prerequisites:
 
-1. opens Blackmagic Disk Speed Test if possible
-2. waits for you to run the benchmark
-3. captures a screenshot of the Blackmagic window with `screencapture`
-4. prompts for the displayed read/write MB/s values
-5. writes both JSON and CSV result artifacts
-6. updates `performance -> DUT -> macOS`
+- Blackmagic Disk Speed Test installed on the macOS host
+- terminal Screen Recording permission so `screencapture` can write benchmark
+  screenshots
+- `drive_qual.toml` `paths.macos` value set to the actual mounted share path
+  on that Mac (typically under `/Volumes`)
 
-If macOS blocks screenshot capture, grant the terminal Screen Recording access
-and rerun the step. If macOS blocks window detection, grant Accessibility
-access to the terminal as well.
+Current supported behavior (manual-assisted):
+
+1. the workflow attempts `open -a "Blackmagic Disk Speed Test"`
+2. if auto-launch fails, you launch the app manually and continue
+3. you run the benchmark and wait for completed read/write values
+4. the workflow captures a screenshot artifact
+5. the workflow prompts for read/write MB/s and validates positive numeric
+   values
+6. the workflow writes JSON and CSV artifacts, then updates
+   `performance -> <DUT> -> macOS`
+
+Permission scope for handoff:
+
+- required now: Screen Recording (for screenshot capture)
+- not a baseline prerequisite for this manual-assisted mode: Accessibility
+- future optional GUI automation work may introduce Accessibility requirements
+
+macOS Blackmagic artifacts written per run:
+
+- screenshot:
+  `Z:\<part_number>\macOS\Blackmagic Disk Speed Test\<dut>_<timestamp>.png`
+- structured JSON:
+  `Z:\<part_number>\macOS\Blackmagic Disk Speed Test\<dut>_<timestamp>.json`
+  with fields `tool`, `dut`, `read_mb_s`, `write_mb_s`, `captured_at`
+- structured CSV:
+  `Z:\<part_number>\macOS\Blackmagic Disk Speed Test\<dut>_<timestamp>.csv`
+  with rows `Metric,Value`, `Read MB/s`, and `Write MB/s`
+
+Report writeback fields:
+
+- `performance -> <DUT> -> macOS -> Blackmagic Disk Speed Test -> read`
+- `performance -> <DUT> -> macOS -> Blackmagic Disk Speed Test -> write`
+
+Recovery behavior:
+
+- if app auto-launch fails, launch Blackmagic manually and continue
+- if screenshot capture is blocked, grant Screen Recording and rerun the step
+- read/write values are manually entered in MB/s in the current supported mode
 
 ## Step-by-Step Report Flow
 
@@ -205,7 +240,7 @@ current sequence across the main report workflow:
 4. Run `performance` on the target host:
    Windows uses the GUI benchmark tools,
    Linux uses the native Disks wrapper,
-   macOS uses Blackmagic Disk Speed Test plus screenshot capture.
+   macOS uses the manual-assisted Blackmagic workflow.
 5. Review the generated report JSON and collected CSV/PNG artifacts.
 
 The maintained measurement/performance phases generally do the following:
@@ -228,15 +263,19 @@ Important files and modules:
   fills host/scope defaults and ensures DUT-related report sections exist
 - `src/drive_qual/platforms/power_measurements.py`
   platform-neutral entrypoint for the mixed-platform power measurements step
+- `src/drive_qual/platforms/power_measurements_mixed.py`
+  shared power-measurement workflow for Linux, macOS, and Windows with
+  cross-platform compatibility/report updates
 - `src/drive_qual/platforms/windows/power_measurements.py`
-  mixed-platform measurement workflow with Windows-specific disk management and
-  safe-eject branches
+  Windows-only power-measurement helpers (Disk Management confirmation,
+  PowerShell safe-eject, and Windows drive-target handling)
 - `src/drive_qual/platforms/performance.py`
   platform-neutral dispatcher for the performance step
 - `src/drive_qual/platforms/macos/performance.py`
-  macOS Blackmagic Disk Speed Test capture and report writeback
+  macOS manual-assisted Blackmagic Disk Speed Test capture, artifact generation,
+  and report writeback
 - `src/drive_qual/platforms/windows/performance.py`
-  Windows GUI automation for CrystalDiskInfo, CrystalDiskMark, and ATTO
+  Windows-only GUI automation for CrystalDiskInfo, CrystalDiskMark, and ATTO
 - `src/drive_qual/benchmarks/`
   split benchmark helpers for shared path handling plus `fio` and Windows-only `diskspd` execution
 - `src/drive_qual/workflows/setup_directories.py`
@@ -312,7 +351,13 @@ Examples:
 - ATTO outputs:
   `Z:\69-420\Windows\ATTO\...`
 - macOS Blackmagic outputs:
-  `Z:\69-420\macOS\Blackmagic Disk Speed Test\...`
+  `Z:\69-420\macOS\Blackmagic Disk Speed Test\<dut>_<timestamp>.png`
+- macOS Blackmagic structured JSON:
+  `Z:\69-420\macOS\Blackmagic Disk Speed Test\<dut>_<timestamp>.json`
+  with `tool`, `dut`, `read_mb_s`, `write_mb_s`, `captured_at`
+- macOS Blackmagic structured CSV:
+  `Z:\69-420\macOS\Blackmagic Disk Speed Test\<dut>_<timestamp>.csv`
+  with `Metric,Value` plus read/write rows
 
 The report content is progressively enriched by each step rather than generated
 all at once.
@@ -363,10 +408,11 @@ If you are new to the project, start here:
 2. `src/drive_qual/workflows/drive_info.py`
 3. `src/drive_qual/workflows/equipment.py`
 4. `src/drive_qual/platforms/power_measurements.py`
-5. `src/drive_qual/platforms/performance.py`
-6. `src/drive_qual/platforms/windows/power_measurements.py`
-7. `src/drive_qual/platforms/macos/performance.py`
-8. `src/drive_qual/platforms/windows/performance.py`
+5. `src/drive_qual/platforms/power_measurements_mixed.py`
+6. `src/drive_qual/platforms/performance.py`
+7. `src/drive_qual/platforms/windows/power_measurements.py`
+8. `src/drive_qual/platforms/macos/performance.py`
+9. `src/drive_qual/platforms/windows/performance.py`
 
 That path will get you from top-level orchestration into the platform-neutral
 dispatch layer and then down into the concrete platform implementations.
