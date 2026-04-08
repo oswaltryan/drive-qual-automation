@@ -24,6 +24,7 @@ LINUX_VOLUME_LABEL = "DUT"
 MACOS_FILESYSTEM = "ExFAT"
 MACOS_PARTITION_TABLE = "GPTFormat"
 MACOS_VOLUME_LABEL = "DUT"
+MACOS_NO_INDEX_MARKER = ".metadata_never_index"
 POLL_ATTEMPTS = 20
 POLL_DELAY_SECONDS = 0.5
 
@@ -102,6 +103,7 @@ def _prepare_macos_device(device: ApricornDevice) -> PreparedBenchmarkTarget:
     )
     partition_path = _macos_wait_for_partition(candidate.disk_path)
     mount_point = _macos_wait_for_mount(partition_path)
+    _mark_macos_volume_no_index(mount_point)
     return PreparedBenchmarkTarget(candidate.disk_path, partition_path, mount_point)
 
 
@@ -112,19 +114,52 @@ def _safe_remove_linux_device(device: ApricornDevice) -> bool:
     return result.returncode == 0
 
 
+def _mark_macos_volume_no_index(mount_point: str) -> None:
+    marker_path = os.path.join(mount_point, MACOS_NO_INDEX_MARKER)
+    result = _run_command(["touch", marker_path], check=False, capture_output=True)
+    if result.returncode != 0:
+        print(f"Warning: could not create {MACOS_NO_INDEX_MARKER} on {mount_point}.")
+
+
 def _safe_remove_macos_device(device: ApricornDevice) -> bool:
     candidate = _select_macos_candidate(device)
-    eject_result = _run_command(["diskutil", "eject", candidate.disk_path], check=False)
-    if eject_result.returncode == 0:
+    eject_result = _run_command(
+        ["diskutil", "eject", candidate.disk_path],
+        check=False,
+        capture_output=True,
+    )
+    if eject_result.returncode == 0 or _macos_disk_missing_from_result(eject_result):
         return True
 
     # Retry with a forced unmount in case Spotlight/Finder is still holding the volume.
-    unmount_result = _run_command(["diskutil", "unmountDisk", "force", candidate.disk_path], check=False)
-    if unmount_result.returncode == 0:
+    output = _normalized(f"{eject_result.stdout or ''}\n{eject_result.stderr or ''}")
+    if "mds_stores" in output:
+        print(f"Spotlight lock detected on {candidate.disk_path}; forcing unmount before removal.")
+    _run_command(
+        ["diskutil", "unmountDisk", "force", candidate.disk_path],
+        check=False,
+        capture_output=True,
+    )
+
+    retry_eject = _run_command(
+        ["diskutil", "eject", candidate.disk_path],
+        check=False,
+        capture_output=True,
+    )
+    if retry_eject.returncode == 0 or _macos_disk_missing_from_result(retry_eject):
         return True
 
-    retry_eject = _run_command(["diskutil", "eject", candidate.disk_path], check=False)
-    return retry_eject.returncode == 0
+    presence_check = _run_command(
+        ["diskutil", "info", candidate.disk_path],
+        check=False,
+        capture_output=True,
+    )
+    return presence_check.returncode != 0
+
+
+def _macos_disk_missing_from_result(result: subprocess.CompletedProcess[str]) -> bool:
+    output = _normalized(f"{result.stdout or ''}\n{result.stderr or ''}")
+    return "failed to find disk" in output or "could not find disk" in output
 
 
 def _with_linux_privilege(command: list[str]) -> list[str]:
