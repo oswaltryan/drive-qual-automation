@@ -14,6 +14,7 @@ from drive_qual.core.report_session import load_report, resolve_folder_name, sav
 from drive_qual.core.storage_paths import artifact_dir, localize_windows_path
 from drive_qual.platforms.macos.blackmagic import (
     DEFAULT_BENCHMARK_DURATION_SECONDS,
+    BlackmagicAutomationResult,
     extract_blackmagic_read_write_from_screenshot,
     run_blackmagic_benchmark_automation,
 )
@@ -186,22 +187,62 @@ def _prompt_positive_mb_s(label: str) -> float:
         print("Enter a positive MB/s value greater than 0.")
 
 
-def _resolve_blackmagic_read_write_values(tool_name: str, dut_name: str, screenshot_path: Path) -> tuple[float, float]:
+def _collect_blackmagic_automation_result(dut_name: str, screenshot_path: Path) -> BlackmagicAutomationResult:
+    warnings: list[str] = []
+    benchmark_ran_automatically = _run_blackmagic_automation(dut_name)
+    app_launched = True
+    if not benchmark_ran_automatically:
+        app_launched = _launch_blackmagic_app()
+    _prompt_blackmagic_ready(
+        dut_name,
+        app_launched=app_launched,
+        benchmark_ran_automatically=benchmark_ran_automatically,
+    )
+    _capture_blackmagic_screenshot(screenshot_path)
+
+    read_mb_s: float | None = None
+    write_mb_s: float | None = None
     try:
         extracted = extract_blackmagic_read_write_from_screenshot(screenshot_path)
     except Exception as exc:
-        print(f"Automatic {tool_name} value extraction failed: {exc}")
+        warnings.append(f"OCR extraction failed: {exc}")
         extracted = None
 
     if extracted is not None:
         read_mb_s, write_mb_s = extracted
-        print(f"Auto-extracted {tool_name} values for {dut_name}: read={read_mb_s} MB/s write={write_mb_s} MB/s")
-        return (read_mb_s, write_mb_s)
+        value_source = "ocr"
+    else:
+        value_source = "none"
+
+    return BlackmagicAutomationResult(
+        screenshot_path=screenshot_path,
+        benchmark_ran_automatically=benchmark_ran_automatically,
+        app_launched_for_manual=app_launched if not benchmark_ran_automatically else False,
+        read_mb_s=read_mb_s,
+        write_mb_s=write_mb_s,
+        value_source=value_source,
+        warnings=warnings,
+    )
+
+
+def _resolve_blackmagic_read_write_values(
+    tool_name: str,
+    dut_name: str,
+    automation_result: BlackmagicAutomationResult,
+) -> tuple[float, float, str]:
+    for warning in automation_result.warnings:
+        print(f"Automatic {tool_name} value extraction failed: {warning}")
+    if automation_result.read_mb_s is not None and automation_result.write_mb_s is not None:
+        print(
+            f"Auto-extracted {tool_name} values for {dut_name}: "
+            f"read={automation_result.read_mb_s} MB/s write={automation_result.write_mb_s} MB/s"
+        )
+        return (automation_result.read_mb_s, automation_result.write_mb_s, automation_result.value_source)
 
     print("Falling back to manual read/write entry.")
     read_mb_s = _prompt_positive_mb_s(f"macOS {tool_name} read for {dut_name}")
     write_mb_s = _prompt_positive_mb_s(f"macOS {tool_name} write for {dut_name}")
-    return (read_mb_s, write_mb_s)
+    return (read_mb_s, write_mb_s, "manual")
 
 
 def _run_blackmagic_automation(dut_name: str) -> bool:
@@ -297,17 +338,15 @@ def run_software_step(part_number: str | None = None) -> None:  # noqa: PLR0915
         raise RuntimeError(f"Could not map performance results for DUT {dut_name!r}.")
 
     screenshot_path, json_path, csv_path = _blackmagic_artifact_paths(actual_pn, dut_name)
-    benchmark_ran_automatically = _run_blackmagic_automation(dut_name)
-    app_launched = True
-    if not benchmark_ran_automatically:
-        app_launched = _launch_blackmagic_app()
-    _prompt_blackmagic_ready(
+    automation_result = _collect_blackmagic_automation_result(
         dut_name,
-        app_launched=app_launched,
-        benchmark_ran_automatically=benchmark_ran_automatically,
+        screenshot_path,
     )
-    _capture_blackmagic_screenshot(screenshot_path)
-    read_mb_s, write_mb_s = _resolve_blackmagic_read_write_values(tool_name, dut_name, screenshot_path)
+    read_mb_s, write_mb_s, _value_source = _resolve_blackmagic_read_write_values(
+        tool_name,
+        dut_name,
+        automation_result,
+    )
     _write_blackmagic_json(
         json_path,
         tool_name=tool_name,

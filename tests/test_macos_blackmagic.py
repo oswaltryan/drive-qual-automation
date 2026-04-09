@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 from _pytest.monkeypatch import MonkeyPatch
@@ -89,7 +90,14 @@ def test_extract_blackmagic_read_write_from_screenshot_uses_swift_ocr(monkeypatc
     screenshot_path = tmp_path / "capture.png"
     screenshot_path.write_bytes(b"png")
     calls: list[list[str]] = []
-    ocr_output = "WRITE\n500.5\nREAD\n400.4\n"
+    ocr_output = json.dumps(
+        [
+            {"text": "159.1", "confidence": 0.98, "x": 0.18, "y": 0.62, "width": 0.08, "height": 0.06},
+            {"text": "110.0", "confidence": 0.97, "x": 0.77, "y": 0.62, "width": 0.08, "height": 0.06},
+            {"text": "665", "confidence": 0.96, "x": 0.86, "y": 0.49, "width": 0.05, "height": 0.03},
+            {"text": "10", "confidence": 0.95, "x": 0.86, "y": 0.06, "width": 0.03, "height": 0.02},
+        ]
+    )
 
     def fake_run(command: list[str], **_kwargs: object) -> object:
         calls.append(command)
@@ -103,7 +111,7 @@ def test_extract_blackmagic_read_write_from_screenshot_uses_swift_ocr(monkeypatc
     assert calls[0][0] == "swift"
     assert calls[0][1] == "-e"
     assert calls[0][-1] == str(screenshot_path)
-    assert parsed == (400.4, 500.5)
+    assert parsed == (110.0, 159.1)
 
 
 def test_extract_blackmagic_read_write_from_screenshot_returns_none_when_unparseable(
@@ -120,3 +128,27 @@ def test_extract_blackmagic_read_write_from_screenshot_returns_none_when_unparse
     parsed = blackmagic.extract_blackmagic_read_write_from_screenshot(screenshot_path)
 
     assert parsed is None
+
+
+def test_extract_blackmagic_read_write_from_screenshot_falls_back_to_text_parser_when_regions_missing(
+    monkeypatch: MonkeyPatch, tmp_path: Path
+) -> None:
+    screenshot_path = tmp_path / "capture.png"
+    screenshot_path.write_bytes(b"png")
+    ocr_output = json.dumps(
+        [
+            {"text": "WRITE", "confidence": 0.95, "x": 0.10, "y": 0.30, "width": 0.08, "height": 0.02},
+            {"text": "500.5", "confidence": 0.95, "x": 0.20, "y": 0.30, "width": 0.10, "height": 0.02},
+            {"text": "READ", "confidence": 0.95, "x": 0.60, "y": 0.30, "width": 0.08, "height": 0.02},
+            {"text": "400.4", "confidence": 0.95, "x": 0.70, "y": 0.30, "width": 0.10, "height": 0.02},
+        ]
+    )
+
+    def fake_run(command: list[str], **_kwargs: object) -> object:
+        return type("Result", (), {"returncode": 0, "stdout": ocr_output, "stderr": ""})()
+
+    monkeypatch.setattr("drive_qual.platforms.macos.blackmagic.subprocess.run", fake_run)
+
+    parsed = blackmagic.extract_blackmagic_read_write_from_screenshot(screenshot_path)
+
+    assert parsed == (400.4, 500.5)

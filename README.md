@@ -122,8 +122,9 @@ Available workflow steps:
    Dispatches by platform:
    Windows automates CrystalDiskInfo, CrystalDiskMark, and ATTO;
    Linux records native Disks benchmark results;
-   macOS uses a manual-assisted Blackmagic Disk Speed Test flow that captures a
-   screenshot, prompts for MB/s values, and writes JSON/CSV results.
+   macOS uses an automation-first Blackmagic Disk Speed Test flow that runs the
+   benchmark, captures a screenshot, extracts MB/s values via OCR, and writes
+   JSON/CSV results (with manual fallback).
 
 ### 2. Legacy CLI
 
@@ -163,7 +164,7 @@ uv run python -m drive_qual.cli.post_process_measurements
 This is a helper-oriented script for turning measurement CSV rows into a
 smaller JSON summary.
 
-## macOS Performance (Current Manual-Assisted Mode)
+## macOS Performance (Current Automation-First Mode)
 
 The macOS `performance` step expects a host entry for `Blackmagic Disk Speed
 Test`.
@@ -187,22 +188,23 @@ Operator prerequisites:
 - `drive_qual.toml` `paths.macos` value set to the actual mounted share path
   on that Mac (typically under `/Volumes`)
 
-Current supported behavior (manual-assisted):
+Current supported behavior (automation-first):
 
-1. the workflow attempts `open -a "Blackmagic Disk Speed Test"`
-2. if auto-launch fails, you launch the app manually and continue
-3. you run the benchmark and wait for completed read/write values
-4. the workflow captures a screenshot artifact
-5. the workflow prompts for read/write MB/s and validates positive numeric
-   values
+1. the workflow closes stale app state, launches Blackmagic, and selects
+   `/Volumes/DUT`
+2. the workflow starts/stops benchmark by coordinate click after a fixed run
+   duration
+3. the workflow waits briefly for UI settle and captures a screenshot artifact
+4. the workflow extracts read/write MB/s from the screenshot using OCR
+5. if OCR extraction fails, the workflow prompts for manual read/write MB/s
 6. the workflow writes JSON and CSV artifacts, then updates
    `performance -> <DUT> -> macOS`
 
 Permission scope for handoff:
 
-- required now: Screen Recording (for screenshot capture)
-- not a baseline prerequisite for this manual-assisted mode: Accessibility
-- future optional GUI automation work may introduce Accessibility requirements
+- required for automation mode: Accessibility (UI scripting) and Screen
+  Recording (screenshot capture)
+- manual fallback still works for value entry if OCR extraction fails
 
 macOS Blackmagic artifacts written per run:
 
@@ -222,9 +224,9 @@ Report writeback fields:
 
 Recovery behavior:
 
-- if app auto-launch fails, launch Blackmagic manually and continue
+- if automation fails, the workflow falls back to manual-assisted benchmark mode
+- if OCR value extraction fails, the workflow prompts for manual MB/s entry
 - if screenshot capture is blocked, grant Screen Recording and rerun the step
-- read/write values are manually entered in MB/s in the current supported mode
 
 ## Step-by-Step Report Flow
 
@@ -240,7 +242,7 @@ current sequence across the main report workflow:
 4. Run `performance` on the target host:
    Windows uses the GUI benchmark tools,
    Linux uses the native Disks wrapper,
-   macOS uses the manual-assisted Blackmagic workflow.
+   macOS uses the automation-first Blackmagic workflow with manual fallback.
 5. Review the generated report JSON and collected CSV/PNG artifacts.
 
 The maintained measurement/performance phases generally do the following:

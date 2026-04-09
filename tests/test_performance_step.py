@@ -243,17 +243,48 @@ def test_prompt_blackmagic_ready_auto_mode_waits_without_user_input(monkeypatch:
 def test_resolve_blackmagic_read_write_values_falls_back_to_manual(monkeypatch: MonkeyPatch) -> None:
     responses = iter([str(EXPECTED_MACOS_FALLBACK_READ), str(EXPECTED_MACOS_FALLBACK_WRITE)])
 
-    monkeypatch.setattr(macos_performance, "extract_blackmagic_read_write_from_screenshot", lambda _path: None)
     monkeypatch.setattr("builtins.input", lambda _prompt="": next(responses))
+    automation_result = macos_performance.BlackmagicAutomationResult(
+        screenshot_path=Path("/tmp/fake.png"),
+        benchmark_ran_automatically=True,
+        app_launched_for_manual=False,
+        read_mb_s=None,
+        write_mb_s=None,
+        value_source="none",
+        warnings=[],
+    )
 
-    read_value, write_value = macos_performance._resolve_blackmagic_read_write_values(
+    read_value, write_value, value_source = macos_performance._resolve_blackmagic_read_write_values(
         "Blackmagic Disk Speed Test",
         "Padlock DT",
-        Path("/tmp/fake.png"),
+        automation_result,
     )
 
     assert read_value == EXPECTED_MACOS_FALLBACK_READ
     assert write_value == EXPECTED_MACOS_FALLBACK_WRITE
+    assert value_source == "manual"
+
+
+def test_collect_blackmagic_automation_result_returns_contract(monkeypatch: MonkeyPatch, tmp_path: Path) -> None:
+    screenshot_path = tmp_path / "capture.png"
+    monkeypatch.setattr(macos_performance, "_run_blackmagic_automation", lambda _dut_name: True)
+    monkeypatch.setattr("drive_qual.platforms.macos.performance.time.sleep", lambda _seconds: None)
+    monkeypatch.setattr(macos_performance, "_capture_blackmagic_screenshot", lambda path: path.write_bytes(b"png"))
+    monkeypatch.setattr(
+        macos_performance,
+        "extract_blackmagic_read_write_from_screenshot",
+        lambda _path: (EXPECTED_MACOS_READ, EXPECTED_MACOS_WRITE),
+    )
+
+    result = macos_performance._collect_blackmagic_automation_result("Padlock DT", screenshot_path)
+
+    assert result.screenshot_path == screenshot_path
+    assert result.benchmark_ran_automatically is True
+    assert result.app_launched_for_manual is False
+    assert result.read_mb_s == EXPECTED_MACOS_READ
+    assert result.write_mb_s == EXPECTED_MACOS_WRITE
+    assert result.value_source == "ocr"
+    assert result.warnings == []
 
 
 def test_capture_blackmagic_screenshot_uses_window_bounds(monkeypatch: MonkeyPatch, tmp_path: Path) -> None:

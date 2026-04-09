@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+import json
 import plistlib
 import re
 import subprocess
 import sys
 import time
+from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Literal
 
 BLACKMAGIC_APP_NAME = "Blackmagic Disk Speed Test"
 BLACKMAGIC_APP_PATH = Path("/Applications/Blackmagic Disk Speed Test.app")
@@ -13,6 +16,23 @@ DEFAULT_BENCHMARK_DURATION_SECONDS = 60
 HARD_CODED_TARGET_VOLUME_PATH = Path("/Volumes/DUT")
 HARD_CODED_CLICK_REL_X = 0.50
 HARD_CODED_CLICK_REL_Y = 0.31
+WRITE_GAUGE_OCR_REGION = (0.05, 0.60, 0.40, 0.82)
+READ_GAUGE_OCR_REGION = (0.60, 0.60, 0.95, 0.82)
+OCR_EXPECTED_MIN_MB_S = 20.0
+OCR_EXPECTED_MAX_MB_S = 1500.0
+
+ValueSource = Literal["ocr", "manual", "none"]
+
+
+@dataclass
+class BlackmagicAutomationResult:
+    screenshot_path: Path
+    benchmark_ran_automatically: bool
+    app_launched_for_manual: bool
+    read_mb_s: float | None
+    write_mb_s: float | None
+    value_source: ValueSource
+    warnings: list[str] = field(default_factory=list)
 
 _SELECT_TARGET_DRIVE_MENU_SCRIPT = """
 tell application "{app_name}" to activate
@@ -141,9 +161,28 @@ guard let results = request.results else {
     exit(0)
 }
 
+var output: [[String: Any]] = []
 for observation in results {
     guard let candidate = observation.topCandidates(1).first else { continue }
-    print(candidate.string)
+    let bbox = observation.boundingBox
+    output.append([
+        "text": candidate.string,
+        "confidence": candidate.confidence,
+        "x": bbox.origin.x,
+        "y": bbox.origin.y,
+        "width": bbox.size.width,
+        "height": bbox.size.height
+    ])
+}
+
+do {
+    let data = try JSONSerialization.data(withJSONObject: output, options: [])
+    if let jsonText = String(data: data, encoding: .utf8) {
+        print(jsonText)
+    }
+} catch {
+    fputs("failed to encode OCR JSON output: \\(error.localizedDescription)\\n", stderr)
+    exit(6)
 }
 """
 
@@ -340,8 +379,97 @@ def _ocr_screenshot_text_via_swift(screenshot_path: Path) -> str:
     return (result.stdout or "").strip()
 
 
+def _parse_ocr_observations(raw_text: str) -> list[dict[str, object]]:
+    try:
+        parsed = json.loads(raw_text)
+    except json.JSONDecodeError:
+        return []
+    if not isinstance(parsed, list):
+        return []
+    return [item for item in parsed if isinstance(item, dict)]
+
+
+def _observation_in_region(observation: dict[str, object], region: tuple[float, float, float, float]) -> bool:
+    x_raw = observation.get("x")
+    y_raw = observation.get("y")
+    width_raw = observation.get("width")
+    height_raw = observation.get("height")
+    if not isinstance(x_raw, (int, float)) or not isinstance(y_raw, (int, float)):
+        return False
+    if not isinstance(width_raw, (int, float)) or not isinstance(height_raw, (int, float)):
+        return False
+    x_center = float(x_raw) + (float(width_raw) / 2.0)
+    y_center = float(y_raw) + (float(height_raw) / 2.0)
+    min_x, min_y, max_x, max_y = region
+    return min_x <= x_center <= max_x and min_y <= y_center <= max_y
+
+
+def _number_token(raw: str) -> str | None:
+    match = re.search(r"([0-9][0-9,]*(?:\.[0-9]+)?)", raw)
+    if match is None:
+        return None
+    return match.group(1)
+
+
+def _candidate_score(value: float, token: str, confidence: float) -> float:
+    score = confidence
+    if "." in token:
+        fractional = token.split(".", maxsplit=1)[1]
+        if fractional and any(char != "0" for char in fractional):
+            score += 0.12
+        else:
+            score += 0.04
+    if OCR_EXPECTED_MIN_MB_S <= value <= OCR_EXPECTED_MAX_MB_S:
+        score += 0.03
+    return score
+
+
+def _extract_numeric_from_region(
+    observations: list[dict[str, object]],
+    region: tuple[float, float, float, float],
+) -> float | None:
+    best_value: float | None = None
+    best_score = float("-inf")
+    for observation in observations:
+        if not _observation_in_region(observation, region):
+            continue
+        text = observation.get("text")
+        if not isinstance(text, str):
+            continue
+        token = _number_token(text)
+        if token is None:
+            continue
+        try:
+            value = float(token.replace(",", ""))
+        except ValueError:
+            continue
+        if value <= 0:
+            continue
+        confidence_raw = observation.get("confidence")
+        confidence = float(confidence_raw) if isinstance(confidence_raw, (int, float)) else 0.0
+        score = _candidate_score(value, token, confidence)
+        if score > best_score:
+            best_score = score
+            best_value = value
+    return best_value
+
+
 def extract_blackmagic_read_write_from_screenshot(screenshot_path: Path) -> tuple[float, float] | None:
     raw_text = _ocr_screenshot_text_via_swift(screenshot_path)
+    observations = _parse_ocr_observations(raw_text)
+    if observations:
+        write_value = _extract_numeric_from_region(observations, WRITE_GAUGE_OCR_REGION)
+        read_value = _extract_numeric_from_region(observations, READ_GAUGE_OCR_REGION)
+        if read_value is not None and write_value is not None:
+            return (read_value, write_value)
+
+        joined_text = "\n".join(
+            item["text"]
+            for item in observations
+            if isinstance(item.get("text"), str)
+        )
+        return parse_blackmagic_read_write_mb_s(joined_text)
+
     return parse_blackmagic_read_write_mb_s(raw_text)
 
 
