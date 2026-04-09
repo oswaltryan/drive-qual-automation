@@ -206,6 +206,9 @@ Choose a macOS automation strategy only after the manual path, tests, and platfo
 - Required permissions and any macOS-only dependency are documented before implementation.
 - The selected approach has a clear fallback to the manual-assisted flow.
 
+Decision note:
+- `MACOS_PHASE6_BLACKMAGIC_DECISION.md`
+
 ## Phase 7: Implement Optional Blackmagic GUI Automation
 
 ### Objective

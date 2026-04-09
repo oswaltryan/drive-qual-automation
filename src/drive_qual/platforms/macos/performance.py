@@ -12,6 +12,10 @@ from typing import Any
 from drive_qual.core.io_utils import mk_dir
 from drive_qual.core.report_session import load_report, resolve_folder_name, save_report
 from drive_qual.core.storage_paths import artifact_dir, localize_windows_path
+from drive_qual.platforms.macos.blackmagic import (
+    DEFAULT_BENCHMARK_DURATION_SECONDS,
+    run_blackmagic_benchmark_automation,
+)
 from drive_qual.platforms.performance_common import (
     load_part_number_and_report,
     resolve_report_dut_key,
@@ -27,6 +31,9 @@ BLACKMAGIC_APP_NAME = BLACKMAGIC_TOOL_NAME
 BLACKMAGIC_APP_PATH = Path("/Applications/Blackmagic Disk Speed Test.app")
 BLACKMAGIC_WINDOW_CAPTURE_INSET_X = 24
 BLACKMAGIC_WINDOW_CAPTURE_INSET_Y = 24
+BLACKMAGIC_AUTOMATION_MODE = "auto-with-manual-fallback"
+BLACKMAGIC_AUTOMATION_DURATION_SECONDS = DEFAULT_BENCHMARK_DURATION_SECONDS
+BLACKMAGIC_AUTOMATION_POST_STOP_SETTLE_SECONDS = 3
 BLACKMAGIC_WINDOW_BOUNDS_SCRIPT = """
 tell application "{app_name}" to activate
 tell application "System Events"
@@ -178,7 +185,33 @@ def _prompt_positive_mb_s(label: str) -> float:
         print("Enter a positive MB/s value greater than 0.")
 
 
-def _prompt_blackmagic_ready(dut_name: str, app_launched: bool) -> None:
+def _run_blackmagic_automation(dut_name: str) -> bool:
+    if BLACKMAGIC_AUTOMATION_MODE != "auto-with-manual-fallback":
+        return False
+
+    try:
+        run_blackmagic_benchmark_automation(
+            dut_name,
+            duration_seconds=BLACKMAGIC_AUTOMATION_DURATION_SECONDS,
+        )
+    except Exception as exc:
+        print(f"Automatic {BLACKMAGIC_TOOL_NAME} run failed: {exc}")
+        print("Falling back to manual-assisted benchmark entry.")
+        return False
+
+    print("Automatic Blackmagic benchmark run complete.")
+    return True
+
+
+def _prompt_blackmagic_ready(dut_name: str, *, app_launched: bool, benchmark_ran_automatically: bool) -> None:
+    if benchmark_ran_automatically:
+        print(
+            f"Automatic {BLACKMAGIC_TOOL_NAME} run completed for {dut_name}. "
+            f"Waiting {BLACKMAGIC_AUTOMATION_POST_STOP_SETTLE_SECONDS} seconds for UI to settle before screenshot..."
+        )
+        time.sleep(BLACKMAGIC_AUTOMATION_POST_STOP_SETTLE_SECONDS)
+        return
+
     launch_note = "The app was opened automatically." if app_launched else "Open the app manually before continuing."
     input(
         f"Run {BLACKMAGIC_TOOL_NAME} for {dut_name}. {launch_note} "
@@ -245,8 +278,15 @@ def run_software_step(part_number: str | None = None) -> None:  # noqa: PLR0915
         raise RuntimeError(f"Could not map performance results for DUT {dut_name!r}.")
 
     screenshot_path, json_path, csv_path = _blackmagic_artifact_paths(actual_pn, dut_name)
-    app_launched = _launch_blackmagic_app()
-    _prompt_blackmagic_ready(dut_name, app_launched)
+    benchmark_ran_automatically = _run_blackmagic_automation(dut_name)
+    app_launched = True
+    if not benchmark_ran_automatically:
+        app_launched = _launch_blackmagic_app()
+    _prompt_blackmagic_ready(
+        dut_name,
+        app_launched=app_launched,
+        benchmark_ran_automatically=benchmark_ran_automatically,
+    )
     _capture_blackmagic_screenshot(screenshot_path)
     read_mb_s = _prompt_positive_mb_s(f"macOS {tool_name} read for {dut_name}")
     write_mb_s = _prompt_positive_mb_s(f"macOS {tool_name} write for {dut_name}")

@@ -128,7 +128,7 @@ def test_run_software_step_records_macos_blackmagic_results(monkeypatch: MonkeyP
     screenshot_path = tmp_path / "Secure Key DT.png"
     json_path = tmp_path / "Secure Key DT.json"
     csv_path = tmp_path / "Secure Key DT.csv"
-    responses = iter(["", str(EXPECTED_MACOS_READ), str(EXPECTED_MACOS_WRITE)])
+    responses = iter([str(EXPECTED_MACOS_READ), str(EXPECTED_MACOS_WRITE)])
 
     monkeypatch.setattr(sys, "platform", "darwin")
     monkeypatch.setattr(macos_performance, "resolve_folder_name", lambda part_number=None: "69-420")
@@ -143,7 +143,8 @@ def test_run_software_step_records_macos_blackmagic_results(monkeypatch: MonkeyP
         "_blackmagic_artifact_paths",
         lambda part_number, dut_name: (screenshot_path, json_path, csv_path),
     )
-    monkeypatch.setattr(macos_performance, "_launch_blackmagic_app", lambda: True)
+    monkeypatch.setattr("drive_qual.platforms.macos.performance.time.sleep", lambda _seconds: None)
+    monkeypatch.setattr(macos_performance, "_run_blackmagic_automation", lambda dut_name: True)
     monkeypatch.setattr(macos_performance, "_capture_blackmagic_screenshot", lambda path: path.write_bytes(b"png"))
     monkeypatch.setattr("builtins.input", lambda prompt="": next(responses))
 
@@ -190,6 +191,7 @@ def test_run_software_step_rejects_invalid_macos_blackmagic_values(monkeypatch: 
         "_blackmagic_artifact_paths",
         lambda part_number, dut_name: (screenshot_path, json_path, csv_path),
     )
+    monkeypatch.setattr(macos_performance, "_run_blackmagic_automation", lambda dut_name: False)
     monkeypatch.setattr(macos_performance, "_launch_blackmagic_app", lambda: False)
     monkeypatch.setattr(macos_performance, "_capture_blackmagic_screenshot", lambda path: path.write_bytes(b"png"))
 
@@ -210,6 +212,23 @@ def test_run_software_step_rejects_invalid_macos_blackmagic_values(monkeypatch: 
     assert "Open the app manually before continuing" in prompts[0]
     assert "completed read/write results in MB/s" in prompts[0]
     assert "Screen Recording" in prompts[0]
+
+
+def test_prompt_blackmagic_ready_auto_mode_waits_without_user_input(monkeypatch: MonkeyPatch) -> None:
+    sleeps: list[int] = []
+    monkeypatch.setattr(
+        "builtins.input",
+        lambda _prompt="": (_ for _ in ()).throw(AssertionError("input should not be called in auto mode")),
+    )
+    monkeypatch.setattr("drive_qual.platforms.macos.performance.time.sleep", lambda seconds: sleeps.append(seconds))
+
+    macos_performance._prompt_blackmagic_ready(
+        "Padlock DT",
+        app_launched=True,
+        benchmark_ran_automatically=True,
+    )
+
+    assert sleeps == [macos_performance.BLACKMAGIC_AUTOMATION_POST_STOP_SETTLE_SECONDS]
 
 
 def test_capture_blackmagic_screenshot_uses_window_bounds(monkeypatch: MonkeyPatch, tmp_path: Path) -> None:
