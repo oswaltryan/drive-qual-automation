@@ -35,6 +35,7 @@ REPORT_OS_KEY_BY_ARTIFACT = {
     "macos": "macos",
     "linux": "linux",
 }
+CSV_ENCODING_CANDIDATES = ("utf-8", "utf-8-sig", "cp1252", "latin-1")
 DUT_ALIASES: dict[str, str] = {
     "secure key 3 0": "Padlock DT",
     "secure key 3": "Padlock DT",
@@ -98,9 +99,20 @@ def _parse_value_with_unit(text: str) -> float | None:
 
 def _measurement_rows(csv_path: Path) -> list[dict[str, str]]:
     try:
-        lines = csv_path.read_text(encoding="utf-8").splitlines()
+        raw = csv_path.read_bytes()
     except OSError as exc:
         print(f"Failed to read measurements CSV {_display_path(csv_path)}: {exc}")
+        return []
+
+    lines: list[str] | None = None
+    for encoding in CSV_ENCODING_CANDIDATES:
+        try:
+            lines = raw.decode(encoding).splitlines()
+            break
+        except UnicodeDecodeError:
+            continue
+    if lines is None:
+        print(f"Failed to decode measurements CSV {_display_path(csv_path)} with supported encodings.")
         return []
 
     header_index = next((i for i, line in enumerate(lines) if line.startswith("Name,")), None)

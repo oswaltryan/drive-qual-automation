@@ -5,7 +5,11 @@ import shutil
 import sys
 from pathlib import PureWindowsPath
 
-FIO_NOT_FOUND_MESSAGE = "fio not found in PATH. Download from https://bsdio.com/fio/ and add to system PATH"
+FIO_NOT_FOUND_MESSAGE = (
+    "fio not found. Install fio and ensure it is on PATH "
+    "(macOS: `brew install fio`; Linux: use your package manager; "
+    "Windows: https://bsdio.com/fio/)."
+)
 DISKSPD_NOT_FOUND_MESSAGE = "diskspd not found in PATH. Download it and add to system PATH"
 DRIVE_TOKEN_LEN = 1
 DRIVE_TOKEN_WITH_COLON_LEN = 2
@@ -20,10 +24,21 @@ def _resolve_tool(*candidates: str) -> str | None:
 
 
 def _require_fio() -> str:
-    tool = _resolve_tool("fio.exe", "tools/fio.exe", "fio")
+    tool = _resolve_tool(
+        "fio.exe",
+        "tools/fio.exe",
+        "tools/fio",
+        "fio",
+        "/opt/homebrew/bin/fio",
+        "/usr/local/bin/fio",
+    )
     if tool is None:
         raise FileNotFoundError(FIO_NOT_FOUND_MESSAGE)
     return tool
+
+
+def require_fio() -> str:
+    return _require_fio()
 
 
 def _require_diskspd() -> str:

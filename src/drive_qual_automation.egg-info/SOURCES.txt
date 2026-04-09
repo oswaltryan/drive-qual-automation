@@ -12,7 +12,9 @@ src/drive_qual/cli/legacy.py
 src/drive_qual/cli/post_process_measurements.py
 src/drive_qual/cli/report.py
 src/drive_qual/core/__init__.py
+src/drive_qual/core/config.py
 src/drive_qual/core/io_utils.py
+src/drive_qual/core/native_disk_ops.py
 src/drive_qual/core/power_measurements.py
 src/drive_qual/core/report_session.py
 src/drive_qual/core/storage_paths.py
@@ -23,6 +25,13 @@ src/drive_qual/integrations/instruments/__init__.py
 src/drive_qual/integrations/instruments/tektronix.py
 src/drive_qual/integrations/instruments/watlow.py
 src/drive_qual/platforms/__init__.py
+src/drive_qual/platforms/performance.py
+src/drive_qual/platforms/performance_common.py
+src/drive_qual/platforms/power_measurements.py
+src/drive_qual/platforms/linux/__init__.py
+src/drive_qual/platforms/linux/performance.py
+src/drive_qual/platforms/macos/__init__.py
+src/drive_qual/platforms/macos/performance.py
 src/drive_qual/platforms/windows/__init__.py
 src/drive_qual/platforms/windows/performance.py
 src/drive_qual/platforms/windows/power_measurements.py
@@ -39,7 +48,11 @@ src/drive_qual_automation.egg-info/requires.txt
 src/drive_qual_automation.egg-info/top_level.txt
 tests/test_apricorn_usb_cli.py
 tests/test_benchmark_paths.py
+tests/test_config.py
+tests/test_native_disk_ops.py
+tests/test_performance_step.py
 tests/test_power_measurements_paths.py
 tests/test_power_measurements_step.py
 tests/test_report_workflow.py
 tests/test_smoke.py
+tests/test_workflow_metadata_reuse.py

@@ -6,6 +6,7 @@ import sys
 from types import ModuleType
 from typing import Any
 
+import pytest
 from _pytest.monkeypatch import MonkeyPatch
 
 EXPECTED_STEP_ORDER = ("drive_info", "equipment", "power_measurements", "performance")
@@ -14,6 +15,7 @@ EXPECTED_STEP_ORDER = ("drive_info", "equipment", "power_measurements", "perform
 def test_report_workflow_import_does_not_import_software_step(monkeypatch: MonkeyPatch) -> None:
     sys.modules.pop("drive_qual.workflows.report", None)
     sys.modules.pop("drive_qual.platforms.windows.performance", None)
+    sys.modules.pop("drive_qual.platforms.windows.power_measurements", None)
 
     real_import = builtins.__import__
 
@@ -24,8 +26,11 @@ def test_report_workflow_import_does_not_import_software_step(monkeypatch: Monke
         fromlist: tuple[str, ...] = (),
         level: int = 0,
     ) -> Any:
-        if name == "drive_qual.platforms.windows.performance":
-            raise AssertionError("workflows.report imported platforms.windows.performance eagerly")
+        if name in {
+            "drive_qual.platforms.windows.performance",
+            "drive_qual.platforms.windows.power_measurements",
+        }:
+            raise AssertionError(f"workflows.report imported {name} eagerly")
         return real_import(name, globals, locals, fromlist, level)
 
     monkeypatch.setattr(builtins, "__import__", guarded_import)
@@ -53,8 +58,69 @@ def test_run_report_workflow_imports_performance_step_lazily(monkeypatch: Monkey
     assert calls == ["69-420"]
 
 
+def test_run_report_workflow_imports_power_measurements_step_lazily(monkeypatch: MonkeyPatch) -> None:
+    sys.modules.pop("drive_qual.workflows.report", None)
+    module = importlib.import_module("drive_qual.workflows.report")
+
+    calls: list[str] = []
+
+    class FakePowerMeasurementsModule(ModuleType):
+        def run_power_measurements_step(self) -> None:
+            calls.append("called")
+
+    fake_power_measurements = FakePowerMeasurementsModule("drive_qual.platforms.power_measurements")
+    monkeypatch.setitem(sys.modules, "drive_qual.platforms.power_measurements", fake_power_measurements)
+
+    module.run_report_workflow(["power_measurements"])
+
+    assert calls == ["called"]
+
+
 def test_default_steps_include_all_workflow_steps() -> None:
     sys.modules.pop("drive_qual.workflows.report", None)
     module = importlib.import_module("drive_qual.workflows.report")
 
     assert module._default_steps() == EXPECTED_STEP_ORDER
+
+
+def test_run_report_workflow_rejects_steps_and_profile() -> None:
+    sys.modules.pop("drive_qual.workflows.report", None)
+    module = importlib.import_module("drive_qual.workflows.report")
+
+    with pytest.raises(ValueError, match="Use either --steps or --profile"):
+        module.run_report_workflow(["performance"], profile="core_perf_v1")
+
+
+def test_run_report_workflow_delegates_profile_execution_to_orchestrator(monkeypatch: MonkeyPatch) -> None:
+    sys.modules.pop("drive_qual.workflows.report", None)
+    module = importlib.import_module("drive_qual.workflows.report")
+
+    captured: dict[str, Any] = {}
+
+    def fake_execute_orchestrated_workflow(
+        *,
+        selected_steps: tuple[str, ...],
+        step_runners: dict[str, Any],
+        profile: str | None,
+        part_number: str | None,
+        resume: bool,
+    ) -> None:
+        captured["selected_steps"] = selected_steps
+        captured["step_runner_keys"] = tuple(step_runners)
+        captured["profile"] = profile
+        captured["part_number"] = part_number
+        captured["resume"] = resume
+
+    monkeypatch.setattr(module, "execute_orchestrated_workflow", fake_execute_orchestrated_workflow)
+
+    module.run_report_workflow(
+        part_number="69-420",
+        profile="core_perf_v1",
+        resume=True,
+    )
+
+    assert captured["selected_steps"] == EXPECTED_STEP_ORDER
+    assert captured["step_runner_keys"] == EXPECTED_STEP_ORDER
+    assert captured["profile"] == "core_perf_v1"
+    assert captured["part_number"] == "69-420"
+    assert captured["resume"] is True

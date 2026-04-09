@@ -83,6 +83,24 @@ def test_extract_power_values_from_max_io_csv() -> None:
     shutil.rmtree(workspace_tmp)
 
 
+def test_extract_power_values_from_max_io_csv_cp1252() -> None:
+    workspace_tmp = Path("tests/.tmp/test_extract_power_values_cp1252")
+    if workspace_tmp.exists():
+        shutil.rmtree(workspace_tmp)
+    csv_path = workspace_tmp / "Z" / "69-420" / "Windows" / "Max IO" / "Secure Key 3.0.csv"
+    csv_path.parent.mkdir(parents=True)
+
+    lines = TEK_CSV_LINES.copy()
+    lines[1] = "Date-Time,2026-03-06T11:25:30-08:00,Ambient 25°C"
+    csv_path.write_bytes("\n".join(lines).encode("cp1252"))
+
+    values = power_measurements.extract_power_values_from_csv(str(csv_path))
+
+    assert values["max_read_write_current"] == EXPECTED_MAX_RW_CURRENT
+    assert values["rms_read_write_current"] == EXPECTED_RMS_RW_CURRENT
+    shutil.rmtree(workspace_tmp)
+
+
 def test_resolve_dut_key_uses_business_name_aliases() -> None:
     power: dict[str, dict[str, Any]] = {
         "Padlock DT": {},

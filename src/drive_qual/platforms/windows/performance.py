@@ -10,9 +10,20 @@ from pathlib import Path
 from typing import Any
 
 from drive_qual.core.io_utils import mk_dir
-from drive_qual.core.report_session import load_report, report_path_for, resolve_folder_name, save_report
+from drive_qual.core.report_session import load_report, resolve_folder_name, save_report
 from drive_qual.core.storage_paths import artifact_dir, localize_windows_path
-from drive_qual.integrations.apricorn.usb_cli import ApricornDevice, find_apricorn_device
+from drive_qual.platforms.performance_common import (
+    find_report_dut_key as _find_report_dut_key,
+)
+from drive_qual.platforms.performance_common import (
+    load_part_number_and_report,
+    software_entries_for_host,
+    sync_performance_section,
+    wait_for_device_present,
+)
+from drive_qual.platforms.performance_common import (
+    to_float as _to_float,
+)
 
 CRYSTAL_DISK_INFO_PATH = Path("C:/Program Files/CrystalDiskInfo/DiskInfo64.exe")
 CRYSTAL_DISK_MARK_PATH = Path("C:/Program Files/CrystalDiskMark8/DiskMark64.exe")
@@ -20,16 +31,6 @@ ATTO_PATH = Path("C:/Program Files (x86)/ATTO Technology/Disk Benchmark/ATTODisk
 
 ATTO_TIMEOUT = 1800
 CDM_TIMEOUT = 1200
-CURRENT_HOST_BY_PLATFORM = {
-    "windows": "windows_host",
-    "linux": "linux_host",
-    "macos": "macos_host",
-}
-CURRENT_OS_BY_HOST = {
-    "windows_host": "Windows",
-    "linux_host": "Linux",
-    "macos_host": "macOS",
-}
 
 
 def _pywinauto_module() -> Any:
@@ -44,83 +45,6 @@ def _pywinauto_application_class() -> Any:
 
 def _pywinauto_desktop_class() -> Any:
     return _pywinauto_module().Desktop
-
-
-def _current_host_key() -> str:
-    if sys.platform == "darwin":
-        return CURRENT_HOST_BY_PLATFORM["macos"]
-    return CURRENT_HOST_BY_PLATFORM["windows"]
-
-
-def _current_os_name() -> str:
-    return CURRENT_OS_BY_HOST[_current_host_key()]
-
-
-def _software_entries_for_current_host(equipment: dict[str, Any]) -> list[dict[str, Any]]:
-    host_data = equipment.get(_current_host_key(), {})
-    if not isinstance(host_data, dict):
-        return []
-    software = host_data.get("software", [])
-    if not isinstance(software, list):
-        return []
-    return [entry for entry in software if isinstance(entry, dict)]
-
-
-def _resolve_report_dut_key(performance: dict[str, Any], dut_name: str) -> str | None:
-    report_dut_key = _find_report_dut_key(performance, dut_name)
-    if report_dut_key is not None:
-        return report_dut_key
-    if len(performance) == 1:
-        return next(iter(performance))
-    return None
-
-
-def _prompt_manual_float(label: str, current: float | None) -> float | None:
-    current_text = "" if current is None else str(current)
-    prompt = f"{label} [{current_text}]: " if current_text else f"{label}: "
-    while True:
-        response = input(prompt).strip()
-        if not response:
-            return current
-        value = _to_float(response)
-        if value is not None:
-            return value
-        print("Enter a numeric value in MB/s or leave the field blank to keep the current value.")
-
-
-def _run_manual_performance_flow(report_path: Path, data: dict[str, Any], equipment: dict[str, Any]) -> None:
-    software_entries = _software_entries_for_current_host(equipment)
-    if not software_entries:
-        print(f"No performance software configured for {_current_os_name()}.")
-        return
-
-    performance = data.setdefault("performance", {})
-    if not isinstance(performance, dict):
-        raise ValueError("Missing or invalid 'performance' section in report.")
-
-    dut_info = _wait_for_device_present("Connect the Apricorn device to continue...")
-    dut_name = (dut_info.iProduct or "unknown_device").strip()
-    report_dut_key = _resolve_report_dut_key(performance, dut_name)
-    if report_dut_key is None:
-        raise RuntimeError(f"Could not map performance results for DUT {dut_name!r}.")
-
-    os_name = _current_os_name()
-    os_perf = performance.setdefault(report_dut_key, {"Windows": {}, "Linux": {}, "macOS": {}}).setdefault(os_name, {})
-    for software in software_entries:
-        name = software.get("name")
-        if not isinstance(name, str) or not name.strip():
-            continue
-        entry = os_perf.setdefault(name, {"read": None, "write": None})
-        if not isinstance(entry, dict):
-            entry = {"read": None, "write": None}
-            os_perf[name] = entry
-        current_read = entry.get("read") if isinstance(entry.get("read"), (int, float)) else None
-        current_write = entry.get("write") if isinstance(entry.get("write"), (int, float)) else None
-        entry["read"] = _prompt_manual_float(f"{os_name} {name} read MB/s for {dut_name}", current_read)
-        entry["write"] = _prompt_manual_float(f"{os_name} {name} write MB/s for {dut_name}", current_write)
-
-    save_report(report_path, data)
-    print(f"Updated {os_name} performance in {report_path}")
 
 
 def _find_drive_button(main_window: Any, drive_letter: str) -> Any | None:
@@ -169,13 +93,6 @@ def _capture_window(main_window: Any, part_number: str, dut_name: str, tool_name
     print(f"Screenshot saved to: {ss_path}")
 
 
-def _find_report_dut_key(performance: dict[str, Any], dut_name: str) -> str | None:
-    for k in performance:
-        if k.lower() in dut_name.lower() or dut_name.lower() in k.lower():
-            return k
-    return None
-
-
 def _launch_or_connect_app(app_path: Path, exe_name: str, app_name: str) -> Any:
     """Helper to connect to an existing app or launch it."""
     try:
@@ -187,17 +104,6 @@ def _launch_or_connect_app(app_path: Path, exe_name: str, app_name: str) -> Any:
         app = _pywinauto_application_class()(backend="uia").start(str(app_path))
         time.sleep(5)
         return app
-
-
-def _to_float(val: str | None) -> float | None:
-    """Safely convert a string to a float, returning None if conversion fails."""
-    if val is None:
-        return None
-    try:
-        clean_val = "".join(c for k, c in enumerate(val) if c.isdigit() or c == "." or (c == "-" and k == 0))
-        return float(clean_val)
-    except (ValueError, TypeError):
-        return None
 
 
 def _update_cdi_json(report_path: Path, data: dict[str, Any], dut_name: str, val: bool | None) -> None:
@@ -447,55 +353,9 @@ def automate_crystal_disk_mark(
         return False
 
 
-def _wait_for_device_present(prompt: str) -> ApricornDevice:
-    """Wait for an Apricorn device to be connected and return it."""
-    dut = find_apricorn_device()
-    if dut is None:
-        print(f"\n{prompt}")
-    while dut is None:
-        time.sleep(1)
-        dut = find_apricorn_device()
-    return dut
-
-
-def _sync_performance_section(data: dict[str, Any], equipment: dict[str, Any]) -> None:
-    """Re-sync performance section with current equipment software."""
-    performance = data.setdefault("performance", {})
-    duts = equipment.get("dut", [])
-    host_map = {"windows_host": "Windows", "linux_host": "Linux", "macos_host": "macOS"}
-    for dut in duts:
-        perf_dut = performance.setdefault(dut, {"Windows": {}, "Linux": {}, "macOS": {}})
-        for host_key, os_key in host_map.items():
-            host_data = equipment.get(host_key, {})
-            sw_list = host_data.get("software", [])
-            if isinstance(sw_list, list):
-                os_perf = perf_dut.setdefault(os_key, {})
-                for sw in sw_list:
-                    if isinstance(sw, dict) and sw.get("name"):
-                        name = sw.get("name")
-                        if name == "CrystalDiskInfo":
-                            cdi_dict = os_perf.setdefault(name, {"screenshot": None})
-                            cdi_dict.pop("read", None)
-                            cdi_dict.pop("write", None)
-                        else:
-                            os_perf.setdefault(name, {"read": None, "write": None})
-
-
-def _load_part_number_and_report(folder_name: str) -> tuple[str, Path]:
-    report_path = report_path_for(folder_name)
-    data = load_report(report_path)
-    drive_info = data.get("drive_info")
-    part_number = folder_name
-    if isinstance(drive_info, dict):
-        raw = drive_info.get("apricorn_part_number")
-        if isinstance(raw, str) and raw.strip():
-            part_number = raw.strip()
-    return part_number, report_path
-
-
 def _get_software_flags(equipment: dict[str, Any]) -> tuple[bool, bool, bool]:
     """Determine which software automations to run for the current host."""
-    names = {entry.get("name") for entry in _software_entries_for_current_host(equipment)}
+    names = {entry.get("name") for entry in software_entries_for_host(equipment, "windows_host")}
     return (
         "CrystalDiskInfo" in names,
         "CrystalDiskMark" in names,
@@ -504,34 +364,36 @@ def _get_software_flags(equipment: dict[str, Any]) -> tuple[bool, bool, bool]:
 
 
 def run_software_step(part_number: str | None = None) -> None:
+    if sys.platform != "win32":
+        raise RuntimeError("Windows performance step can only run on Windows.")
+
     folder_name = resolve_folder_name(part_number)
-    actual_pn, report_path = _load_part_number_and_report(folder_name)
+    actual_pn, report_path = load_part_number_and_report(folder_name)
     data = load_report(report_path)
     equipment = data.get("equipment")
     if not isinstance(equipment, dict):
         raise ValueError("Missing or invalid 'equipment' section.")
     has_cdi, has_cdm, has_atto = _get_software_flags(equipment)
-    _sync_performance_section(data, equipment)
+    sync_performance_section(data, equipment)
     save_report(report_path, data)
     print(f"\nSync complete. Updated report at {report_path}")
 
-    if sys.platform == "win32":
-        if has_cdi or has_cdm or has_atto:
-            dut_info = _wait_for_device_present("Connect the Apricorn device to continue...")
-            if dut_info and dut_info.driveLetter:
-                letter = dut_info.driveLetter.strip().replace(":", "").replace("\\", "")
-                dut_name = (dut_info.iProduct or "unknown_device").strip()
-                if has_cdi:
-                    automate_crystal_disk_info(letter, actual_pn, dut_name, report_path, data)
-                if has_cdm:
-                    automate_crystal_disk_mark(letter, actual_pn, dut_name, report_path, data)
-                if has_atto:
-                    automate_atto(letter, actual_pn, dut_name, report_path, data)
-            else:
-                raise RuntimeError("Could not determine drive letter for the connected device.")
+    if not (has_cdi or has_cdm or has_atto):
+        print("No performance software configured for Windows.")
         return
 
-    _run_manual_performance_flow(report_path, data, equipment)
+    dut_info = wait_for_device_present("Connect the Apricorn device to continue...")
+    if dut_info.driveLetter is None:
+        raise RuntimeError("Could not determine drive letter for the connected device.")
+
+    letter = dut_info.driveLetter.strip().replace(":", "").replace("\\", "")
+    dut_name = (dut_info.iProduct or "unknown_device").strip()
+    if has_cdi:
+        automate_crystal_disk_info(letter, actual_pn, dut_name, report_path, data)
+    if has_cdm:
+        automate_crystal_disk_mark(letter, actual_pn, dut_name, report_path, data)
+    if has_atto:
+        automate_atto(letter, actual_pn, dut_name, report_path, data)
 
 
 if __name__ == "__main__":

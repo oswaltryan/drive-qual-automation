@@ -13,9 +13,9 @@ async def run_fio(target_dir: str, test_type: str, size_mb: int, loops: int) -> 
     test_file = (
         "benchmark_file.dat" if sys.platform == "win32" else benchmark_file_path(target_dir, "benchmark_file.dat")
     )
-    engine: str
+    engine: str | None
     if sys.platform == "darwin":
-        engine = ""
+        engine = None
     elif sys.platform == "linux":
         engine = "libaio"
     elif sys.platform == "win32":
@@ -32,8 +32,6 @@ async def run_fio(target_dir: str, test_type: str, size_mb: int, loops: int) -> 
         f"{size_mb}M",
         "--rw",
         test_type,
-        "--ioengine",
-        engine,
         "--buffered",
         "0",
         "--bs",
@@ -45,6 +43,8 @@ async def run_fio(target_dir: str, test_type: str, size_mb: int, loops: int) -> 
         "--output-format",
         "normal",
     ]
+    if engine is not None:
+        cmd.extend(["--ioengine", engine])
 
     print(f"\nStarting {test_type} benchmark ({loops} passes, {size_mb}MB file)")
 

@@ -3,6 +3,12 @@ from __future__ import annotations
 import argparse
 from collections.abc import Callable
 
+from drive_qual.workflows.orchestrator import (
+    WORKFLOW_PROFILES,
+    execute_orchestrated_workflow,
+    resolve_selected_steps,
+)
+
 STEP_ORDER: tuple[str, ...] = ("drive_info", "equipment", "power_measurements", "performance")
 StepRunner = Callable[[], None]
 
@@ -24,7 +30,7 @@ def _run_equipment_step(part_number: str | None = None, scope_profile: str | Non
 
 
 def _run_power_measurements_step() -> None:
-    from drive_qual.platforms.windows.power_measurements import run_power_measurements_step
+    from drive_qual.platforms.power_measurements import run_power_measurements_step
 
     run_power_measurements_step()
 
@@ -40,8 +46,14 @@ def run_report_workflow(
     *,
     part_number: str | None = None,
     scope_profile: str | None = None,
+    profile: str | None = None,
+    resume: bool = False,
 ) -> None:
-    selected = steps or list(_default_steps())
+    selected = resolve_selected_steps(
+        explicit_steps=steps,
+        default_steps=_default_steps(),
+        profile=profile,
+    )
     step_runners: dict[str, StepRunner] = {
         "drive_info": _run_drive_info_step,
         "equipment": lambda: _run_equipment_step(part_number=part_number, scope_profile=scope_profile),
@@ -49,10 +61,15 @@ def run_report_workflow(
         "performance": lambda: _run_performance_step(part_number=part_number),
     }
     for step in selected:
-        runner = step_runners.get(step)
-        if runner is None:
+        if step not in step_runners:
             raise ValueError(f"Unknown workflow step: {step}")
-        runner()
+    execute_orchestrated_workflow(
+        selected_steps=selected,
+        step_runners=step_runners,
+        profile=profile,
+        part_number=part_number,
+        resume=resume,
+    )
 
 
 def _parse_steps(raw: str) -> list[str]:
@@ -73,6 +90,20 @@ def run_report_workflow_cli() -> None:
         action="store_true",
         help="List available steps and exit.",
     )
+    parser.add_argument(
+        "--profile",
+        help="Run a named workflow profile (for example: core_perf_v1).",
+    )
+    parser.add_argument(
+        "--list-profiles",
+        action="store_true",
+        help="List available workflow profiles and exit.",
+    )
+    parser.add_argument(
+        "--resume",
+        action="store_true",
+        help="Resume a prior profiled run from workflow_run_manifest.json.",
+    )
     parser.add_argument("--part-number", help="Apricorn part number for selecting the report folder.")
     parser.add_argument("--scope-profile", help="Apply a scope/probe profile (e.g., tektronix, rigol).")
     args = parser.parse_args()
@@ -83,8 +114,20 @@ def run_report_workflow_cli() -> None:
             print(f"  - {step}")
         return
 
-    steps = _parse_steps(args.steps) if args.steps else list(_default_steps())
-    run_report_workflow(steps, part_number=args.part_number, scope_profile=args.scope_profile)
+    if args.list_profiles:
+        print("Available profiles:")
+        for profile_name in sorted(WORKFLOW_PROFILES):
+            print(f"  - {profile_name}")
+        return
+
+    steps = _parse_steps(args.steps) if args.steps else None
+    run_report_workflow(
+        steps,
+        part_number=args.part_number,
+        scope_profile=args.scope_profile,
+        profile=args.profile,
+        resume=args.resume,
+    )
 
 
 if __name__ == "__main__":

@@ -113,7 +113,7 @@ def initialize_tracker(project_path: Path) -> None:
 
     default_status = {
         "Linux": {"Disks Benchmark Screenshot": False, "In-Rush PDF": False, "Max I/O PDF": False},
-        "macOS": {"Blackmagic Benchmark Screenshot": False, "In-Rush PDF": False, "Max I/O PDF": False},
+        "macOS": {"Blackmagic Disk Speed Test Screenshot": False, "In-Rush PDF": False, "Max I/O PDF": False},
         "Windows": {
             "ATTO Benchmark Screenshot": False,
             "CrystalDiskInfo Screenshot": False,

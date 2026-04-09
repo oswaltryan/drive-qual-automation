@@ -172,3 +172,168 @@ def test_linux_prepare_for_repartition_clears_partition_signatures(monkeypatch) 
         ["sudo", "wipefs", "--all", "--force", "/dev/sda"],
         ["sudo", "udevadm", "settle"],
     ]
+
+
+def test_prepare_macos_device_creates_no_index_marker(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    device = ApricornDevice(iProduct="Padlock 3.0", iSerial="ABC123")
+    marker_calls: list[str] = []
+
+    monkeypatch.setattr(
+        native_disk_ops,
+        "_select_macos_candidate",
+        lambda device: native_disk_ops.NativeDiskCandidate("/dev/disk4", "disk"),
+    )
+    monkeypatch.setattr(native_disk_ops, "_macos_wait_for_partition", lambda disk_path: "/dev/disk4s2")
+    monkeypatch.setattr(native_disk_ops, "_macos_wait_for_mount", lambda partition_path: "/Volumes/DUT")
+    monkeypatch.setattr(
+        native_disk_ops, "_run_command", lambda command, **kwargs: type("Result", (), {"returncode": 0})()
+    )
+    monkeypatch.setattr(
+        native_disk_ops,
+        "_mark_macos_volume_no_index",
+        lambda mount_point: marker_calls.append(mount_point),
+    )
+
+    prepared = native_disk_ops._prepare_macos_device(device)
+
+    assert prepared == native_disk_ops.PreparedBenchmarkTarget("/dev/disk4", "/dev/disk4s2", "/Volumes/DUT")
+    assert marker_calls == ["/Volumes/DUT"]
+
+
+def test_mark_macos_volume_no_index_runs_touch_command(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    seen: list[tuple[list[str], dict[str, Any]]] = []
+
+    def fake_run_command(command: list[str], **kwargs: Any) -> object:
+        seen.append((command, kwargs))
+        return type("Result", (), {"returncode": 0})()
+
+    monkeypatch.setattr(native_disk_ops, "_run_command", fake_run_command)
+
+    native_disk_ops._mark_macos_volume_no_index("/Volumes/DUT")
+
+    assert seen == [
+        (
+            ["touch", "/Volumes/DUT/.metadata_never_index"],
+            {"check": False, "capture_output": True},
+        )
+    ]
+
+
+def test_macos_data_partition_path_prefers_dut_named_volume() -> None:
+    entry = {
+        "Partitions": [
+            {"DeviceIdentifier": "disk4s1", "Content": "EFI"},
+            {"DeviceIdentifier": "disk4s2", "Content": "Microsoft Basic Data", "VolumeName": "DUT"},
+        ]
+    }
+
+    assert native_disk_ops._macos_data_partition_path(entry) == "/dev/disk4s2"
+
+
+def test_macos_data_partition_path_falls_back_to_first_non_efi() -> None:
+    entry = {
+        "Partitions": [
+            {"DeviceIdentifier": "disk4s1", "Content": "EFI"},
+            {"DeviceIdentifier": "disk4s2", "Content": "Microsoft Basic Data"},
+        ]
+    }
+
+    assert native_disk_ops._macos_data_partition_path(entry) == "/dev/disk4s2"
+
+
+def test_macos_wait_for_partition_skips_efi_partition(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    monkeypatch.setattr(
+        native_disk_ops,
+        "_macos_disk_entry",
+        lambda disk_path: {
+            "Partitions": [
+                {"DeviceIdentifier": "disk4s1", "Content": "EFI"},
+                {"DeviceIdentifier": "disk4s2", "Content": "Microsoft Basic Data", "VolumeName": "DUT"},
+            ]
+        },
+    )
+    monkeypatch.setattr("drive_qual.core.native_disk_ops.time.sleep", lambda _: None)
+
+    assert native_disk_ops._macos_wait_for_partition("/dev/disk4") == "/dev/disk4s2"
+
+
+def test_macos_wait_for_mount_attempts_mount_when_not_mounted(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    infos = iter(
+        [
+            {"MountPoint": None},
+            {"MountPoint": "/Volumes/DUT"},
+        ]
+    )
+    commands: list[list[str]] = []
+
+    monkeypatch.setattr(native_disk_ops, "_macos_disk_info", lambda partition_path: next(infos))
+    monkeypatch.setattr("drive_qual.core.native_disk_ops.time.sleep", lambda _: None)
+
+    def fake_run_command(command: list[str], **kwargs: Any) -> object:
+        commands.append(command)
+        return type("Result", (), {"returncode": 0, "stdout": "", "stderr": ""})()
+
+    monkeypatch.setattr(native_disk_ops, "_run_command", fake_run_command)
+
+    mount_point = native_disk_ops._macos_wait_for_mount("/dev/disk4s2")
+
+    assert mount_point == "/Volumes/DUT"
+    assert commands == [["diskutil", "mount", "/dev/disk4s2"]]
+
+
+def test_safe_remove_macos_device_uses_force_unmount_fallback(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    device = ApricornDevice(iProduct="Padlock 3.0", iSerial="ABC123")
+    commands: list[list[str]] = []
+    kwargs_seen: list[dict[str, Any]] = []
+
+    monkeypatch.setattr(
+        native_disk_ops,
+        "_select_macos_candidate",
+        lambda device: native_disk_ops.NativeDiskCandidate("/dev/disk4", "disk"),
+    )
+
+    def fake_run_command(command: list[str], **kwargs: Any) -> object:
+        commands.append(command)
+        kwargs_seen.append(kwargs)
+        if command[:2] == ["diskutil", "eject"]:
+            returncode = 0 if len([c for c in commands if c[:2] == ["diskutil", "eject"]]) > 1 else 1
+            return type("Result", (), {"returncode": returncode, "stdout": "mds_stores", "stderr": "mds_stores"})()
+        return type("Result", (), {"returncode": 0, "stdout": "", "stderr": ""})()
+
+    monkeypatch.setattr(native_disk_ops, "_run_command", fake_run_command)
+
+    assert native_disk_ops._safe_remove_macos_device(device) is True
+    assert commands == [
+        ["diskutil", "eject", "/dev/disk4"],
+        ["diskutil", "unmountDisk", "force", "/dev/disk4"],
+        ["diskutil", "eject", "/dev/disk4"],
+    ]
+    assert kwargs_seen == [
+        {"check": False, "capture_output": True},
+        {"check": False, "capture_output": True},
+        {"check": False, "capture_output": True},
+    ]
+
+
+def test_safe_remove_macos_device_returns_true_when_disk_already_missing(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    device = ApricornDevice(iProduct="Padlock 3.0", iSerial="ABC123")
+    commands: list[list[str]] = []
+
+    monkeypatch.setattr(
+        native_disk_ops,
+        "_select_macos_candidate",
+        lambda device: native_disk_ops.NativeDiskCandidate("/dev/disk4", "disk"),
+    )
+
+    def fake_run_command(command: list[str], **kwargs: Any) -> object:
+        commands.append(command)
+        return type(
+            "Result",
+            (),
+            {"returncode": 1, "stdout": "", "stderr": "Failed to find disk /dev/disk4"},
+        )()
+
+    monkeypatch.setattr(native_disk_ops, "_run_command", fake_run_command)
+
+    assert native_disk_ops._safe_remove_macos_device(device) is True
+    assert commands == [["diskutil", "eject", "/dev/disk4"]]

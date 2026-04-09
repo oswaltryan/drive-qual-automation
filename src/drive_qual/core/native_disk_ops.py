@@ -24,6 +24,7 @@ LINUX_VOLUME_LABEL = "DUT"
 MACOS_FILESYSTEM = "ExFAT"
 MACOS_PARTITION_TABLE = "GPTFormat"
 MACOS_VOLUME_LABEL = "DUT"
+MACOS_NO_INDEX_MARKER = ".metadata_never_index"
 POLL_ATTEMPTS = 20
 POLL_DELAY_SECONDS = 0.5
 
@@ -86,6 +87,7 @@ def _prepare_macos_device(device: ApricornDevice) -> PreparedBenchmarkTarget:
     )
     partition_path = _macos_wait_for_partition(candidate.disk_path)
     mount_point = _macos_wait_for_mount(partition_path)
+    _mark_macos_volume_no_index(mount_point)
     return PreparedBenchmarkTarget(candidate.disk_path, partition_path, mount_point)
 
 
@@ -96,10 +98,52 @@ def _safe_remove_linux_device(device: ApricornDevice) -> bool:
     return result.returncode == 0
 
 
+def _mark_macos_volume_no_index(mount_point: str) -> None:
+    marker_path = os.path.join(mount_point, MACOS_NO_INDEX_MARKER)
+    result = _run_command(["touch", marker_path], check=False, capture_output=True)
+    if result.returncode != 0:
+        print(f"Warning: could not create {MACOS_NO_INDEX_MARKER} on {mount_point}.")
+
+
 def _safe_remove_macos_device(device: ApricornDevice) -> bool:
     candidate = _select_macos_candidate(device)
-    result = _run_command(["diskutil", "eject", candidate.disk_path], check=False)
-    return result.returncode == 0
+    eject_result = _run_command(
+        ["diskutil", "eject", candidate.disk_path],
+        check=False,
+        capture_output=True,
+    )
+    if eject_result.returncode == 0 or _macos_disk_missing_from_result(eject_result):
+        return True
+
+    # Retry with a forced unmount in case Spotlight/Finder is still holding the volume.
+    output = _normalized(f"{eject_result.stdout or ''}\n{eject_result.stderr or ''}")
+    if "mds_stores" in output:
+        print(f"Spotlight lock detected on {candidate.disk_path}; forcing unmount before removal.")
+    _run_command(
+        ["diskutil", "unmountDisk", "force", candidate.disk_path],
+        check=False,
+        capture_output=True,
+    )
+
+    retry_eject = _run_command(
+        ["diskutil", "eject", candidate.disk_path],
+        check=False,
+        capture_output=True,
+    )
+    if retry_eject.returncode == 0 or _macos_disk_missing_from_result(retry_eject):
+        return True
+
+    presence_check = _run_command(
+        ["diskutil", "info", candidate.disk_path],
+        check=False,
+        capture_output=True,
+    )
+    return presence_check.returncode != 0
+
+
+def _macos_disk_missing_from_result(result: subprocess.CompletedProcess[str]) -> bool:
+    output = _normalized(f"{result.stdout or ''}\n{result.stderr or ''}")
+    return "failed to find disk" in output or "could not find disk" in output
 
 
 def _with_linux_privilege(command: list[str]) -> list[str]:
@@ -412,25 +456,53 @@ def _macos_disk_entry(device_path: str) -> dict[str, Any]:
 def _macos_wait_for_partition(disk_path: str) -> str:
     for _ in range(POLL_ATTEMPTS):
         entry = _macos_disk_entry(disk_path)
-        partitions = entry.get("Partitions", [])
-        if isinstance(partitions, list) and partitions:
-            first_partition = partitions[0]
-            if isinstance(first_partition, dict):
-                identifier = _string_or_none(first_partition.get("DeviceIdentifier"))
-                if identifier:
-                    return f"/dev/{identifier}"
+        partition_path = _macos_data_partition_path(entry)
+        if partition_path is not None:
+            return partition_path
         time.sleep(POLL_DELAY_SECONDS)
     raise RuntimeError(f"Timed out waiting for macOS partition on {disk_path}.")
 
 
 def _macos_wait_for_mount(partition_path: str) -> str:
+    mount_attempted = False
     for _ in range(POLL_ATTEMPTS):
         info = _macos_disk_info(partition_path)
         mount_point = _string_or_none(info.get("MountPoint"))
         if mount_point:
             return mount_point
+        if not mount_attempted:
+            _run_command(["diskutil", "mount", partition_path], check=False)
+            mount_attempted = True
         time.sleep(POLL_DELAY_SECONDS)
     raise RuntimeError(f"Timed out waiting for macOS mount point on {partition_path}.")
+
+
+def _macos_data_partition_path(entry: dict[str, Any]) -> str | None:
+    partitions = entry.get("Partitions", [])
+    if not isinstance(partitions, list) or not partitions:
+        return None
+
+    preferred: str | None = None
+    fallback: str | None = None
+    for partition in partitions:
+        if not isinstance(partition, dict):
+            continue
+        identifier = _string_or_none(partition.get("DeviceIdentifier"))
+        if not identifier:
+            continue
+        partition_path = f"/dev/{identifier}"
+        if fallback is None:
+            fallback = partition_path
+
+        volume_name = _normalized(_string_or_none(partition.get("VolumeName")))
+        if volume_name == _normalized(MACOS_VOLUME_LABEL):
+            return partition_path
+
+        content = _normalized(_string_or_none(partition.get("Content")))
+        if content != "efi" and preferred is None:
+            preferred = partition_path
+
+    return preferred or fallback
 
 
 def _string_or_none(value: object) -> str | None:
