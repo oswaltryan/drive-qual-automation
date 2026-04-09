@@ -148,6 +148,93 @@ def _authenticate_sudo() -> None:
         raise RuntimeError("Linux benchmark wrapper requires sudo authentication.")
 
 
+def _lsblk_device_tree(disk_path: str) -> dict[str, Any] | None:
+    result = subprocess.run(
+        ["lsblk", "-J", "-o", "PATH", disk_path],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        return None
+    try:
+        payload = json.loads(result.stdout)
+    except json.JSONDecodeError:
+        return None
+    devices = payload.get("blockdevices", [])
+    if not isinstance(devices, list) or not devices:
+        return None
+    root = devices[0]
+    if not isinstance(root, dict):
+        return None
+    return root
+
+
+def _append_lsblk_paths_depth_first(entry: dict[str, Any], paths: list[str]) -> None:
+    children = entry.get("children", [])
+    if isinstance(children, list):
+        for child in children:
+            if isinstance(child, dict):
+                _append_lsblk_paths_depth_first(child, paths)
+
+    path = entry.get("path")
+    if isinstance(path, str) and path:
+        paths.append(path)
+
+
+def _linux_unmount_candidates(disk_path: str) -> list[str]:
+    tree = _lsblk_device_tree(disk_path)
+    if tree is None:
+        return [disk_path]
+
+    collected: list[str] = []
+    _append_lsblk_paths_depth_first(tree, collected)
+
+    deduped: list[str] = []
+    seen: set[str] = set()
+    for path in collected:
+        if path in seen:
+            continue
+        seen.add(path)
+        deduped.append(path)
+
+    if disk_path not in seen:
+        deduped.append(disk_path)
+    return deduped
+
+
+def _with_optional_sudo(command: list[str], *, use_sudo: bool) -> list[str]:
+    if use_sudo:
+        return ["sudo", "-n", *command]
+    return command
+
+
+def _prepare_linux_device_for_raw_benchmark(disk_path: str, *, use_sudo: bool) -> None:
+    for block_path in _linux_unmount_candidates(disk_path):
+        result = subprocess.run(
+            _with_optional_sudo(["udisksctl", "unmount", "-b", block_path], use_sudo=use_sudo),
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        if result.returncode != 0:
+            subprocess.run(
+                _with_optional_sudo(["umount", block_path], use_sudo=use_sudo),
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+
+
+def _prepare_linux_disks_command(base_command: list[str], disk_path: str) -> list[str]:
+    requires_sudo = os.geteuid() != 0
+    if requires_sudo:
+        _authenticate_sudo()
+
+    _prepare_linux_device_for_raw_benchmark(disk_path, use_sudo=requires_sudo)
+    return _with_optional_sudo(base_command, use_sudo=requires_sudo)
+
+
 def _run_linux_disks_benchmark(dut: ApricornDevice, part_number: str) -> tuple[dict[str, str], Path, Path]:
     disk_path = (dut.blockDevice or "").strip()
     if not disk_path:
@@ -168,10 +255,8 @@ def _run_linux_disks_benchmark(dut: ApricornDevice, part_number: str) -> tuple[d
         "--allow-buffered",
     ]
 
-    command = base_command
-    if os.geteuid() != 0:
-        _authenticate_sudo()
-        command = ["sudo", "-n", *base_command]
+    command = _prepare_linux_disks_command(base_command, disk_path)
+    print(f"Running Linux Disks benchmark on {disk_path}. This can take several minutes...")
 
     result = _run_benchmark_command(command)
     detail = _benchmark_detail(result)

@@ -141,6 +141,7 @@ def test_run_linux_disks_benchmark_invokes_wrapper_script(monkeypatch: MonkeyPat
         lambda part_number, dut_name: (json_path, csv_path),
     )
     monkeypatch.setattr(linux_performance, "_linux_disks_wrapper_script_path", lambda: wrapper_path)
+    monkeypatch.setattr(linux_performance, "_prepare_linux_device_for_raw_benchmark", lambda disk_path, use_sudo: None)
     monkeypatch.setattr("drive_qual.platforms.linux.performance.subprocess.run", fake_run)
     monkeypatch.setattr("drive_qual.platforms.linux.performance.os.geteuid", lambda: 1000)
 
@@ -183,6 +184,7 @@ def test_run_linux_disks_benchmark_requires_sudo_authentication(monkeypatch: Mon
         lambda part_number, dut_name: (json_path, csv_path),
     )
     monkeypatch.setattr(linux_performance, "_linux_disks_wrapper_script_path", lambda: wrapper_path)
+    monkeypatch.setattr(linux_performance, "_prepare_linux_device_for_raw_benchmark", lambda disk_path, use_sudo: None)
     monkeypatch.setattr("drive_qual.platforms.linux.performance.subprocess.run", fake_run)
     monkeypatch.setattr("drive_qual.platforms.linux.performance.os.geteuid", lambda: 1000)
 
