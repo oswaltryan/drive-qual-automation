@@ -19,6 +19,7 @@ from drive_qual.platforms.macos.blackmagic import (
     run_blackmagic_benchmark_automation,
 )
 from drive_qual.platforms.performance_common import (
+    BLACKMAGIC_DISK_SPEED_TEST_TOOL_NAME,
     load_part_number_and_report,
     resolve_report_dut_key,
     software_entries_for_host,
@@ -26,7 +27,7 @@ from drive_qual.platforms.performance_common import (
     wait_for_device_present,
 )
 
-BLACKMAGIC_TOOL_NAME = "Blackmagic Disk Speed Test"
+BLACKMAGIC_TOOL_NAME = BLACKMAGIC_DISK_SPEED_TEST_TOOL_NAME
 BLACKMAGIC_LEGACY_TOOL_NAMES = frozenset({"BlackMagic RAW Speed Test"})
 BLACKMAGIC_ARTIFACT_CATEGORY = BLACKMAGIC_TOOL_NAME
 BLACKMAGIC_APP_NAME = BLACKMAGIC_TOOL_NAME

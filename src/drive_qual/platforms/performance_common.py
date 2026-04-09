@@ -12,6 +12,7 @@ HOST_OS_NAMES: dict[str, str] = {
     "linux_host": "Linux",
     "macos_host": "macOS",
 }
+BLACKMAGIC_DISK_SPEED_TEST_TOOL_NAME = "Blackmagic Disk Speed Test"
 
 
 def software_entries_for_host(equipment: dict[str, Any], host_key: str) -> list[dict[str, Any]]:

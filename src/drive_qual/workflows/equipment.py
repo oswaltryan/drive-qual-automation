@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Any
 
 from drive_qual.core.report_session import load_report, report_path_for, resolve_folder_name, save_report
+from drive_qual.platforms.performance_common import BLACKMAGIC_DISK_SPEED_TEST_TOOL_NAME
 
 FORM_FACTOR_PRODUCTS: dict[str, list[str]] = {
     "2.5": ["Fortress", "Fortress L3", "Padlock 3.0"],
@@ -41,7 +42,7 @@ HOST_DEFAULTS: dict[str, dict[str, Any]] = {
         "hardware": "Mac Mini M2",
         "os_version": "OS 15 Sequoia",
         "software": [
-            {"name": "Blackmagic Disk Speed Test", "version": "4.2"},
+            {"name": BLACKMAGIC_DISK_SPEED_TEST_TOOL_NAME, "version": "4.2"},
         ],
     },
 }
