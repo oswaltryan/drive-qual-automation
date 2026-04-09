@@ -21,6 +21,8 @@ EXPECTED_LINUX_WRITE = 234.5
 EXPECTED_SUDO_AUTH_AND_RUN_CALL_COUNT = 2
 EXPECTED_MACOS_READ = 345.6
 EXPECTED_MACOS_WRITE = 456.7
+EXPECTED_MACOS_FALLBACK_READ = 101.1
+EXPECTED_MACOS_FALLBACK_WRITE = 202.2
 
 
 def _report_payload() -> dict[str, Any]:
@@ -128,8 +130,6 @@ def test_run_software_step_records_macos_blackmagic_results(monkeypatch: MonkeyP
     screenshot_path = tmp_path / "Secure Key DT.png"
     json_path = tmp_path / "Secure Key DT.json"
     csv_path = tmp_path / "Secure Key DT.csv"
-    responses = iter([str(EXPECTED_MACOS_READ), str(EXPECTED_MACOS_WRITE)])
-
     monkeypatch.setattr(sys, "platform", "darwin")
     monkeypatch.setattr(macos_performance, "resolve_folder_name", lambda part_number=None: "69-420")
     monkeypatch.setattr(macos_performance, "load_part_number_and_report", lambda folder_name: ("69-420", report_path))
@@ -145,8 +145,16 @@ def test_run_software_step_records_macos_blackmagic_results(monkeypatch: MonkeyP
     )
     monkeypatch.setattr("drive_qual.platforms.macos.performance.time.sleep", lambda _seconds: None)
     monkeypatch.setattr(macos_performance, "_run_blackmagic_automation", lambda dut_name: True)
+    monkeypatch.setattr(
+        macos_performance,
+        "extract_blackmagic_read_write_from_screenshot",
+        lambda _screenshot_path: (EXPECTED_MACOS_READ, EXPECTED_MACOS_WRITE),
+    )
     monkeypatch.setattr(macos_performance, "_capture_blackmagic_screenshot", lambda path: path.write_bytes(b"png"))
-    monkeypatch.setattr("builtins.input", lambda prompt="": next(responses))
+    monkeypatch.setattr(
+        "builtins.input",
+        lambda _prompt="": (_ for _ in ()).throw(AssertionError("manual input not expected when extraction succeeds")),
+    )
 
     performance_dispatch.run_software_step(part_number="69-420")
 
@@ -193,6 +201,7 @@ def test_run_software_step_rejects_invalid_macos_blackmagic_values(monkeypatch: 
     )
     monkeypatch.setattr(macos_performance, "_run_blackmagic_automation", lambda dut_name: False)
     monkeypatch.setattr(macos_performance, "_launch_blackmagic_app", lambda: False)
+    monkeypatch.setattr(macos_performance, "extract_blackmagic_read_write_from_screenshot", lambda _path: None)
     monkeypatch.setattr(macos_performance, "_capture_blackmagic_screenshot", lambda path: path.write_bytes(b"png"))
 
     def fake_input(prompt: str = "") -> str:
@@ -229,6 +238,22 @@ def test_prompt_blackmagic_ready_auto_mode_waits_without_user_input(monkeypatch:
     )
 
     assert sleeps == [macos_performance.BLACKMAGIC_AUTOMATION_POST_STOP_SETTLE_SECONDS]
+
+
+def test_resolve_blackmagic_read_write_values_falls_back_to_manual(monkeypatch: MonkeyPatch) -> None:
+    responses = iter([str(EXPECTED_MACOS_FALLBACK_READ), str(EXPECTED_MACOS_FALLBACK_WRITE)])
+
+    monkeypatch.setattr(macos_performance, "extract_blackmagic_read_write_from_screenshot", lambda _path: None)
+    monkeypatch.setattr("builtins.input", lambda _prompt="": next(responses))
+
+    read_value, write_value = macos_performance._resolve_blackmagic_read_write_values(
+        "Blackmagic Disk Speed Test",
+        "Padlock DT",
+        Path("/tmp/fake.png"),
+    )
+
+    assert read_value == EXPECTED_MACOS_FALLBACK_READ
+    assert write_value == EXPECTED_MACOS_FALLBACK_WRITE
 
 
 def test_capture_blackmagic_screenshot_uses_window_bounds(monkeypatch: MonkeyPatch, tmp_path: Path) -> None:

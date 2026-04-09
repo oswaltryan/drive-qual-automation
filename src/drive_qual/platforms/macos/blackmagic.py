@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import plistlib
+import re
 import subprocess
 import sys
 import time
@@ -98,6 +99,52 @@ tell application "System Events"
         return "main-window-ready"
     end tell
 end tell
+"""
+
+_SWIFT_VISION_OCR_SCRIPT = """
+import AppKit
+import Foundation
+import Vision
+
+let args = CommandLine.arguments
+guard args.count >= 2 else {
+    fputs("missing image path\\n", stderr)
+    exit(2)
+}
+
+let imagePath = args[1]
+guard let nsImage = NSImage(contentsOfFile: imagePath) else {
+    fputs("unable to load image: \\(imagePath)\\n", stderr)
+    exit(3)
+}
+guard let tiff = nsImage.tiffRepresentation,
+      let bitmap = NSBitmapImageRep(data: tiff),
+      let cgImage = bitmap.cgImage else {
+    fputs("unable to decode image: \\(imagePath)\\n", stderr)
+    exit(4)
+}
+
+let request = VNRecognizeTextRequest()
+request.recognitionLevel = .accurate
+request.usesLanguageCorrection = false
+
+let handler = VNImageRequestHandler(cgImage: cgImage, options: [:])
+
+do {
+    try handler.perform([request])
+} catch {
+    fputs("vision OCR failed: \\(error.localizedDescription)\\n", stderr)
+    exit(5)
+}
+
+guard let results = request.results else {
+    exit(0)
+}
+
+for observation in results {
+    guard let candidate = observation.topCandidates(1).first else { continue }
+    print(candidate.string)
+}
 """
 
 
@@ -204,6 +251,98 @@ def _click_blackmagic_by_relative_coordinate(rel_x: float, rel_y: float) -> str:
     target_y = win_y + int(height * rel_y)
     result = _run_ui_script(_CLICK_AT_COORDINATE_SCRIPT, x=str(target_x), y=str(target_y))
     return f"{result};window={win_x},{win_y},{width},{height};rel={rel_x:.3f},{rel_y:.3f}"
+
+
+def _number_from_text(raw: str) -> float | None:
+    match = re.search(r"([0-9][0-9,]*(?:\.[0-9]+)?)", raw)
+    if match is None:
+        return None
+    try:
+        return float(match.group(1).replace(",", ""))
+    except ValueError:
+        return None
+
+
+def _extract_labeled_value(raw_text: str, label: str) -> float | None:
+    patterns = (
+        rf"{label}\s*[:=]?\s*([0-9][0-9,]*(?:\.[0-9]+)?)",
+        rf"([0-9][0-9,]*(?:\.[0-9]+)?)\s*(?:MB/?S|MBPS)?\s*{label}",
+    )
+    for pattern in patterns:
+        match = re.search(pattern, raw_text, flags=re.IGNORECASE)
+        if match is None:
+            continue
+        try:
+            return float(match.group(1).replace(",", ""))
+        except ValueError:
+            continue
+    return None
+
+
+def parse_blackmagic_read_write_mb_s(raw_text: str) -> tuple[float, float] | None:  # noqa: PLR0912
+    text = raw_text.strip()
+    if not text:
+        return None
+
+    read_value = _extract_labeled_value(text, "READ")
+    write_value = _extract_labeled_value(text, "WRITE")
+    if read_value is not None and write_value is not None and read_value > 0 and write_value > 0:
+        return (read_value, write_value)
+
+    lines = [line.strip() for line in re.split(r"[\r\n]+", text) if line.strip()]
+    if len(lines) == 1:
+        lines = [piece.strip() for piece in re.split(r"\s*,\s*", text) if piece.strip()]
+
+    pending_label: str | None = None
+    for line in lines:
+        line_upper = line.upper()
+        number = _number_from_text(line)
+        if "READ" in line_upper:
+            pending_label = "READ"
+            if number is not None:
+                read_value = number
+            continue
+        if "WRITE" in line_upper:
+            pending_label = "WRITE"
+            if number is not None:
+                write_value = number
+            continue
+        if number is not None and pending_label == "READ" and read_value is None:
+            read_value = number
+            pending_label = None
+            continue
+        if number is not None and pending_label == "WRITE" and write_value is None:
+            write_value = number
+            pending_label = None
+
+    if read_value is None or write_value is None:
+        return None
+    if read_value <= 0 or write_value <= 0:
+        return None
+    return (read_value, write_value)
+
+
+def _ocr_screenshot_text_via_swift(screenshot_path: Path) -> str:
+    try:
+        result = subprocess.run(
+            ["swift", "-e", _SWIFT_VISION_OCR_SCRIPT, str(screenshot_path)],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+    except OSError as exc:
+        raise RuntimeError(f"Swift OCR command failed to start: {exc}") from exc
+
+    if result.returncode != 0:
+        detail = (result.stderr or result.stdout or "").strip()
+        raise RuntimeError(detail or "Swift OCR command failed")
+
+    return (result.stdout or "").strip()
+
+
+def extract_blackmagic_read_write_from_screenshot(screenshot_path: Path) -> tuple[float, float] | None:
+    raw_text = _ocr_screenshot_text_via_swift(screenshot_path)
+    return parse_blackmagic_read_write_mb_s(raw_text)
 
 
 def run_blackmagic_benchmark_automation(

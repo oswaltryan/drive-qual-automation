@@ -67,3 +67,56 @@ def test_run_automation_uses_hard_coded_dut_volume_path(monkeypatch: MonkeyPatch
     choose_calls = [values for template, values in calls if template == blackmagic._CHOOSE_DRIVE_IN_DIALOG_SCRIPT]
     assert len(choose_calls) == 1
     assert choose_calls[0]["target_path"] == target_volume.resolve().as_posix()
+
+
+def test_parse_blackmagic_read_write_mb_s_parses_labeled_values() -> None:
+    raw_text = """
+WRITE
+456.7
+READ
+345.6
+"""
+    parsed = blackmagic.parse_blackmagic_read_write_mb_s(raw_text)
+    assert parsed == (345.6, 456.7)
+
+
+def test_parse_blackmagic_read_write_mb_s_returns_none_when_missing_values() -> None:
+    raw_text = "WRITE\n456.7\nSOMETHING ELSE"
+    assert blackmagic.parse_blackmagic_read_write_mb_s(raw_text) is None
+
+
+def test_extract_blackmagic_read_write_from_screenshot_uses_swift_ocr(monkeypatch: MonkeyPatch, tmp_path: Path) -> None:
+    screenshot_path = tmp_path / "capture.png"
+    screenshot_path.write_bytes(b"png")
+    calls: list[list[str]] = []
+    ocr_output = "WRITE\n500.5\nREAD\n400.4\n"
+
+    def fake_run(command: list[str], **_kwargs: object) -> object:
+        calls.append(command)
+        return type("Result", (), {"returncode": 0, "stdout": ocr_output, "stderr": ""})()
+
+    monkeypatch.setattr("drive_qual.platforms.macos.blackmagic.subprocess.run", fake_run)
+
+    parsed = blackmagic.extract_blackmagic_read_write_from_screenshot(screenshot_path)
+
+    assert calls
+    assert calls[0][0] == "swift"
+    assert calls[0][1] == "-e"
+    assert calls[0][-1] == str(screenshot_path)
+    assert parsed == (400.4, 500.5)
+
+
+def test_extract_blackmagic_read_write_from_screenshot_returns_none_when_unparseable(
+    monkeypatch: MonkeyPatch, tmp_path: Path
+) -> None:
+    screenshot_path = tmp_path / "capture.png"
+    screenshot_path.write_bytes(b"png")
+
+    def fake_run(command: list[str], **_kwargs: object) -> object:
+        return type("Result", (), {"returncode": 0, "stdout": "NO READ WRITE VALUES", "stderr": ""})()
+
+    monkeypatch.setattr("drive_qual.platforms.macos.blackmagic.subprocess.run", fake_run)
+
+    parsed = blackmagic.extract_blackmagic_read_write_from_screenshot(screenshot_path)
+
+    assert parsed is None

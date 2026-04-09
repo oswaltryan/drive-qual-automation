@@ -14,6 +14,7 @@ from drive_qual.core.report_session import load_report, resolve_folder_name, sav
 from drive_qual.core.storage_paths import artifact_dir, localize_windows_path
 from drive_qual.platforms.macos.blackmagic import (
     DEFAULT_BENCHMARK_DURATION_SECONDS,
+    extract_blackmagic_read_write_from_screenshot,
     run_blackmagic_benchmark_automation,
 )
 from drive_qual.platforms.performance_common import (
@@ -185,6 +186,24 @@ def _prompt_positive_mb_s(label: str) -> float:
         print("Enter a positive MB/s value greater than 0.")
 
 
+def _resolve_blackmagic_read_write_values(tool_name: str, dut_name: str, screenshot_path: Path) -> tuple[float, float]:
+    try:
+        extracted = extract_blackmagic_read_write_from_screenshot(screenshot_path)
+    except Exception as exc:
+        print(f"Automatic {tool_name} value extraction failed: {exc}")
+        extracted = None
+
+    if extracted is not None:
+        read_mb_s, write_mb_s = extracted
+        print(f"Auto-extracted {tool_name} values for {dut_name}: read={read_mb_s} MB/s write={write_mb_s} MB/s")
+        return (read_mb_s, write_mb_s)
+
+    print("Falling back to manual read/write entry.")
+    read_mb_s = _prompt_positive_mb_s(f"macOS {tool_name} read for {dut_name}")
+    write_mb_s = _prompt_positive_mb_s(f"macOS {tool_name} write for {dut_name}")
+    return (read_mb_s, write_mb_s)
+
+
 def _run_blackmagic_automation(dut_name: str) -> bool:
     if BLACKMAGIC_AUTOMATION_MODE != "auto-with-manual-fallback":
         return False
@@ -288,8 +307,7 @@ def run_software_step(part_number: str | None = None) -> None:  # noqa: PLR0915
         benchmark_ran_automatically=benchmark_ran_automatically,
     )
     _capture_blackmagic_screenshot(screenshot_path)
-    read_mb_s = _prompt_positive_mb_s(f"macOS {tool_name} read for {dut_name}")
-    write_mb_s = _prompt_positive_mb_s(f"macOS {tool_name} write for {dut_name}")
+    read_mb_s, write_mb_s = _resolve_blackmagic_read_write_values(tool_name, dut_name, screenshot_path)
     _write_blackmagic_json(
         json_path,
         tool_name=tool_name,
