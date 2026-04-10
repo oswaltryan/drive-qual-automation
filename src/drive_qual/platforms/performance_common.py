@@ -4,6 +4,12 @@ import time
 from pathlib import Path
 from typing import Any
 
+from drive_qual.core.dut_selection import (
+    dut_names_from_equipment,
+    refresh_report_dut_device,
+    resolve_or_bind_report_dut_device,
+    select_report_dut_name,
+)
 from drive_qual.core.report_session import load_report, report_path_for
 from drive_qual.integrations.apricorn.usb_cli import ApricornDevice, find_apricorn_device
 
@@ -63,10 +69,33 @@ def wait_for_device_present(prompt: str) -> ApricornDevice:
     return dut
 
 
+def resolve_report_dut_name(report_path: Path) -> str:
+    return select_report_dut_name(report_path)
+
+
+def resolve_or_bind_dut_device(
+    report_path: Path,
+    dut_name: str,
+    *,
+    prompt: str,
+    required_fields: tuple[str, ...] = (),
+) -> ApricornDevice:
+    return resolve_or_bind_report_dut_device(report_path, dut_name, prompt=prompt, required_fields=required_fields)
+
+
+def refresh_dut_device(
+    report_path: Path,
+    dut_name: str,
+    *,
+    prompt: str,
+    required_fields: tuple[str, ...] = (),
+) -> ApricornDevice:
+    return refresh_report_dut_device(report_path, dut_name, prompt=prompt, required_fields=required_fields)
+
+
 def sync_performance_section(data: dict[str, Any], equipment: dict[str, Any]) -> None:
     performance = data.setdefault("performance", {})
-    duts = equipment.get("dut", [])
-    for dut in duts:
+    for dut in dut_names_from_equipment(equipment):
         perf_dut = performance.setdefault(dut, {"Windows": {}, "Linux": {}, "macOS": {}})
         for host_key, os_key in HOST_OS_NAMES.items():
             os_perf = perf_dut.setdefault(os_key, {})

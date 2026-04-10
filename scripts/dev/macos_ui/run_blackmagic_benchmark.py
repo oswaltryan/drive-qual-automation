@@ -6,6 +6,7 @@ import re
 import subprocess
 import sys
 import time
+from collections.abc import Callable
 from pathlib import Path
 
 BLACKMAGIC_APP_NAME = "Blackmagic Disk Speed Test"
@@ -99,7 +100,10 @@ tell application "System Events"
                 set posKnown to true
             end try
             set isTitleBarControl to false
-            if subRoleValue is "AXCloseButton" or subRoleValue is "AXMinimizeButton" or subRoleValue is "AXZoomButton" or subRoleValue is "AXToolbarButton" then
+            if subRoleValue is "AXCloseButton" or subRoleValue is "AXMinimizeButton" then
+                set isTitleBarControl to true
+            end if
+            if subRoleValue is "AXZoomButton" or subRoleValue is "AXToolbarButton" then
                 set isTitleBarControl to true
             end if
             if (not isTitleBarControl) and posKnown and (yPos <= (winY + 70)) and (xPos <= (winX + 220)) then
@@ -107,10 +111,12 @@ tell application "System Events"
             end if
             if not isTitleBarControl then
                 set candidateCount to candidateCount + 1
+                set descriptorPrefix to (candidateCount as text) & "(raw:" & (i as text) & "):"
+                set descriptor to descriptorPrefix & subRoleValue & ":" & elementName
                 if details is "" then
-                    set details to (candidateCount as text) & "(raw:" & (i as text) & "):" & subRoleValue & ":" & elementName
+                    set details to descriptor
                 else
-                    set details to details & " | " & (candidateCount as text) & "(raw:" & (i as text) & "):" & subRoleValue & ":" & elementName
+                    set details to details & " | " & descriptor
                 end if
             end if
         end repeat
@@ -152,7 +158,10 @@ tell application "System Events"
                 set posKnown to true
             end try
             set isTitleBarControl to false
-            if subRoleValue is "AXCloseButton" or subRoleValue is "AXMinimizeButton" or subRoleValue is "AXZoomButton" or subRoleValue is "AXToolbarButton" then
+            if subRoleValue is "AXCloseButton" or subRoleValue is "AXMinimizeButton" then
+                set isTitleBarControl to true
+            end if
+            if subRoleValue is "AXZoomButton" or subRoleValue is "AXToolbarButton" then
                 set isTitleBarControl to true
             end if
             if (not isTitleBarControl) and posKnown and (yPos <= (winY + 70)) and (xPos <= (winX + 220)) then
@@ -186,7 +195,9 @@ tell application "System Events"
             set subRoleValue to (subrole of targetControl) as text
         end try
         click targetControl
-        return "clicked-index={button_index};count=" & (candidateCount as text) & ";role=" & roleValue & ";subrole=" & subRoleValue & ";name=" & controlName
+        set resultPrefix to "clicked-index={button_index};count=" & (candidateCount as text)
+        set resultSuffix to ";role=" & roleValue & ";subrole=" & subRoleValue & ";name=" & controlName
+        return resultPrefix & resultSuffix
     end tell
 end tell
 """
@@ -385,12 +396,58 @@ def _pick_single_match(candidates: list[Path], *, match_type: str, dut_name: str
     return None
 
 
+def _resolve_absolute_target(requested: Path) -> Path | None:
+    if not requested.is_absolute():
+        return None
+    if requested.exists():
+        return requested.resolve()
+    raise RuntimeError(f"Target drive path does not exist: {requested}")
+
+
+def _normalized_patterns(dut_name: str) -> tuple[str, str, str]:
+    normalized = dut_name.strip().casefold()
+    if not normalized:
+        raise RuntimeError("DUT name cannot be empty.")
+    return normalized, _normalize_name(dut_name), _normalize_name_loose(dut_name)
+
+
+def _volume_matchers(
+    normalized: str,
+    normalized_compact: str,
+    normalized_loose: str,
+) -> list[tuple[str, Callable[[Path], bool]]]:
+    matchers: list[tuple[str, Callable[[Path], bool]]] = [
+        ("exact(case-insensitive)", lambda path: path.name.casefold() == normalized),
+        ("prefix", lambda path: path.name.casefold().startswith(normalized)),
+        ("contains", lambda path: normalized in path.name.casefold()),
+    ]
+    if normalized_compact:
+        matchers.extend(
+            [
+                ("normalized-exact", lambda path: _normalize_name(path.name) == normalized_compact),
+                ("normalized-prefix", lambda path: _normalize_name(path.name).startswith(normalized_compact)),
+                ("normalized-contains", lambda path: normalized_compact in _normalize_name(path.name)),
+            ]
+        )
+    if normalized_loose:
+        matchers.extend(
+            [
+                ("normalized-loose-exact", lambda path: _normalize_name_loose(path.name) == normalized_loose),
+                (
+                    "normalized-loose-prefix",
+                    lambda path: _normalize_name_loose(path.name).startswith(normalized_loose),
+                ),
+                ("normalized-loose-contains", lambda path: normalized_loose in _normalize_name_loose(path.name)),
+            ]
+        )
+    return matchers
+
+
 def _resolve_target_volume(dut_name: str, volume_root: Path) -> Path:
     requested = Path(dut_name)
-    if requested.is_absolute():
-        if requested.exists():
-            return requested.resolve()
-        raise RuntimeError(f"Target drive path does not exist: {requested}")
+    absolute_target = _resolve_absolute_target(requested)
+    if absolute_target is not None:
+        return absolute_target
 
     direct = (volume_root / dut_name).resolve()
     if direct.exists():
@@ -400,90 +457,45 @@ def _resolve_target_volume(dut_name: str, volume_root: Path) -> Path:
     if not mounted:
         raise RuntimeError(f"No mounted volumes found under: {volume_root}")
 
-    normalized = dut_name.strip().casefold()
-    normalized_compact = _normalize_name(dut_name)
-    normalized_loose = _normalize_name_loose(dut_name)
-    if not normalized:
-        raise RuntimeError("DUT name cannot be empty.")
-
-    exact_match = _pick_single_match(
-        [path for path in mounted if path.name.casefold() == normalized],
-        match_type="exact(case-insensitive)",
-        dut_name=dut_name,
-    )
-    if exact_match is not None:
-        return exact_match
-
-    prefix_match = _pick_single_match(
-        [path for path in mounted if path.name.casefold().startswith(normalized)],
-        match_type="prefix",
-        dut_name=dut_name,
-    )
-    if prefix_match is not None:
-        return prefix_match
-
-    contains_match = _pick_single_match(
-        [path for path in mounted if normalized in path.name.casefold()],
-        match_type="contains",
-        dut_name=dut_name,
-    )
-    if contains_match is not None:
-        return contains_match
-
-    if normalized_compact:
-        exact_compact = _pick_single_match(
-            [path for path in mounted if _normalize_name(path.name) == normalized_compact],
-            match_type="normalized-exact",
+    normalized, normalized_compact, normalized_loose = _normalized_patterns(dut_name)
+    for match_type, matcher in _volume_matchers(normalized, normalized_compact, normalized_loose):
+        selected = _pick_single_match(
+            [path for path in mounted if matcher(path)],
+            match_type=match_type,
             dut_name=dut_name,
         )
-        if exact_compact is not None:
-            return exact_compact
-
-        prefix_compact = _pick_single_match(
-            [path for path in mounted if _normalize_name(path.name).startswith(normalized_compact)],
-            match_type="normalized-prefix",
-            dut_name=dut_name,
-        )
-        if prefix_compact is not None:
-            return prefix_compact
-
-        contains_compact = _pick_single_match(
-            [path for path in mounted if normalized_compact in _normalize_name(path.name)],
-            match_type="normalized-contains",
-            dut_name=dut_name,
-        )
-        if contains_compact is not None:
-            return contains_compact
-
-    if normalized_loose:
-        exact_loose = _pick_single_match(
-            [path for path in mounted if _normalize_name_loose(path.name) == normalized_loose],
-            match_type="normalized-loose-exact",
-            dut_name=dut_name,
-        )
-        if exact_loose is not None:
-            return exact_loose
-
-        prefix_loose = _pick_single_match(
-            [path for path in mounted if _normalize_name_loose(path.name).startswith(normalized_loose)],
-            match_type="normalized-loose-prefix",
-            dut_name=dut_name,
-        )
-        if prefix_loose is not None:
-            return prefix_loose
-
-        contains_loose = _pick_single_match(
-            [path for path in mounted if normalized_loose in _normalize_name_loose(path.name)],
-            match_type="normalized-loose-contains",
-            dut_name=dut_name,
-        )
-        if contains_loose is not None:
-            return contains_loose
+        if selected is not None:
+            return selected
 
     available = ", ".join(path.name for path in mounted)
-    raise RuntimeError(
-        f"Could not find mounted volume for {dut_name!r} under {volume_root}. Available: {available}"
-    )
+    raise RuntimeError(f"Could not find mounted volume for {dut_name!r} under {volume_root}. Available: {available}")
+
+
+def _select_target_drive(target_path: Path) -> int:
+    print(f"Step 10: Selecting partition: {target_path.name} ({target_path})")
+    print("Step 10.1: Opening Select Target Drive dialog...")
+    _run_ui_script(_SELECT_TARGET_DRIVE_MENU_SCRIPT)
+    time.sleep(1.0)
+    print(f"Step 10.2: Choosing target path in dialog: {target_path.as_posix()}")
+    _run_ui_script(_CHOOSE_DRIVE_IN_DIALOG_SCRIPT, target_path=target_path.as_posix())
+    time.sleep(1.0)
+    print("Step 13: Ensuring target-drive dialog is closed...")
+    ready_result = _run_ui_script(_ENSURE_MAIN_WINDOW_READY_SCRIPT)
+    print(f"Step 13 complete: {ready_result}")
+    print("Step 13.1: Capturing Blackmagic control inventory...")
+    inventory_result = _run_ui_script(_BUTTON_INVENTORY_SCRIPT)
+    print(f"Control inventory: {inventory_result}")
+    return _inventory_candidate_count(inventory_result)
+
+
+def _toggle_benchmark(toggle_mode: str, *, candidate_count: int, button_index: int) -> str:
+    if toggle_mode == "controls" and candidate_count == 0:
+        raise RuntimeError(
+            "Requested --toggle-mode controls, but no candidate controls were found. Use --toggle-mode coordinate."
+        )
+    if toggle_mode == "controls":
+        return _run_ui_script(_CLICK_BUTTON_BY_INDEX_SCRIPT, button_index=str(button_index))
+    return _click_blackmagic_by_relative_coordinate(HARD_CODED_CLICK_REL_X, HARD_CODED_CLICK_REL_Y)
 
 
 def run_blackmagic_benchmark(
@@ -506,48 +518,20 @@ def run_blackmagic_benchmark(
     _launch_blackmagic_app()
 
     try:
-        print(f"Step 10: Selecting partition: {target_path.name} ({target_path})")
-        print("Step 10.1: Opening Select Target Drive dialog...")
-        _run_ui_script(_SELECT_TARGET_DRIVE_MENU_SCRIPT)
-        time.sleep(1.0)
-        print(f"Step 10.2: Choosing target path in dialog: {target_path.as_posix()}")
-        _run_ui_script(_CHOOSE_DRIVE_IN_DIALOG_SCRIPT, target_path=target_path.as_posix())
-        time.sleep(1.0)
-        print("Step 13: Ensuring target-drive dialog is closed...")
-        ready_result = _run_ui_script(_ENSURE_MAIN_WINDOW_READY_SCRIPT)
-        print(f"Step 13 complete: {ready_result}")
-        print("Step 13.1: Capturing Blackmagic control inventory...")
-        inventory_result = _run_ui_script(_BUTTON_INVENTORY_SCRIPT)
-        print(f"Control inventory: {inventory_result}")
-        candidate_count = _inventory_candidate_count(inventory_result)
+        candidate_count = _select_target_drive(target_path)
         if list_buttons_only:
             print("List-only mode enabled; exiting before benchmark start.")
             return
 
         print(f"Step 14: Starting benchmark with mode={toggle_mode}...")
-        if toggle_mode == "controls" and candidate_count > 0:
-            start_result = _run_ui_script(_CLICK_BUTTON_BY_INDEX_SCRIPT, button_index=str(button_index))
-        elif toggle_mode == "controls" and candidate_count == 0:
-            raise RuntimeError(
-                "Requested --toggle-mode controls, but no candidate controls were found. "
-                "Use --toggle-mode coordinate."
-            )
-        else:
-            start_result = _click_blackmagic_by_relative_coordinate(HARD_CODED_CLICK_REL_X, HARD_CODED_CLICK_REL_Y)
+        start_result = _toggle_benchmark(toggle_mode, candidate_count=candidate_count, button_index=button_index)
         print(f"Step 14 complete: {start_result}")
 
         print(f"Benchmark running for {duration_seconds} seconds...")
         time.sleep(duration_seconds)
 
         print(f"Stopping benchmark with mode={toggle_mode}...")
-        if toggle_mode == "controls" and candidate_count > 0:
-            stop_result = _run_ui_script(_CLICK_BUTTON_BY_INDEX_SCRIPT, button_index=str(button_index))
-        elif toggle_mode == "controls" and candidate_count == 0:
-            raise RuntimeError(
-                "Requested --toggle-mode controls, but no candidate controls were found for stop action."
-            )
-        else:
-            stop_result = _click_blackmagic_by_relative_coordinate(HARD_CODED_CLICK_REL_X, HARD_CODED_CLICK_REL_Y)
+        stop_result = _toggle_benchmark(toggle_mode, candidate_count=candidate_count, button_index=button_index)
         print(f"Stop action result: {stop_result}")
         print("Benchmark stopped.")
     finally:

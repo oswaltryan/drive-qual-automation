@@ -26,6 +26,7 @@ def _write_report(report_path: Path) -> None:
     report_path.write_text(
         json.dumps(
             {
+                "equipment": {"dut": {"Padlock DT": {"serial_number": "ABC123"}}},
                 "compatibility": {
                     "recognized_by_os": {"linux": None, "macos": None, "windows": None},
                     "hot_pluggable": {"linux": None, "macos": None, "windows": None},
@@ -36,7 +37,7 @@ def _write_report(report_path: Path) -> None:
                     "partition_drive": {"linux": None, "macos": None, "windows": None},
                     "format_drive": {"linux": None, "macos": None, "windows": None},
                     "device_manager_disk_mgmt": {"windows": None},
-                }
+                },
             }
         ),
         encoding="utf-8",
@@ -46,7 +47,15 @@ def _write_report(report_path: Path) -> None:
 def _setup_common_mocks(monkeypatch: MonkeyPatch, dut: ApricornDevice, artifact_os: str = "Windows") -> None:
     monkeypatch.setattr("drive_qual.platforms.power_measurements_mixed.benchmark.require_fio", lambda: "fio")
     monkeypatch.setattr(
-        "drive_qual.platforms.power_measurements_mixed._wait_for_confirmed_device_present", lambda prompt: dut
+        "drive_qual.platforms.power_measurements_mixed._select_report_dut_name", lambda report_path: "Padlock DT"
+    )
+    monkeypatch.setattr(
+        "drive_qual.platforms.power_measurements_mixed._resolve_device_for_report_dut",
+        lambda report_path, dut_name, prompt, required_fields=None: dut,
+    )
+    monkeypatch.setattr(
+        "drive_qual.platforms.power_measurements_mixed._refresh_device_for_report_dut",
+        lambda report_path, dut_name, prompt, required_fields=None: dut,
     )
     monkeypatch.setattr(
         "drive_qual.platforms.power_measurements_mixed._wait_for_device_removed", lambda dut, prompt: None
@@ -195,7 +204,6 @@ def test_run_max_io_marks_windows_compatibility_fields(monkeypatch: MonkeyPatch,
         lambda *args: str(benchmark_file),
     )
     monkeypatch.setattr("drive_qual.platforms.windows.power_measurements.partition_and_format_drive", lambda dut: True)
-    monkeypatch.setattr("drive_qual.platforms.power_measurements_mixed._refresh_device_after_format", lambda dut: dut)
     monkeypatch.setattr(
         "drive_qual.platforms.windows.power_measurements.prompt_disk_management_visible", lambda dut: True
     )
@@ -229,7 +237,6 @@ def test_run_max_io_marks_delete_data_false_when_cleanup_fails(monkeypatch: Monk
     monkeypatch.setattr("drive_qual.platforms.power_measurements_mixed.sys.platform", "win32")
 
     monkeypatch.setattr("drive_qual.platforms.windows.power_measurements.partition_and_format_drive", lambda dut: True)
-    monkeypatch.setattr("drive_qual.platforms.power_measurements_mixed._refresh_device_after_format", lambda dut: dut)
     monkeypatch.setattr(
         "drive_qual.platforms.windows.power_measurements.prompt_disk_management_visible", lambda dut: False
     )
@@ -419,7 +426,11 @@ def test_run_in_rush_marks_hot_pluggable(
     monkeypatch.setattr("drive_qual.platforms.power_measurements_mixed.sys.platform", platform_name)
 
     monkeypatch.setattr(
-        "drive_qual.platforms.power_measurements_mixed._wait_for_device_present", lambda prompt, expected=None: dut
+        "drive_qual.platforms.power_measurements_mixed._select_report_dut_name", lambda report_path: "Padlock DT"
+    )
+    monkeypatch.setattr(
+        "drive_qual.platforms.power_measurements_mixed._refresh_device_for_report_dut",
+        lambda report_path, dut_name, prompt, required_fields=None: dut,
     )
     monkeypatch.setattr("drive_qual.platforms.power_measurements_mixed.mk_dir", lambda path: None)
     monkeypatch.setattr(

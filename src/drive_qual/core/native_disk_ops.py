@@ -99,7 +99,7 @@ def _safe_remove_linux_device(device: ApricornDevice) -> bool:
 
 
 def _mark_macos_volume_no_index(mount_point: str) -> None:
-    marker_path = os.path.join(mount_point, MACOS_NO_INDEX_MARKER)
+    marker_path = f"{mount_point.rstrip('/')}/{MACOS_NO_INDEX_MARKER}"
     result = _run_command(["touch", marker_path], check=False, capture_output=True)
     if result.returncode != 0:
         print(f"Warning: could not create {MACOS_NO_INDEX_MARKER} on {mount_point}.")
@@ -147,7 +147,7 @@ def _macos_disk_missing_from_result(result: subprocess.CompletedProcess[str]) ->
 
 
 def _with_linux_privilege(command: list[str]) -> list[str]:
-    if os.geteuid() == 0:
+    if _current_uid() == 0:
         return command
     sudo = shutil.which("sudo")
     if sudo is None:
@@ -386,9 +386,23 @@ def _linux_mount_point(block_path: str) -> str | None:
 
 
 def _linux_take_mount_ownership(mount_point: str) -> None:
-    uid = os.getuid()
-    gid = os.getgid()
+    uid = _current_uid()
+    gid = _current_gid()
     _run_command(_with_linux_privilege(["chown", f"{uid}:{gid}", mount_point]))
+
+
+def _current_uid() -> int:
+    getter = getattr(os, "getuid", None)
+    if callable(getter):
+        return int(getter())
+    return 0
+
+
+def _current_gid() -> int:
+    getter = getattr(os, "getgid", None)
+    if callable(getter):
+        return int(getter())
+    return 0
 
 
 def _linux_block_device_info(block_path: str) -> dict[str, Any] | None:

@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from typing import Any, cast
 
 APRICON_NAME = "apricorn"
+MIN_USB_3_BCD = 3.0
 
 
 @dataclass(frozen=True)
@@ -31,14 +32,16 @@ class ApricornDevice:
     mcuFW: str | None = None
     driveLetter: str | None = None
     blockDevice: str | None = None
+    diskIdentifier: str | None = None
 
     @classmethod
     def from_dict(cls, raw: dict[str, Any], drive_letter: str | None = None) -> ApricornDevice:
         physical_drive_num = raw.get("physicalDriveNum")
         physical_drive_num = physical_drive_num if isinstance(physical_drive_num, int) else None
         normalized_drive_letter = raw.get("driveLetter")
+        bcd_usb = _coerce_bcd_usb(raw.get("bcdUSB"))
         return cls(
-            bcdUSB=raw.get("bcdUSB"),
+            bcdUSB=bcd_usb,
             idVendor=raw.get("idVendor"),
             idProduct=raw.get("idProduct"),
             bcdDevice=raw.get("bcdDevice"),
@@ -59,7 +62,26 @@ class ApricornDevice:
             mcuFW=raw.get("mcuFW"),
             driveLetter=drive_letter or normalized_drive_letter,
             blockDevice=raw.get("blockDevice"),
+            diskIdentifier=raw.get("diskIdentifier"),
         )
+
+
+def _coerce_bcd_usb(value: Any) -> float | None:
+    if isinstance(value, (int, float)):
+        return float(value)
+    if isinstance(value, str):
+        stripped = value.strip()
+        if not stripped:
+            return None
+        try:
+            return float(stripped)
+        except ValueError:
+            return None
+    return None
+
+
+def _normalized_serial(value: str | None) -> str:
+    return (value or "").strip().casefold()
 
 
 def device_identity(device: ApricornDevice) -> str:
@@ -141,6 +163,21 @@ def list_apricorn_devices(payload: dict[str, Any]) -> list[ApricornDevice]:
     return devices
 
 
+def find_apricorn_device_by_serial(devices: list[ApricornDevice], serial: str | None) -> ApricornDevice | None:
+    normalized_target = _normalized_serial(serial)
+    if not normalized_target:
+        return None
+    for device in devices:
+        if _normalized_serial(device.iSerial) == normalized_target:
+            return device
+    return None
+
+
+def resolve_apricorn_device_by_serial(payload: dict[str, Any], serial: str | None) -> ApricornDevice | None:
+    devices = list_apricorn_devices(payload)
+    return find_apricorn_device_by_serial(devices, serial)
+
+
 def select_apricorn_device(devices: list[ApricornDevice]) -> ApricornDevice | None:
     if not devices:
         return None
@@ -182,6 +219,31 @@ def is_same_device(expected: ApricornDevice, current: ApricornDevice) -> bool:
         and expected.idProduct == current.idProduct
         and expected.iProduct == current.iProduct
     )
+
+
+def usb_generation_label(device: ApricornDevice) -> str:
+    if device.bcdUSB is None:
+        return "unknown USB version"
+    return f"USB {device.bcdUSB:.2f}"
+
+
+def is_usb_3x(device: ApricornDevice) -> bool:
+    bcd_usb = device.bcdUSB
+    return bcd_usb is not None and bcd_usb >= MIN_USB_3_BCD
+
+
+def missing_required_fields(device: ApricornDevice, required_fields: tuple[str, ...]) -> list[str]:
+    missing: list[str] = []
+    for field_name in required_fields:
+        value = getattr(device, field_name)
+        if isinstance(value, str):
+            if value.strip():
+                continue
+            missing.append(field_name)
+            continue
+        if value is None:
+            missing.append(field_name)
+    return missing
 
 
 def find_apricorn_device() -> ApricornDevice | None:

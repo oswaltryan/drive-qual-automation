@@ -187,7 +187,7 @@ def test_equipment_skips_scope_prompt_when_profile_data_exists(monkeypatch: Monk
     equipment.run_equipment_prompt()
 
     updated = json.loads(report_path.read_text(encoding="utf-8"))
-    assert updated["equipment"]["dut"] == ["Padlock NVX"]
+    assert updated["equipment"]["dut"] == {"Padlock NVX": {"serial_number": None}}
 
 
 def test_equipment_prompts_for_scope_profile_when_scope_data_missing(monkeypatch: MonkeyPatch, tmp_path: Path) -> None:

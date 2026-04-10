@@ -11,10 +11,12 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from drive_qual.core.dut_selection import dut_names_from_equipment
 from drive_qual.core.io_utils import mk_dir
 from drive_qual.core.report_session import load_report, report_path_for, resolve_folder_name, save_report
 from drive_qual.core.storage_paths import artifact_dir, localize_windows_path
-from drive_qual.integrations.apricorn.usb_cli import ApricornDevice, find_apricorn_device
+from drive_qual.integrations.apricorn.usb_cli import ApricornDevice
+from drive_qual.platforms.performance_common import resolve_or_bind_dut_device, resolve_report_dut_name
 
 LINUX_DISKS_BENCHMARK_TIMEOUT: float | None = None
 LINUX_DISKS_TOOL_NAME = "Disks (native)"
@@ -25,7 +27,8 @@ LINUX_DISKS_ARTIFACT_CATEGORY = "Disks"
 class LinuxPerformanceDeps:
     software_entries_for_current_host: Callable[[dict[str, Any]], list[dict[str, Any]]]
     run_manual_performance_flow: Callable[[Path, dict[str, Any], dict[str, Any]], None]
-    wait_for_device_present: Callable[[str], ApricornDevice]
+    resolve_report_dut_name: Callable[[Path], str]
+    resolve_or_bind_dut_device: Callable[[Path, str, str, tuple[str, ...]], ApricornDevice]
     resolve_report_dut_key: Callable[[dict[str, Any], str], str | None]
     to_float: Callable[[str | None], float | None]
 
@@ -227,12 +230,19 @@ def _prepare_linux_device_for_raw_benchmark(disk_path: str, *, use_sudo: bool) -
 
 
 def _prepare_linux_disks_command(base_command: list[str], disk_path: str) -> list[str]:
-    requires_sudo = os.geteuid() != 0
+    requires_sudo = _effective_uid() != 0
     if requires_sudo:
         _authenticate_sudo()
 
     _prepare_linux_device_for_raw_benchmark(disk_path, use_sudo=requires_sudo)
     return _with_optional_sudo(base_command, use_sudo=requires_sudo)
+
+
+def _effective_uid() -> int:
+    getter = getattr(os, "geteuid", None)
+    if callable(getter):
+        return int(getter())
+    return 0
 
 
 def _run_linux_disks_benchmark(dut: ApricornDevice, part_number: str) -> tuple[dict[str, str], Path, Path]:
@@ -304,8 +314,13 @@ def run_linux_performance_flow(
     if not isinstance(performance, dict):
         raise ValueError("Missing or invalid 'performance' section in report.")
 
-    dut_info = deps.wait_for_device_present("Connect the Apricorn device to continue...")
-    dut_name = (dut_info.iProduct or "unknown_device").strip()
+    dut_name = deps.resolve_report_dut_name(report_path)
+    dut_info = deps.resolve_or_bind_dut_device(
+        report_path,
+        dut_name,
+        "Connect the Apricorn device to continue...",
+        ("blockDevice",),
+    )
     report_dut_key = deps.resolve_report_dut_key(performance, dut_name)
     if report_dut_key is None:
         raise RuntimeError(f"Could not map performance results for DUT {dut_name!r}.")
@@ -359,16 +374,6 @@ def _to_float(val: str | None) -> float | None:
         return None
 
 
-def _wait_for_device_present(prompt: str) -> ApricornDevice:
-    dut = find_apricorn_device()
-    if dut is None:
-        print(f"\n{prompt}")
-    while dut is None:
-        time.sleep(1)
-        dut = find_apricorn_device()
-    return dut
-
-
 def _prompt_manual_float(label: str, current: float | None) -> float | None:
     current_text = "" if current is None else str(current)
     prompt = f"{label} [{current_text}]: " if current_text else f"{label}: "
@@ -392,8 +397,13 @@ def _run_manual_performance_flow(report_path: Path, data: dict[str, Any], equipm
     if not isinstance(performance, dict):
         raise ValueError("Missing or invalid 'performance' section in report.")
 
-    dut_info = _wait_for_device_present("Connect the Apricorn device to continue...")
-    dut_name = (dut_info.iProduct or "unknown_device").strip()
+    dut_name = resolve_report_dut_name(report_path)
+    resolve_or_bind_dut_device(
+        report_path,
+        dut_name,
+        prompt="Connect the Apricorn device to continue...",
+        required_fields=("blockDevice",),
+    )
     report_dut_key = _resolve_report_dut_key(performance, dut_name)
     if report_dut_key is None:
         raise RuntimeError(f"Could not map performance results for DUT {dut_name!r}.")
@@ -418,9 +428,8 @@ def _run_manual_performance_flow(report_path: Path, data: dict[str, Any], equipm
 
 def _sync_performance_section(data: dict[str, Any], equipment: dict[str, Any]) -> None:
     performance = data.setdefault("performance", {})
-    duts = equipment.get("dut", [])
     host_map = {"windows_host": "Windows", "linux_host": "Linux", "macos_host": "macOS"}
-    for dut in duts:
+    for dut in dut_names_from_equipment(equipment):
         perf_dut = performance.setdefault(dut, {"Windows": {}, "Linux": {}, "macOS": {}})
         for host_key, os_key in host_map.items():
             host_data = equipment.get(host_key, {})
@@ -450,6 +459,17 @@ def _load_part_number_and_report(folder_name: str) -> tuple[str, Path]:
     return part_number, report_path
 
 
+def _resolve_or_bind_dut_device_for_deps(
+    report_path: Path, dut_name: str, prompt: str, required_fields: tuple[str, ...]
+) -> ApricornDevice:
+    return resolve_or_bind_dut_device(
+        report_path,
+        dut_name,
+        prompt=prompt,
+        required_fields=required_fields,
+    )
+
+
 def run_software_step(part_number: str | None = None) -> None:
     folder_name = resolve_folder_name(part_number)
     actual_pn, report_path = _load_part_number_and_report(folder_name)
@@ -470,7 +490,8 @@ def run_software_step(part_number: str | None = None) -> None:
         deps=LinuxPerformanceDeps(
             software_entries_for_current_host=_software_entries_for_current_host,
             run_manual_performance_flow=_run_manual_performance_flow,
-            wait_for_device_present=_wait_for_device_present,
+            resolve_report_dut_name=resolve_report_dut_name,
+            resolve_or_bind_dut_device=_resolve_or_bind_dut_device_for_deps,
             resolve_report_dut_key=_resolve_report_dut_key,
             to_float=_to_float,
         ),

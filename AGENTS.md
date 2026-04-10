@@ -35,14 +35,14 @@ Recommended setup:
 ```bash
 uv venv
 uv sync --group dev
-uv run pre-commit install
+uv run --group dev python -m pre_commit install
 ```
 
 Common commands:
 
 ```bash
 uv run pytest
-uv run pre-commit run --all-files
+uv run --group dev python -m pre_commit run --all-files
 uv run drive-qual-report --list-steps
 uv run drive-qual-report --steps drive_info,equipment
 uv run drive-qual-report --steps power_measurements,performance --part-number 69-420

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from drive_qual.core.dut_selection import normalize_dut_bindings
 from drive_qual.core.report_session import load_report, report_path_for, resolve_folder_name, save_report
 from drive_qual.platforms.performance_common import BLACKMAGIC_DISK_SPEED_TEST_TOOL_NAME
 
@@ -61,7 +62,7 @@ def _prompt(label: str, current: str) -> str:
     return input(f"{label}: ").strip()
 
 
-def _dut_from_form_factor(data: dict[str, Any]) -> list[str]:
+def _dut_from_form_factor(data: dict[str, Any]) -> dict[str, dict[str, str | None]]:
     drive_info = data.get("drive_info")
     form_factor = ""
     if isinstance(drive_info, dict):
@@ -72,7 +73,7 @@ def _dut_from_form_factor(data: dict[str, Any]) -> list[str]:
     if form_factor not in FORM_FACTOR_PRODUCTS:
         raise ValueError(f"Unknown form factor: {form_factor or '<missing>'}")
 
-    return FORM_FACTOR_PRODUCTS[form_factor]
+    return {dut_name: {"serial_number": None} for dut_name in FORM_FACTOR_PRODUCTS[form_factor]}
 
 
 def apply_scope_profile(equipment: dict[str, Any], scope: str) -> None:
@@ -196,8 +197,16 @@ def run_equipment_prompt(part_number: str | None = None, scope_profile: str | No
 
     _ensure_hosts(equipment)
 
-    equipment["dut"] = _dut_from_form_factor(data)
-    _ensure_dut_sections(data, equipment["dut"])
+    expected_dut_bindings = _dut_from_form_factor(data)
+    existing_dut_bindings = normalize_dut_bindings(equipment.get("dut"))
+    for dut_name, binding in expected_dut_bindings.items():
+        existing_binding = existing_dut_bindings.get(dut_name)
+        if isinstance(existing_binding, dict):
+            serial_number = existing_binding.get("serial_number")
+            if isinstance(serial_number, str) and serial_number.strip():
+                binding["serial_number"] = serial_number.strip()
+    equipment["dut"] = expected_dut_bindings
+    _ensure_dut_sections(data, list(expected_dut_bindings))
 
     save_report(report_path, data)
     print(f"Updated equipment in {report_path}")

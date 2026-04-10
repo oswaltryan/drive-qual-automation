@@ -48,12 +48,12 @@ def test_run_automation_uses_hard_coded_dut_volume_path(monkeypatch: MonkeyPatch
     target_volume.mkdir()
     calls: list[tuple[str, dict[str, str]]] = []
 
-    monkeypatch.setattr(blackmagic.sys, "platform", "darwin")
+    monkeypatch.setattr("drive_qual.platforms.macos.blackmagic.sys.platform", "darwin")
     monkeypatch.setattr(blackmagic, "HARD_CODED_TARGET_VOLUME_PATH", target_volume)
     monkeypatch.setattr(blackmagic, "_close_blackmagic_app", lambda: None)
     monkeypatch.setattr(blackmagic, "_launch_blackmagic_app", lambda: None)
     monkeypatch.setattr(blackmagic, "_click_blackmagic_by_relative_coordinate", lambda _x, _y: "clicked")
-    monkeypatch.setattr(blackmagic.time, "sleep", lambda _seconds: None)
+    monkeypatch.setattr("drive_qual.platforms.macos.blackmagic.time.sleep", lambda _seconds: None)
 
     def fake_run_ui_script(script_template: str, **values: str) -> str:
         calls.append((script_template, values))

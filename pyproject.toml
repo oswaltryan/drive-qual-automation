@@ -71,7 +71,6 @@ max-args = 6
 max-positional-args = 4
 max-bool-expr = 4
 
-
 [tool.mypy]
 python_version = "3.12"
 strict = true

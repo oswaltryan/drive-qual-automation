@@ -83,9 +83,8 @@ uv sync --group dev
 ### Common Commands
 
 ```bash
-uv run pre-commit install
-uv run pre-commit run --all-files
-uv run pytest
+uv run pre_commit install
+uv run pre_commit run --all-files
 uv run drive-qual-report --list-steps
 ```
 
@@ -383,7 +382,7 @@ automation or instrument integration.
 Use:
 
 ```bash
-uv run pre-commit run --all-files
+uv run pre_commit run --all-files
 ```
 
 This runs formatting, linting, mypy, and pytest through the configured

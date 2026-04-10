@@ -33,7 +33,7 @@ def _report_payload() -> dict[str, Any]:
             "windows_host": {"software": []},
             "linux_host": {"software": [{"name": "Disks (native)", "version": None}]},
             "macos_host": {"software": [{"name": "Blackmagic Disk Speed Test", "version": "4.2"}]},
-            "dut": ["Padlock DT"],
+            "dut": {"Padlock DT": {"serial_number": "ABC123"}},
         },
         "performance": {"Padlock DT": {"Windows": {}, "Linux": {}, "macOS": {}}},
     }
@@ -103,8 +103,17 @@ def test_run_software_step_records_linux_disks_results(monkeypatch: MonkeyPatch,
     monkeypatch.setattr(linux_performance, "report_path_for", lambda folder_name: report_path)
     monkeypatch.setattr(
         linux_performance,
-        "_wait_for_device_present",
-        lambda prompt: ApricornDevice(iProduct="Secure Key DT", iSerial="ABC123", blockDevice="/dev/sdb"),
+        "resolve_report_dut_name",
+        lambda _report_path: "Padlock DT",
+    )
+    monkeypatch.setattr(
+        linux_performance,
+        "resolve_or_bind_dut_device",
+        lambda report_path, dut_name, *, prompt, required_fields=(): ApricornDevice(
+            iProduct="Secure Key DT",
+            iSerial="ABC123",
+            blockDevice="/dev/sdb",
+        ),
     )
     monkeypatch.setattr(
         linux_performance,
@@ -136,8 +145,13 @@ def test_run_software_step_records_macos_blackmagic_results(monkeypatch: MonkeyP
     monkeypatch.setattr(macos_performance, "load_part_number_and_report", lambda folder_name: ("69-420", report_path))
     monkeypatch.setattr(
         macos_performance,
-        "wait_for_device_present",
-        lambda prompt: ApricornDevice(iProduct="Secure Key DT"),
+        "resolve_report_dut_name",
+        lambda _report_path: "Padlock DT",
+    )
+    monkeypatch.setattr(
+        macos_performance,
+        "resolve_or_bind_dut_device",
+        lambda report_path, dut_name, *, prompt, required_fields=(): ApricornDevice(iProduct="Secure Key DT"),
     )
     monkeypatch.setattr(
         macos_performance,
@@ -192,8 +206,13 @@ def test_run_software_step_rejects_invalid_macos_blackmagic_values(monkeypatch: 
     monkeypatch.setattr(macos_performance, "load_part_number_and_report", lambda folder_name: ("69-420", report_path))
     monkeypatch.setattr(
         macos_performance,
-        "wait_for_device_present",
-        lambda prompt: ApricornDevice(iProduct="Secure Key DT"),
+        "resolve_report_dut_name",
+        lambda _report_path: "Padlock DT",
+    )
+    monkeypatch.setattr(
+        macos_performance,
+        "resolve_or_bind_dut_device",
+        lambda report_path, dut_name, *, prompt, required_fields=(): ApricornDevice(iProduct="Secure Key DT"),
     )
     monkeypatch.setattr(
         macos_performance,
@@ -420,8 +439,10 @@ def test_windows_performance_syncs_report_without_running_automation(monkeypatch
     no_wait_error = "device wait should not run when no automation is enabled"
     monkeypatch.setattr(
         windows_performance,
-        "wait_for_device_present",
-        lambda prompt: (_ for _ in ()).throw(AssertionError(no_wait_error)),
+        "resolve_or_bind_dut_device",
+        lambda report_path, dut_name, *, prompt, required_fields=(): (_ for _ in ()).throw(
+            AssertionError(no_wait_error)
+        ),
     )
 
     performance_dispatch.run_software_step(part_number="69-420")
@@ -510,7 +531,7 @@ def test_run_linux_disks_benchmark_invokes_wrapper_script(monkeypatch: MonkeyPat
     monkeypatch.setattr(linux_performance, "_linux_disks_wrapper_script_path", lambda: wrapper_path)
     monkeypatch.setattr(linux_performance, "_prepare_linux_device_for_raw_benchmark", lambda disk_path, use_sudo: None)
     monkeypatch.setattr("drive_qual.platforms.linux.performance.subprocess.run", fake_run)
-    monkeypatch.setattr("drive_qual.platforms.linux.performance.os.geteuid", lambda: 1000)
+    monkeypatch.setattr("drive_qual.platforms.linux.performance._effective_uid", lambda: 1000)
 
     metrics, returned_json_path, returned_csv_path = linux_performance._run_linux_disks_benchmark(
         ApricornDevice(iProduct="Secure Key DT", iSerial="ABC123", blockDevice="/dev/sdb"),
@@ -553,7 +574,7 @@ def test_run_linux_disks_benchmark_requires_sudo_authentication(monkeypatch: Mon
     monkeypatch.setattr(linux_performance, "_linux_disks_wrapper_script_path", lambda: wrapper_path)
     monkeypatch.setattr(linux_performance, "_prepare_linux_device_for_raw_benchmark", lambda disk_path, use_sudo: None)
     monkeypatch.setattr("drive_qual.platforms.linux.performance.subprocess.run", fake_run)
-    monkeypatch.setattr("drive_qual.platforms.linux.performance.os.geteuid", lambda: 1000)
+    monkeypatch.setattr("drive_qual.platforms.linux.performance._effective_uid", lambda: 1000)
 
     with pytest.raises(RuntimeError, match="requires sudo authentication"):
         linux_performance._run_linux_disks_benchmark(

@@ -13,13 +13,14 @@ from drive_qual.core.io_utils import mk_dir
 from drive_qual.core.report_session import load_report, resolve_folder_name, save_report
 from drive_qual.core.storage_paths import artifact_dir, localize_windows_path
 from drive_qual.platforms.performance_common import (
-    find_report_dut_key as _find_report_dut_key,
-)
-from drive_qual.platforms.performance_common import (
     load_part_number_and_report,
+    resolve_or_bind_dut_device,
+    resolve_report_dut_name,
     software_entries_for_host,
     sync_performance_section,
-    wait_for_device_present,
+)
+from drive_qual.platforms.performance_common import (
+    resolve_report_dut_key as _resolve_report_dut_key,
 )
 from drive_qual.platforms.performance_common import (
     to_float as _to_float,
@@ -36,15 +37,11 @@ CDM_TIMEOUT = 1200
 def _pywinauto_module() -> Any:
     if sys.platform != "win32":
         raise RuntimeError("pywinauto is only available on Windows.")
-    return importlib.import_module("pywinauto")
+    return importlib.import_module("pywinauto.application")
 
 
 def _pywinauto_application_class() -> Any:
     return _pywinauto_module().Application
-
-
-def _pywinauto_desktop_class() -> Any:
-    return _pywinauto_module().Desktop
 
 
 def _find_drive_button(main_window: Any, drive_letter: str) -> Any | None:
@@ -108,7 +105,7 @@ def _launch_or_connect_app(app_path: Path, exe_name: str, app_name: str) -> Any:
 
 def _update_cdi_json(report_path: Path, data: dict[str, Any], dut_name: str, val: bool | None) -> None:
     performance = data.setdefault("performance", {})
-    report_dut_key = _find_report_dut_key(performance, dut_name)
+    report_dut_key = _resolve_report_dut_key(performance, dut_name)
     if report_dut_key:
         win_perf = performance[report_dut_key].setdefault("Windows", {})
         cdi_perf = win_perf.setdefault("CrystalDiskInfo", {"screenshot": None})
@@ -207,7 +204,7 @@ def _atto_extract_results(
 
     if csv_rows:
         performance = data.setdefault("performance", {})
-        report_dut_key = _find_report_dut_key(performance, dut_name)
+        report_dut_key = _resolve_report_dut_key(performance, dut_name)
         if report_dut_key:
             win_perf = performance[report_dut_key].setdefault("Windows", {})
             atto_perf = win_perf.setdefault("ATTO", {"read": None, "write": None})
@@ -253,11 +250,8 @@ def _cdm_select_drive(main_window: Any, drive_letter: str) -> None:
         target_item = drive_combo.child_window(title_re=f"{drive_letter}:.*", control_type="ListItem")
         target_item.click_input()
     except Exception:
-        combo_lbox = _pywinauto_desktop_class()(backend="uia").window(class_name="ComboLBox")
-        if combo_lbox.exists():
-            combo_lbox.child_window(title_re=f"{drive_letter}:.*").click_input()
-        else:
-            drive_combo.type_keys(f"{drive_letter}:{{ENTER}}")
+        # Fall back to direct keyboard selection if popup list items aren't exposed.
+        drive_combo.type_keys(f"{drive_letter}:{{ENTER}}")
 
 
 def _cdm_wait_for_completion(app: Any) -> None:
@@ -279,7 +273,7 @@ def _update_cdm_json(
     report_path: Path, data: dict[str, Any], dut_name: str, first_read: str | None, first_write: str | None
 ) -> None:
     performance = data.setdefault("performance", {})
-    report_dut_key = _find_report_dut_key(performance, dut_name)
+    report_dut_key = _resolve_report_dut_key(performance, dut_name)
     if report_dut_key:
         win_perf = performance[report_dut_key].setdefault("Windows", {})
         cdm_perf = win_perf.setdefault("CrystalDiskMark", {"read": None, "write": None})
@@ -382,12 +376,17 @@ def run_software_step(part_number: str | None = None) -> None:
         print("No performance software configured for Windows.")
         return
 
-    dut_info = wait_for_device_present("Connect the Apricorn device to continue...")
+    dut_name = resolve_report_dut_name(report_path)
+    dut_info = resolve_or_bind_dut_device(
+        report_path,
+        dut_name,
+        prompt="Connect the Apricorn device to continue...",
+        required_fields=("driveLetter",),
+    )
     if dut_info.driveLetter is None:
         raise RuntimeError("Could not determine drive letter for the connected device.")
 
     letter = dut_info.driveLetter.strip().replace(":", "").replace("\\", "")
-    dut_name = (dut_info.iProduct or "unknown_device").strip()
     if has_cdi:
         automate_crystal_disk_info(letter, actual_pn, dut_name, report_path, data)
     if has_cdm:

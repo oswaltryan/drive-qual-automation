@@ -22,10 +22,11 @@ from drive_qual.platforms.macos.blackmagic import (
 from drive_qual.platforms.performance_common import (
     BLACKMAGIC_DISK_SPEED_TEST_TOOL_NAME,
     load_part_number_and_report,
+    resolve_or_bind_dut_device,
     resolve_report_dut_key,
+    resolve_report_dut_name,
     software_entries_for_host,
     sync_performance_section,
-    wait_for_device_present,
 )
 
 BLACKMAGIC_TOOL_NAME = BLACKMAGIC_DISK_SPEED_TEST_TOOL_NAME
@@ -332,26 +333,31 @@ def run_software_step(part_number: str | None = None) -> None:  # noqa: PLR0915
     if not isinstance(performance, dict):
         raise ValueError("Missing or invalid 'performance' section in report.")
 
-    dut_info = wait_for_device_present("Connect the Apricorn device to continue...")
-    dut_name = (dut_info.iProduct or "unknown_device").strip()
+    dut_name = resolve_report_dut_name(report_path)
+    dut_info = resolve_or_bind_dut_device(
+        report_path,
+        dut_name,
+        prompt="Connect the Apricorn device to continue...",
+    )
+    dut_label = (dut_info.iProduct or dut_name or "unknown_device").strip()
     report_dut_key = resolve_report_dut_key(performance, dut_name)
     if report_dut_key is None:
         raise RuntimeError(f"Could not map performance results for DUT {dut_name!r}.")
 
-    screenshot_path, json_path, csv_path = _blackmagic_artifact_paths(actual_pn, dut_name)
+    screenshot_path, json_path, csv_path = _blackmagic_artifact_paths(actual_pn, dut_label)
     automation_result = _collect_blackmagic_automation_result(
-        dut_name,
+        dut_label,
         screenshot_path,
     )
     read_mb_s, write_mb_s, _value_source = _resolve_blackmagic_read_write_values(
         tool_name,
-        dut_name,
+        dut_label,
         automation_result,
     )
     _write_blackmagic_json(
         json_path,
         tool_name=tool_name,
-        dut_name=dut_name,
+        dut_name=dut_label,
         read_mb_s=read_mb_s,
         write_mb_s=write_mb_s,
     )

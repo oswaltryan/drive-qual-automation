@@ -100,8 +100,7 @@ def _new_manifest(
         "started_at": now,
         "ended_at": None,
         "steps": [
-            {"name": step, "status": STATUS_PENDING, "updated_at": now, "message": None}
-            for step in selected_steps
+            {"name": step, "status": STATUS_PENDING, "updated_at": now, "message": None} for step in selected_steps
         ],
     }
 

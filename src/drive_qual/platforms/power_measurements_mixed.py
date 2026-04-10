@@ -11,6 +11,12 @@ from typing import Any
 
 from drive_qual import benchmarks as benchmark
 from drive_qual.core import native_disk_ops
+from drive_qual.core.dut_selection import (
+    find_report_dut_name_by_serial,
+    refresh_report_dut_device,
+    resolve_or_bind_report_dut_device,
+    select_report_dut_name,
+)
 from drive_qual.core.io_utils import mk_dir
 from drive_qual.core.power_measurements import extract_power_values_from_csv, update_power_measurements_from_saved_csvs
 from drive_qual.core.report_session import (
@@ -26,8 +32,10 @@ from drive_qual.integrations.apricorn.usb_cli import (
     ApricornDevice,
     device_identity,
     find_apricorn_device,
+    find_apricorn_device_by_serial,
     get_usb_payload,
     is_same_device,
+    is_usb_3x,
     list_apricorn_devices,
 )
 from drive_qual.integrations.instruments import tektronix
@@ -102,13 +110,65 @@ def _refresh_device_after_format(
     expected: ApricornDevice, *, attempts: int = 20, delay_seconds: float = 0.5
 ) -> ApricornDevice:
     for _ in range(attempts):
-        current = _find_matching_device(expected)
-        if current is not None and current.driveLetter:
+        payload = get_usb_payload()
+        devices = list_apricorn_devices(payload) if payload else []
+        current = find_apricorn_device_by_serial(devices, expected.iSerial)
+        if current is None:
+            current = _find_matching_device(expected)
+        if current is not None and current.driveLetter and is_usb_3x(current):
             return current
         if current is not None:
             expected = current
         time.sleep(delay_seconds)
     return expected
+
+
+def _required_device_fields_for_current_host() -> tuple[str, ...]:
+    if sys.platform == "win32":
+        return ("physicalDriveNum",)
+    if sys.platform.startswith("linux"):
+        return ("blockDevice",)
+    return ()
+
+
+def _select_report_dut_name(report_path: Path) -> str:
+    return select_report_dut_name(report_path)
+
+
+def _resolve_device_for_report_dut(
+    report_path: Path,
+    dut_name: str,
+    prompt: str,
+    *,
+    required_fields: tuple[str, ...] | None = None,
+) -> ApricornDevice:
+    fields = _required_device_fields_for_current_host() if required_fields is None else required_fields
+    device = resolve_or_bind_report_dut_device(
+        report_path,
+        dut_name,
+        prompt=prompt,
+        required_fields=fields,
+    )
+    print(f"Tracking Apricorn device: {device_identity(device)}")
+    return device
+
+
+def _refresh_device_for_report_dut(
+    report_path: Path,
+    dut_name: str,
+    prompt: str,
+    *,
+    required_fields: tuple[str, ...] | None = None,
+) -> ApricornDevice:
+    fields = _required_device_fields_for_current_host() if required_fields is None else required_fields
+    device = refresh_report_dut_device(
+        report_path,
+        dut_name,
+        prompt=prompt,
+        required_fields=fields,
+    )
+    print(f"Tracking Apricorn device: {device_identity(device)}")
+    return device
 
 
 def _find_matching_device(expected: ApricornDevice | None) -> ApricornDevice | None:
@@ -198,10 +258,12 @@ def _ensure_local_artifact_dir(part_number: str, category: str) -> None:
     mk_dir(localize_windows_path(Path(win_dir)))
 
 
-async def _run_max_io_benchmark(dut: ApricornDevice, report_path: Path) -> ApricornDevice:  # noqa: PLR0915
-    # Fail fast before partition/format operations if fio is unavailable.
-    benchmark.require_fio()
-
+def _prepare_benchmark_target(
+    dut: ApricornDevice,
+    report_path: Path,
+    *,
+    dut_name: str | None,
+) -> tuple[ApricornDevice, str]:
     if sys.platform == "win32":
         from drive_qual.platforms.windows.power_measurements import (
             normalize_drive_target,
@@ -215,21 +277,36 @@ async def _run_max_io_benchmark(dut: ApricornDevice, report_path: Path) -> Apric
         if not partition_and_format_ok:
             raise RuntimeError("Partition/format step failed.")
 
-        refreshed_dut = _refresh_device_after_format(dut)
+        if dut_name is None:
+            refreshed_dut = _refresh_device_after_format(dut)
+        else:
+            refreshed_dut = _refresh_device_for_report_dut(
+                report_path,
+                dut_name,
+                "Waiting for DUT to re-enumerate after format...",
+                required_fields=("physicalDriveNum", "driveLetter"),
+            )
         disk_mgmt_visible = prompt_disk_management_visible(refreshed_dut)
         _set_windows_compatibility(report_path, "device_manager_disk_mgmt", disk_mgmt_visible)
         target_dir = normalize_drive_target(refreshed_dut.driveLetter)
-    else:
-        refreshed_dut = dut
-        try:
-            prepared = native_disk_ops.prepare_device_for_benchmark(dut)
-        except Exception:
-            _set_current_host_compatibility(report_path, "partition_drive", False)
-            _set_current_host_compatibility(report_path, "format_drive", False)
-            raise
-        _mark_current_host_compatibility(report_path, "partition_drive")
-        _mark_current_host_compatibility(report_path, "format_drive")
-        target_dir = prepared.mount_point
+        return refreshed_dut, target_dir
+
+    try:
+        prepared = native_disk_ops.prepare_device_for_benchmark(dut)
+    except Exception:
+        _set_current_host_compatibility(report_path, "partition_drive", False)
+        _set_current_host_compatibility(report_path, "format_drive", False)
+        raise
+
+    _mark_current_host_compatibility(report_path, "partition_drive")
+    _mark_current_host_compatibility(report_path, "format_drive")
+    return dut, prepared.mount_point
+
+
+async def _run_max_io_benchmark(dut: ApricornDevice, report_path: Path, dut_name: str | None = None) -> ApricornDevice:
+    # Fail fast before partition/format operations if fio is unavailable.
+    benchmark.require_fio()
+    refreshed_dut, target_dir = _prepare_benchmark_target(dut, report_path, dut_name=dut_name)
 
     benchmark_file = benchmark.benchmark_file_path(target_dir, "benchmark_file.dat")
     write_ret = await benchmark.run_fio(target_dir, "write", 10, 100)
@@ -291,13 +368,14 @@ def _write_measurement_backup(report_path: Path, csv_path: str, measurement_grou
 
 
 async def _run_max_io(part_number: str, report_path: Path) -> ApricornDevice:
-    dut = _wait_for_confirmed_device_present("Unlock Apricorn device..")
+    dut_name = _select_report_dut_name(report_path)
+    dut = _resolve_device_for_report_dut(report_path, dut_name, "Unlock Apricorn device..")
     _mark_current_host_compatibility(report_path, "recognized_by_os")
     tektronix.recall_setup(setup_type="Max IO", device_type=_device_type_for_scope(dut))
     _ensure_local_artifact_dir(part_number, "Max IO")
 
     try:
-        dut = await _run_max_io_benchmark(dut, report_path)
+        dut = await _run_max_io_benchmark(dut, report_path, dut_name=dut_name)
     except Exception as exc:
         print(f"Critical error during Max IO benchmark: {exc}")
     finally:
@@ -325,7 +403,10 @@ async def _run_in_rush(part_number: str, report_path: Path, expected_dut: Aprico
     tektronix.recall_setup(setup_type="InRush", device_type=device_type)
     _ensure_local_artifact_dir(part_number, "In Rush Current")
 
-    dut = _wait_for_device_present("Reconnect Apricorn device..", expected=expected_dut)
+    dut_name = find_report_dut_name_by_serial(report_path, expected_dut.iSerial)
+    if dut_name is None:
+        dut_name = _select_report_dut_name(report_path)
+    dut = _refresh_device_for_report_dut(report_path, dut_name, "Reconnect Apricorn device..")
     _mark_current_host_compatibility(report_path, "hot_pluggable")
     device_label = _dut_label(dut)
     artifact_os = _current_artifact_os_name()
