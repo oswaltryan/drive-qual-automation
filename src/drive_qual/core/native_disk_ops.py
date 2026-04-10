@@ -27,6 +27,8 @@ MACOS_VOLUME_LABEL = "DUT"
 MACOS_NO_INDEX_MARKER = ".metadata_never_index"
 POLL_ATTEMPTS = 20
 POLL_DELAY_SECONDS = 0.5
+LINUX_MKFS_RETRY_ATTEMPTS = 3
+LINUX_MKFS_RETRY_DELAY_SECONDS = 0.5
 
 
 @dataclass(frozen=True)
@@ -63,9 +65,7 @@ def safe_remove_device(device: ApricornDevice) -> bool:
 def _prepare_linux_device(device: ApricornDevice) -> PreparedBenchmarkTarget:
     candidate = _select_linux_candidate(device)
     _linux_prepare_for_repartition(candidate.disk_path)
-    _run_command(
-        _with_linux_privilege(["mkfs", f"-t{LINUX_FILESYSTEM}", "-F", "-L", LINUX_VOLUME_LABEL, candidate.disk_path])
-    )
+    _linux_make_filesystem(candidate.disk_path)
     _run_command(_with_linux_privilege(["udevadm", "settle"]), check=False)
     mount_point = _linux_mount_block_device(candidate.disk_path)
     _linux_take_mount_ownership(mount_point)
@@ -165,6 +165,36 @@ def _run_command(
         detail = f": {stderr}" if stderr else ""
         raise RuntimeError(f"Command failed ({rendered}){detail}")
     return result
+
+
+def _linux_make_filesystem(disk_path: str) -> None:
+    command = _with_linux_privilege(["mkfs", f"-t{LINUX_FILESYSTEM}", "-F", "-L", LINUX_VOLUME_LABEL, disk_path])
+    for attempt in range(1, LINUX_MKFS_RETRY_ATTEMPTS + 1):
+        result = _run_command(command, check=False, capture_output=True)
+        if result.returncode == 0:
+            return
+
+        stderr = (result.stderr or "").strip()
+        stdout = (result.stdout or "").strip()
+        detail = f"{stderr}\n{stdout}".strip()
+        if attempt < LINUX_MKFS_RETRY_ATTEMPTS and _linux_mkfs_busy(detail):
+            _linux_unmount_disk(disk_path)
+            _run_command(_with_linux_privilege(["udevadm", "settle"]), check=False)
+            time.sleep(LINUX_MKFS_RETRY_DELAY_SECONDS)
+            continue
+
+        rendered = " ".join(command)
+        suffix = f": {detail}" if detail else ""
+        raise RuntimeError(f"Command failed ({rendered}){suffix}")
+
+
+def _linux_mkfs_busy(detail: str) -> bool:
+    normalized = _normalized(detail)
+    return (
+        "apparently in use by the system" in normalized
+        or "is mounted" in normalized
+        or "device or resource busy" in normalized
+    )
 
 
 def _select_linux_candidate(device: ApricornDevice) -> NativeDiskCandidate:

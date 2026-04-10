@@ -16,15 +16,32 @@ def test_benchmark_file_path_normalizes_windows_drive_roots(monkeypatch: MonkeyP
     assert benchmark_file_path("D:\\", "benchmark_file.dat") == r"D:\benchmark_file.dat"
 
 
-def test_require_fio_supports_repo_local_native_binary(monkeypatch: MonkeyPatch) -> None:
+def test_require_fio_supports_repo_local_native_binary_on_macos(monkeypatch: MonkeyPatch) -> None:
     called_with: list[tuple[str, ...]] = []
 
     def fake_resolve_tool(*candidates: str) -> str | None:
         called_with.append(candidates)
         return "/repo/tools/fio"
 
+    monkeypatch.setattr("drive_qual.benchmarks.common.sys.platform", "darwin")
     monkeypatch.setattr("drive_qual.benchmarks.common._resolve_tool", fake_resolve_tool)
 
     assert require_fio() == "/repo/tools/fio"
     assert called_with
     assert "tools/fio" in called_with[0]
+
+
+def test_require_fio_does_not_consider_macos_binary_on_linux(monkeypatch: MonkeyPatch) -> None:
+    called_with: list[tuple[str, ...]] = []
+
+    def fake_resolve_tool(*candidates: str) -> str | None:
+        called_with.append(candidates)
+        return "/usr/bin/fio"
+
+    monkeypatch.setattr("drive_qual.benchmarks.common.sys.platform", "linux")
+    monkeypatch.setattr("drive_qual.benchmarks.common._resolve_tool", fake_resolve_tool)
+
+    assert require_fio() == "/usr/bin/fio"
+    assert called_with
+    assert called_with[0][0] == "fio"
+    assert "tools/fio" not in called_with[0]

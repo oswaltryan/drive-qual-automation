@@ -96,6 +96,48 @@ def test_prepare_linux_device_takes_mount_ownership(monkeypatch) -> None:  # typ
     assert any(command and command[0] == "chown" and "/media/test/DUT" in command for command in calls)
 
 
+def test_prepare_linux_device_retries_when_mkfs_reports_busy(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    device = ApricornDevice(iProduct="Padlock 3.0", iSerial="ABC123", blockDevice="/dev/sda")
+    commands: list[list[str]] = []
+    unmount_calls: list[str] = []
+    mkfs_attempts = 0
+
+    monkeypatch.setattr(
+        native_disk_ops,
+        "_select_linux_candidate",
+        lambda device: native_disk_ops.NativeDiskCandidate("/dev/sda", "disk"),
+    )
+    monkeypatch.setattr(native_disk_ops, "_linux_prepare_for_repartition", lambda disk_path: None)
+    monkeypatch.setattr(native_disk_ops, "_linux_mount_block_device", lambda block_path: "/media/test/DUT")
+    monkeypatch.setattr(native_disk_ops, "_with_linux_privilege", lambda command: command)
+    monkeypatch.setattr(native_disk_ops, "_linux_unmount_disk", lambda disk_path: unmount_calls.append(disk_path))
+    monkeypatch.setattr("drive_qual.core.native_disk_ops.time.sleep", lambda _: None)
+
+    def fake_run_command(command: list[str], **kwargs: Any) -> object:
+        nonlocal mkfs_attempts
+        commands.append(command)
+        if command and command[0] == "mkfs":
+            mkfs_attempts += 1
+            if mkfs_attempts == 1:
+                return type(
+                    "Result",
+                    (),
+                    {"returncode": 1, "stdout": "", "stderr": "/dev/sda is apparently in use by the system"},
+                )()
+        return type("Result", (), {"returncode": 0, "stdout": "", "stderr": ""})()
+
+    monkeypatch.setattr(native_disk_ops, "_run_command", fake_run_command)
+
+    expected_attempts = 2
+    expected_settle_calls = 2
+
+    native_disk_ops._prepare_linux_device(device)
+
+    assert mkfs_attempts == expected_attempts
+    assert unmount_calls == ["/dev/sda"]
+    assert commands.count(["udevadm", "settle"]) == expected_settle_calls
+
+
 def test_safe_remove_linux_device_uses_linux_privilege(monkeypatch) -> None:  # type: ignore[no-untyped-def]
     device = ApricornDevice(iProduct="Padlock 3.0", iSerial="ABC123", blockDevice="/dev/sda")
     commands: list[list[str]] = []

@@ -23,15 +23,29 @@ def _resolve_tool(*candidates: str) -> str | None:
     return None
 
 
-def _require_fio() -> str:
-    tool = _resolve_tool(
-        "fio.exe",
-        "tools/fio.exe",
-        "tools/fio",
+def _fio_candidates() -> tuple[str, ...]:
+    if sys.platform == "win32":
+        return (
+            "fio.exe",
+            "tools/fio.exe",
+            "fio",
+        )
+    if sys.platform == "darwin":
+        return (
+            "fio",
+            "/opt/homebrew/bin/fio",
+            "/usr/local/bin/fio",
+            "tools/fio",
+        )
+    return (
         "fio",
-        "/opt/homebrew/bin/fio",
+        "/usr/bin/fio",
         "/usr/local/bin/fio",
     )
+
+
+def _require_fio() -> str:
+    tool = _resolve_tool(*_fio_candidates())
     if tool is None:
         raise FileNotFoundError(FIO_NOT_FOUND_MESSAGE)
     return tool

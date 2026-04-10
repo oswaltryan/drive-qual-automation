@@ -584,3 +584,28 @@ def test_run_linux_disks_benchmark_requires_sudo_authentication(monkeypatch: Mon
 
     assert calls
     assert calls[0] == ["sudo", "-v"]
+
+
+def test_prepare_linux_device_for_raw_benchmark_uses_noninteractive_sudo_for_fallback(monkeypatch: MonkeyPatch) -> None:
+    calls: list[list[str]] = []
+
+    monkeypatch.setattr(
+        linux_performance,
+        "_linux_unmount_candidates",
+        lambda disk_path: ["/dev/sda1"],
+    )
+
+    def fake_run(command: list[str], **kwargs: Any) -> Any:
+        calls.append(command)
+        if command == ["sudo", "-n", "udisksctl", "unmount", "-b", "/dev/sda1"]:
+            return type("Result", (), {"returncode": 1, "stdout": "", "stderr": "not mounted"})()
+        return type("Result", (), {"returncode": 0, "stdout": "", "stderr": ""})()
+
+    monkeypatch.setattr("drive_qual.platforms.linux.performance.subprocess.run", fake_run)
+
+    linux_performance._prepare_linux_device_for_raw_benchmark("/dev/sda", use_sudo=True)
+
+    assert calls == [
+        ["sudo", "-n", "udisksctl", "unmount", "-b", "/dev/sda1"],
+        ["sudo", "-n", "umount", "/dev/sda1"],
+    ]
