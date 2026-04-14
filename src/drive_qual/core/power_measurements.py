@@ -36,14 +36,19 @@ REPORT_OS_KEY_BY_ARTIFACT = {
     "linux": "linux",
 }
 CSV_ENCODING_CANDIDATES = ("utf-8", "utf-8-sig", "cp1252", "latin-1")
+CSV_APPEAR_TIMEOUT_SECONDS = 45.0
+CSV_APPEAR_POLL_INTERVAL_SECONDS = 0.25
 DUT_ALIASES: dict[str, str] = {
-    "secure key 3 0": "Padlock DT",
-    "secure key 3": "Padlock DT",
-    "secure key dt": "Padlock DT",
+    "secure key 3 0": "Padlock DT FIPS",
+    "secure key 3": "Padlock DT FIPS",
+    "secure key dt": "Padlock DT FIPS",
     "secure key dt fips": "Padlock DT FIPS",
     "secure key 3 0 fips": "Padlock DT FIPS",
     "secure key fips": "Padlock DT FIPS",
+    "aegis fips dt": "Padlock DT FIPS",
+    "padlock dt": "Padlock DT FIPS",
 }
+MAX_IO_RAIL_SUFFIX_PATTERN = re.compile(r"^(?P<dut>.+?)(?:[\s_-]+(?P<rail>5v|12v))?$", re.IGNORECASE)
 
 
 def _display_path(path: str | Path) -> str:
@@ -140,7 +145,12 @@ def _extract_measurement(csv_path: Path, measurement: str, field_name: str) -> f
     return None
 
 
-def _wait_for_csv(csv_path: Path, *, timeout_seconds: float = 10.0, interval_seconds: float = 0.25) -> bool:
+def _wait_for_csv(
+    csv_path: Path,
+    *,
+    timeout_seconds: float = CSV_APPEAR_TIMEOUT_SECONDS,
+    interval_seconds: float = CSV_APPEAR_POLL_INTERVAL_SECONDS,
+) -> bool:
     deadline = time.monotonic() + timeout_seconds
     while True:
         if csv_path.exists():
@@ -181,6 +191,15 @@ def _resolve_dut_key(power: dict[str, Any], dut_name: str) -> str | None:
     return None
 
 
+def _split_dut_name_and_max_io_rail(dut_name: str) -> tuple[str, str | None]:
+    match = MAX_IO_RAIL_SUFFIX_PATTERN.fullmatch(dut_name.strip())
+    if match is None:
+        return dut_name, None
+    base_name = (match.group("dut") or "").strip() or dut_name
+    rail = (match.group("rail") or "").strip().casefold() or None
+    return base_name, rail
+
+
 def _ensure_os_slot(fields: dict[str, Any], key: str) -> dict[str, Any]:
     default_slot = {"linux": None, "macos": None, "windows": None}
     slot = fields.setdefault(key, default_slot)
@@ -193,6 +212,9 @@ def _ensure_os_slot(fields: dict[str, Any], key: str) -> dict[str, Any]:
 def _apply_csv_to_power(power: dict[str, Any], csv_path: Path) -> bool:  # noqa: PLR0912, PLR0915
     measurement_group = csv_path.parent.name.casefold()
     dut_name = csv_path.stem
+    rail = None
+    if measurement_group in {"max io", "in rush current"}:
+        dut_name, rail = _split_dut_name_and_max_io_rail(dut_name)
     dut_key = _resolve_dut_key(power, dut_name)
     if dut_key is None:
         print(f"Skipping CSV {_display_path(csv_path)}; could not map DUT '{dut_name}' in report power section.")
@@ -211,21 +233,35 @@ def _apply_csv_to_power(power: dict[str, Any], csv_path: Path) -> bool:  # noqa:
     changed = False
     if measurement_group == "in rush current":
         max_inrush = _extract_measurement(csv_path, "Meas1", "Accum-Max")
+        inrush_field = "max_inrush_current"
+        if rail == "5v":
+            inrush_field = "max_inrush_current_5v"
+        elif rail == "12v":
+            inrush_field = "max_inrush_current_12v"
         if max_inrush is not None:
-            slot = _ensure_os_slot(fields, "max_inrush_current")
+            slot = _ensure_os_slot(fields, inrush_field)
             if slot.get(report_os_key) != max_inrush:
                 slot[report_os_key] = max_inrush
                 changed = True
     elif measurement_group == "max io":
         max_rw = _extract_measurement(csv_path, "Meas1", "Accum-Max")
         rms_rw = _extract_measurement(csv_path, "Meas3", "Accum-Mean")
+        max_rw_field = "max_read_write_current"
+        rms_rw_field = "rms_read_write_current"
+        if rail == "5v":
+            max_rw_field = "max_read_write_current_5v"
+            rms_rw_field = "rms_read_write_current_5v"
+        elif rail == "12v":
+            max_rw_field = "max_read_write_current_12v"
+            rms_rw_field = "rms_read_write_current_12v"
+
         if max_rw is not None:
-            slot = _ensure_os_slot(fields, "max_read_write_current")
+            slot = _ensure_os_slot(fields, max_rw_field)
             if slot.get(report_os_key) != max_rw:
                 slot[report_os_key] = max_rw
                 changed = True
         if rms_rw is not None:
-            slot = _ensure_os_slot(fields, "rms_read_write_current")
+            slot = _ensure_os_slot(fields, rms_rw_field)
             if slot.get(report_os_key) != rms_rw:
                 slot[report_os_key] = rms_rw
                 changed = True
@@ -235,16 +271,36 @@ def _apply_csv_to_power(power: dict[str, Any], csv_path: Path) -> bool:  # noqa:
 def extract_power_values_from_csv(csv_path: str) -> dict[str, float | None]:
     path = localize_windows_path(Path(csv_path))
     measurement_group = path.parent.name.casefold()
+    _dut_name, rail = _split_dut_name_and_max_io_rail(path.stem)
     values: dict[str, float | None] = {
         "max_inrush_current": None,
+        "max_inrush_current_5v": None,
+        "max_inrush_current_12v": None,
         "max_read_write_current": None,
         "rms_read_write_current": None,
+        "max_read_write_current_5v": None,
+        "rms_read_write_current_5v": None,
+        "max_read_write_current_12v": None,
+        "rms_read_write_current_12v": None,
     }
     if measurement_group == "in rush current":
-        values["max_inrush_current"] = _extract_measurement(path, "Meas1", "Accum-Max")
+        max_inrush = _extract_measurement(path, "Meas1", "Accum-Max")
+        values["max_inrush_current"] = max_inrush
+        if rail == "5v":
+            values["max_inrush_current_5v"] = max_inrush
+        elif rail == "12v":
+            values["max_inrush_current_12v"] = max_inrush
     elif measurement_group == "max io":
-        values["max_read_write_current"] = _extract_measurement(path, "Meas1", "Accum-Max")
-        values["rms_read_write_current"] = _extract_measurement(path, "Meas3", "Accum-Mean")
+        max_rw = _extract_measurement(path, "Meas1", "Accum-Max")
+        rms_rw = _extract_measurement(path, "Meas3", "Accum-Mean")
+        values["max_read_write_current"] = max_rw
+        values["rms_read_write_current"] = rms_rw
+        if rail == "5v":
+            values["max_read_write_current_5v"] = max_rw
+            values["rms_read_write_current_5v"] = rms_rw
+        elif rail == "12v":
+            values["max_read_write_current_12v"] = max_rw
+            values["rms_read_write_current_12v"] = rms_rw
     return values
 
 

@@ -46,6 +46,8 @@ ARTIFACT_OS_NAME_BY_SLOT = {
     "macos": "macOS",
     "windows": "Windows",
 }
+DT_FIPS_DUT_NAME = "padlock dt fips"
+DT_FIPS_MAX_IO_RAILS: tuple[str, ...] = ("5V", "12V")
 
 
 def _display_path(path: str | Path) -> str:
@@ -241,6 +243,14 @@ def _report_benchmark_results(write_ret: int, read_ret: int) -> None:
         print(f"\nBenchmark failed - Write: {write_ret}, Read: {read_ret}")
 
 
+def _try_safe_remove_native_device(dut: ApricornDevice) -> bool:
+    try:
+        return native_disk_ops.safe_remove_device(dut)
+    except Exception as exc:
+        print(f"Warning: safe remove failed for {device_identity(dut)}: {exc}")
+        return False
+
+
 def _device_type_for_scope(dut: ApricornDevice) -> str:
     product = (dut.iProduct or "").strip().lower()
     if "dt" in product:
@@ -251,6 +261,34 @@ def _device_type_for_scope(dut: ApricornDevice) -> str:
 def _dut_label(dut: ApricornDevice) -> str:
     label = (dut.iProduct or "").strip()
     return label or "unknown_device"
+
+
+def _normalized_dut_name(dut_name: str) -> str:
+    return " ".join(dut_name.strip().casefold().split())
+
+
+def _max_io_rails_for_dut(dut_name: str) -> tuple[str | None, ...]:
+    if _normalized_dut_name(dut_name) == DT_FIPS_DUT_NAME:
+        return DT_FIPS_MAX_IO_RAILS
+    return (None,)
+
+
+def _rail_device_label(base_label: str, rail: str | None) -> str:
+    if not rail:
+        return base_label
+    return f"{base_label} {rail}"
+
+
+def _max_io_measurement_group(rail: str | None) -> str:
+    if not rail:
+        return "Max IO"
+    return f"Max IO {rail}"
+
+
+def _in_rush_measurement_group(rail: str | None) -> str:
+    if not rail:
+        return "In Rush Current"
+    return f"In Rush Current {rail}"
 
 
 def _ensure_local_artifact_dir(part_number: str, category: str) -> None:
@@ -303,10 +341,20 @@ def _prepare_benchmark_target(
     return dut, prepared.mount_point
 
 
-async def _run_max_io_benchmark(dut: ApricornDevice, report_path: Path, dut_name: str | None = None) -> ApricornDevice:
+async def _run_max_io_benchmark(
+    dut: ApricornDevice,
+    report_path: Path,
+    dut_name: str | None = None,
+    *,
+    max_io_rail: str | None = None,
+) -> ApricornDevice:
     # Fail fast before partition/format operations if fio is unavailable.
     benchmark.require_fio()
     refreshed_dut, target_dir = _prepare_benchmark_target(dut, report_path, dut_name=dut_name)
+    tektronix.recall_setup(setup_type="Max IO", device_type=_device_type_for_scope(refreshed_dut))
+    tektronix.start_run()
+    if max_io_rail:
+        print(f"Running Max IO benchmark on {max_io_rail} rail.")
 
     benchmark_file = benchmark.benchmark_file_path(target_dir, "benchmark_file.dat")
     write_ret = await benchmark.run_fio(target_dir, "write", 10, 100)
@@ -367,62 +415,74 @@ def _write_measurement_backup(report_path: Path, csv_path: str, measurement_grou
     print(f"Wrote capture backup entry to {_display_path(backup_path)}")
 
 
-async def _run_max_io(part_number: str, report_path: Path) -> ApricornDevice:
+async def _run_max_io(part_number: str, report_path: Path, *, max_io_rail: str | None = None) -> ApricornDevice:
     dut_name = _select_report_dut_name(report_path)
     dut = _resolve_device_for_report_dut(report_path, dut_name, "Unlock Apricorn device..")
     _mark_current_host_compatibility(report_path, "recognized_by_os")
-    tektronix.recall_setup(setup_type="Max IO", device_type=_device_type_for_scope(dut))
     _ensure_local_artifact_dir(part_number, "Max IO")
-
     try:
-        dut = await _run_max_io_benchmark(dut, report_path, dut_name=dut_name)
+        dut = await _run_max_io_benchmark(dut, report_path, dut_name=dut_name, max_io_rail=max_io_rail)
     except Exception as exc:
-        print(f"Critical error during Max IO benchmark: {exc}")
+        rail_suffix = f" ({max_io_rail})" if max_io_rail else ""
+        print(f"Critical error during Max IO benchmark{rail_suffix}: {exc}")
     finally:
-        device_label = _dut_label(dut)
+        device_label = _rail_device_label(_dut_label(dut), max_io_rail)
         artifact_os = _current_artifact_os_name()
         csv_path = artifact_file(part_number, artifact_os, "Max IO", f"{device_label}.csv")
         tektronix.stop_run()
         parsed_csv_path = tektronix.save_measurements(csv_path)
         tektronix.backup_session(artifact_file(part_number, artifact_os, "Max IO", f"{device_label}.png"))
-        _write_measurement_backup(report_path, parsed_csv_path, "Max IO")
-        if sys.platform == "win32":
-            from drive_qual.platforms.windows.power_measurements import run_safe_eject_script
+        _write_measurement_backup(report_path, parsed_csv_path, _max_io_measurement_group(max_io_rail))
 
-            if run_safe_eject_script(dut):
-                _mark_current_host_compatibility(report_path, "safely_remove")
-        elif native_disk_ops.safe_remove_device(dut):
+    if sys.platform == "win32":
+        from drive_qual.platforms.windows.power_measurements import run_safe_eject_script
+
+        if run_safe_eject_script(dut):
             _mark_current_host_compatibility(report_path, "safely_remove")
-        _wait_for_device_removed(dut, "Remove Apricorn device..")
-        print("")
+    elif _try_safe_remove_native_device(dut):
+        _mark_current_host_compatibility(report_path, "safely_remove")
+    _wait_for_device_removed(dut, "Remove Apricorn device..")
+    print("")
     return dut
 
 
-async def _run_in_rush(part_number: str, report_path: Path, expected_dut: ApricornDevice) -> None:
+async def _run_in_rush(
+    part_number: str,
+    report_path: Path,
+    expected_dut: ApricornDevice,
+    *,
+    max_io_rail: str | None = None,
+) -> None:
     device_type = _device_type_for_scope(expected_dut)
     tektronix.recall_setup(setup_type="InRush", device_type=device_type)
     _ensure_local_artifact_dir(part_number, "In Rush Current")
+    _wait_for_device_removed(expected_dut, "Remove Apricorn device..")
 
     dut_name = find_report_dut_name_by_serial(report_path, expected_dut.iSerial)
     if dut_name is None:
         dut_name = _select_report_dut_name(report_path)
     dut = _refresh_device_for_report_dut(report_path, dut_name, "Reconnect Apricorn device..")
     _mark_current_host_compatibility(report_path, "hot_pluggable")
-    device_label = _dut_label(dut)
+    device_label = _rail_device_label(_dut_label(dut), max_io_rail)
     artifact_os = _current_artifact_os_name()
     csv_path = artifact_file(part_number, artifact_os, "In Rush Current", f"{device_label}.csv")
     tektronix.stop_run()
     parsed_csv_path = tektronix.save_measurements(csv_path)
     tektronix.backup_session(artifact_file(part_number, artifact_os, "In Rush Current", f"{device_label}.png"))
-    _write_measurement_backup(report_path, parsed_csv_path, "In Rush Current")
+    _write_measurement_backup(report_path, parsed_csv_path, _in_rush_measurement_group(max_io_rail))
 
 
 def run_power_measurements_step() -> None:
     folder_name = resolve_folder_name(None)
     part_number, report_path = _load_part_number_and_report(folder_name)
+    dut_name = _select_report_dut_name(report_path)
+    rails = _max_io_rails_for_dut(dut_name)
 
-    dut = asyncio.run(_run_max_io(part_number, report_path))
-    asyncio.run(_run_in_rush(part_number, report_path, dut))
+    for rail in rails:
+        if rail:
+            print(f"Starting power-measurement sequence for {rail} rail.")
+        dut = asyncio.run(_run_max_io(part_number, report_path, max_io_rail=rail))
+        asyncio.run(_run_in_rush(part_number, report_path, dut, max_io_rail=rail))
 
     # Final pass re-reads all CSVs to ensure report JSON is consistent.
     update_power_measurements_from_saved_csvs(part_number=part_number)

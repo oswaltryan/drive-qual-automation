@@ -211,3 +211,28 @@ def test_equipment_prompts_for_scope_profile_when_scope_data_missing(monkeypatch
     assert updated["equipment"]["scope"]["model"] == "Tektronix MSO54"
     assert updated["equipment"]["probe_current"]["channel"] == "4"
     assert prompts == ["Scope profile (tektronix/rigol): "]
+
+
+def test_equipment_3_5_form_factor_uses_only_padlock_dt_fips_and_rail_power_fields(
+    monkeypatch: MonkeyPatch, tmp_path: Path
+) -> None:
+    report_path = tmp_path / "report.json"
+    _write_json(report_path, _report_with_drive_info(form_factor="3.5"))
+
+    monkeypatch.setattr(equipment, "resolve_folder_name", lambda part_number: "69-420")
+    monkeypatch.setattr(equipment, "report_path_for", lambda folder_name: report_path)
+    monkeypatch.setattr("builtins.input", lambda prompt: "tektronix")
+
+    equipment.run_equipment_prompt()
+
+    updated = json.loads(report_path.read_text(encoding="utf-8"))
+    assert updated["equipment"]["dut"] == {"Padlock DT FIPS": {"serial_number": None}}
+    assert updated["power"]["Padlock DT FIPS"] == {
+        "max_inrush_current": {"linux": None, "macos": None, "windows": None},
+        "max_inrush_current_5v": {"linux": None, "macos": None, "windows": None},
+        "max_inrush_current_12v": {"linux": None, "macos": None, "windows": None},
+        "max_read_write_current_5v": {"linux": None, "macos": None, "windows": None},
+        "rms_read_write_current_5v": {"linux": None, "macos": None, "windows": None},
+        "max_read_write_current_12v": {"linux": None, "macos": None, "windows": None},
+        "rms_read_write_current_12v": {"linux": None, "macos": None, "windows": None},
+    }

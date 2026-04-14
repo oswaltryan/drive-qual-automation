@@ -227,6 +227,7 @@ def test_prepare_macos_device_creates_no_index_marker(monkeypatch) -> None:  # t
     )
     monkeypatch.setattr(native_disk_ops, "_macos_wait_for_partition", lambda disk_path: "/dev/disk4s2")
     monkeypatch.setattr(native_disk_ops, "_macos_wait_for_mount", lambda partition_path: "/Volumes/DUT")
+    monkeypatch.setattr(native_disk_ops, "_macos_ensure_writable_mount", lambda partition_path, mount_point: None)
     monkeypatch.setattr(
         native_disk_ops, "_run_command", lambda command, **kwargs: type("Result", (), {"returncode": 0})()
     )
@@ -240,6 +241,77 @@ def test_prepare_macos_device_creates_no_index_marker(monkeypatch) -> None:  # t
 
     assert prepared == native_disk_ops.PreparedBenchmarkTarget("/dev/disk4", "/dev/disk4s2", "/Volumes/DUT")
     assert marker_calls == ["/Volumes/DUT"]
+
+
+def test_select_macos_candidate_retries_until_candidates_appear(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    device = ApricornDevice(iProduct="Padlock DT FIPS", iSerial="ABC123")
+    candidate = native_disk_ops.NativeDiskCandidate("/dev/disk4", "disk")
+    polls = iter([[], [candidate]])
+
+    monkeypatch.setattr(native_disk_ops, "_macos_candidates", lambda: next(polls))
+    monkeypatch.setattr(native_disk_ops, "_select_candidate", lambda candidates, device: candidates[0])
+    monkeypatch.setattr("drive_qual.core.native_disk_ops.time.sleep", lambda _: None)
+
+    selected = native_disk_ops._select_macos_candidate(device)
+
+    assert selected == candidate
+
+
+def test_macos_candidates_fall_back_from_external_physical(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    calls: list[tuple[str, ...]] = []
+
+    def fake_disk_list_entries(*filters: str) -> list[dict[str, str]]:
+        calls.append(filters)
+        if filters == ("external", "physical"):
+            return []
+        if filters == ("external",):
+            return [{"DeviceIdentifier": "disk4"}]
+        return []
+
+    monkeypatch.setattr(native_disk_ops, "_macos_disk_list_entries", fake_disk_list_entries)
+    monkeypatch.setattr(
+        native_disk_ops,
+        "_macos_disk_info",
+        lambda disk_path: {"MediaName": "AEGIS FIPS DT", "DeviceIdentifier": "disk4"},
+    )
+
+    candidates = native_disk_ops._macos_candidates()
+
+    assert calls == [("external", "physical"), ("external",)]
+    assert candidates == [
+        native_disk_ops.NativeDiskCandidate(
+            disk_path="/dev/disk4",
+            description="/dev/disk4 AEGIS FIPS DT",
+            serial="disk4",
+            model="AEGIS FIPS DT",
+        )
+    ]
+
+
+def test_macos_candidates_excludes_internal_disks(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    monkeypatch.setattr(
+        native_disk_ops,
+        "_macos_disk_list_entries",
+        lambda *filters: [{"DeviceIdentifier": "disk0"}, {"DeviceIdentifier": "disk4"}],
+    )
+
+    def fake_disk_info(path: str) -> dict[str, object]:
+        if path == "/dev/disk0":
+            return {"Internal": True, "MediaName": "Apple SSD", "DeviceIdentifier": "disk0"}
+        return {"Internal": False, "MediaName": "AEGIS FIPS DT", "DeviceIdentifier": "disk4"}
+
+    monkeypatch.setattr(native_disk_ops, "_macos_disk_info", fake_disk_info)
+
+    candidates = native_disk_ops._macos_candidates()
+
+    assert candidates == [
+        native_disk_ops.NativeDiskCandidate(
+            disk_path="/dev/disk4",
+            description="/dev/disk4 AEGIS FIPS DT",
+            serial="disk4",
+            model="AEGIS FIPS DT",
+        )
+    ]
 
 
 def test_mark_macos_volume_no_index_runs_touch_command(monkeypatch) -> None:  # type: ignore[no-untyped-def]
@@ -259,6 +331,24 @@ def test_mark_macos_volume_no_index_runs_touch_command(monkeypatch) -> None:  # 
             {"check": False, "capture_output": True},
         )
     ]
+
+
+def test_macos_ensure_writable_mount_disables_ownership_when_probe_fails(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    commands: list[list[str]] = []
+    probes = iter([False, True])
+
+    monkeypatch.setattr(native_disk_ops, "_macos_probe_mount_write", lambda mount_point: next(probes))
+    monkeypatch.setattr("drive_qual.core.native_disk_ops.time.sleep", lambda _: None)
+
+    def fake_run_command(command: list[str], **kwargs: Any) -> object:
+        commands.append(command)
+        return type("Result", (), {"returncode": 0, "stdout": "", "stderr": ""})()
+
+    monkeypatch.setattr(native_disk_ops, "_run_command", fake_run_command)
+
+    native_disk_ops._macos_ensure_writable_mount("/dev/disk4s2", "/Volumes/DUT")
+
+    assert commands == [["diskutil", "disableOwnership", "/dev/disk4s2"]]
 
 
 def test_macos_data_partition_path_prefers_dut_named_volume() -> None:
@@ -387,6 +477,75 @@ def test_macos_apfs_volume_path_for_physical_store_prefers_dut_volume(monkeypatc
     monkeypatch.setattr(native_disk_ops, "_run_command", fake_run_command)
 
     assert native_disk_ops._macos_apfs_volume_path_for_physical_store("/dev/disk4s2") == "/dev/disk5s1"
+
+
+def test_macos_apfs_volume_path_for_physical_store_falls_back_to_container_reference(
+    monkeypatch,
+) -> None:  # type: ignore[no-untyped-def]
+    apfs_empty_plist = """
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Containers</key>
+  <array/>
+</dict>
+</plist>
+""".strip()
+    info_plist = """
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>APFSContainerReference</key>
+  <string>disk5</string>
+</dict>
+</plist>
+""".strip()
+    apfs_container_plist = """
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Containers</key>
+  <array>
+    <dict>
+      <key>ContainerReference</key>
+      <string>disk5</string>
+      <key>Volumes</key>
+      <array>
+        <dict>
+          <key>DeviceIdentifier</key>
+          <string>disk5s1</string>
+          <key>Name</key>
+          <string>DUT</string>
+        </dict>
+      </array>
+    </dict>
+  </array>
+</dict>
+</plist>
+""".strip()
+    commands: list[list[str]] = []
+
+    def fake_run_command(command: list[str], **kwargs: Any) -> object:
+        commands.append(command)
+        if command == ["diskutil", "apfs", "list", "-plist", "/dev/disk4s2"]:
+            return type("Result", (), {"returncode": 0, "stdout": apfs_empty_plist, "stderr": ""})()
+        if command == ["diskutil", "info", "-plist", "/dev/disk4s2"]:
+            return type("Result", (), {"returncode": 0, "stdout": info_plist, "stderr": ""})()
+        if command == ["diskutil", "apfs", "list", "-plist", "/dev/disk5"]:
+            return type("Result", (), {"returncode": 0, "stdout": apfs_container_plist, "stderr": ""})()
+        return type("Result", (), {"returncode": 1, "stdout": "", "stderr": ""})()
+
+    monkeypatch.setattr(native_disk_ops, "_run_command", fake_run_command)
+
+    assert native_disk_ops._macos_apfs_volume_path_for_physical_store("/dev/disk4s2") == "/dev/disk5s1"
+    assert commands == [
+        ["diskutil", "apfs", "list", "-plist", "/dev/disk4s2"],
+        ["diskutil", "info", "-plist", "/dev/disk4s2"],
+        ["diskutil", "apfs", "list", "-plist", "/dev/disk5"],
+    ]
 
 
 def test_safe_remove_macos_device_uses_force_unmount_fallback(monkeypatch) -> None:  # type: ignore[no-untyped-def]

@@ -72,14 +72,14 @@ def test_extract_power_values_from_max_io_csv() -> None:
     workspace_tmp = Path("tests/.tmp/test_extract_power_values")
     if workspace_tmp.exists():
         shutil.rmtree(workspace_tmp)
-    csv_path = workspace_tmp / "Z" / "69-420" / "Windows" / "Max IO" / "Secure Key 3.0.csv"
+    csv_path = workspace_tmp / "Z" / "69-420" / "Windows" / "Max IO" / "Secure Key 3.0 FIPS 5V.csv"
     csv_path.parent.mkdir(parents=True)
     _write_max_io_csv(csv_path)
 
     values = power_measurements.extract_power_values_from_csv(str(csv_path))
 
-    assert values["max_read_write_current"] == EXPECTED_MAX_RW_CURRENT
-    assert values["rms_read_write_current"] == EXPECTED_RMS_RW_CURRENT
+    assert values["max_read_write_current_5v"] == EXPECTED_MAX_RW_CURRENT
+    assert values["rms_read_write_current_5v"] == EXPECTED_RMS_RW_CURRENT
     shutil.rmtree(workspace_tmp)
 
 
@@ -87,7 +87,7 @@ def test_extract_power_values_from_max_io_csv_cp1252() -> None:
     workspace_tmp = Path("tests/.tmp/test_extract_power_values_cp1252")
     if workspace_tmp.exists():
         shutil.rmtree(workspace_tmp)
-    csv_path = workspace_tmp / "Z" / "69-420" / "Windows" / "Max IO" / "Secure Key 3.0.csv"
+    csv_path = workspace_tmp / "Z" / "69-420" / "Windows" / "Max IO" / "Secure Key 3.0 FIPS 5V.csv"
     csv_path.parent.mkdir(parents=True)
 
     lines = TEK_CSV_LINES.copy()
@@ -96,18 +96,17 @@ def test_extract_power_values_from_max_io_csv_cp1252() -> None:
 
     values = power_measurements.extract_power_values_from_csv(str(csv_path))
 
-    assert values["max_read_write_current"] == EXPECTED_MAX_RW_CURRENT
-    assert values["rms_read_write_current"] == EXPECTED_RMS_RW_CURRENT
+    assert values["max_read_write_current_5v"] == EXPECTED_MAX_RW_CURRENT
+    assert values["rms_read_write_current_5v"] == EXPECTED_RMS_RW_CURRENT
     shutil.rmtree(workspace_tmp)
 
 
 def test_resolve_dut_key_uses_business_name_aliases() -> None:
     power: dict[str, dict[str, Any]] = {
-        "Padlock DT": {},
         "Padlock DT FIPS": {},
     }
 
-    assert power_measurements._resolve_dut_key(power, "Secure Key 3.0") == "Padlock DT"
+    assert power_measurements._resolve_dut_key(power, "Secure Key 3.0") == "Padlock DT FIPS"
     assert power_measurements._resolve_dut_key(power, "Secure Key 3.0 FIPS") == "Padlock DT FIPS"
 
 
@@ -115,26 +114,24 @@ def test_apply_csv_to_power_uses_alias_mapping_for_max_io() -> None:
     workspace_tmp = Path("tests/.tmp/test_apply_csv_alias")
     if workspace_tmp.exists():
         shutil.rmtree(workspace_tmp)
-    csv_path = workspace_tmp / "Z" / "69-420" / "Windows" / "Max IO" / "Secure Key 3.0.csv"
+    csv_path = workspace_tmp / "Z" / "69-420" / "Windows" / "Max IO" / "Secure Key 3.0 FIPS 5V.csv"
     csv_path.parent.mkdir(parents=True)
     _write_max_io_csv(csv_path)
 
     power: dict[str, dict[str, dict[str, float | None]]] = {
-        "Padlock DT": {
-            "max_read_write_current": {"linux": None, "macos": None, "windows": None},
-            "rms_read_write_current": {"linux": None, "macos": None, "windows": None},
-        },
         "Padlock DT FIPS": {
-            "max_read_write_current": {"linux": None, "macos": None, "windows": None},
-            "rms_read_write_current": {"linux": None, "macos": None, "windows": None},
+            "max_read_write_current_5v": {"linux": None, "macos": None, "windows": None},
+            "rms_read_write_current_5v": {"linux": None, "macos": None, "windows": None},
+            "max_read_write_current_12v": {"linux": None, "macos": None, "windows": None},
+            "rms_read_write_current_12v": {"linux": None, "macos": None, "windows": None},
         },
     }
 
     changed = power_measurements._apply_csv_to_power(power, csv_path)
 
     assert changed is True
-    assert power["Padlock DT"]["max_read_write_current"]["windows"] == EXPECTED_MAX_RW_CURRENT
-    assert power["Padlock DT"]["rms_read_write_current"]["windows"] == EXPECTED_RMS_RW_CURRENT
+    assert power["Padlock DT FIPS"]["max_read_write_current_5v"]["windows"] == EXPECTED_MAX_RW_CURRENT
+    assert power["Padlock DT FIPS"]["rms_read_write_current_5v"]["windows"] == EXPECTED_RMS_RW_CURRENT
     shutil.rmtree(workspace_tmp)
 
 
@@ -142,22 +139,24 @@ def test_apply_csv_to_power_updates_linux_bucket() -> None:
     workspace_tmp = Path("tests/.tmp/test_apply_csv_linux")
     if workspace_tmp.exists():
         shutil.rmtree(workspace_tmp)
-    csv_path = workspace_tmp / "Z" / "69-420" / "Linux" / "Max IO" / "Secure Key 3.0.csv"
+    csv_path = workspace_tmp / "Z" / "69-420" / "Linux" / "Max IO" / "Secure Key 3.0 FIPS 12V.csv"
     csv_path.parent.mkdir(parents=True)
     _write_max_io_csv(csv_path)
 
     power: dict[str, dict[str, dict[str, float | None]]] = {
-        "Padlock DT": {
-            "max_read_write_current": {"linux": None, "macos": None, "windows": None},
-            "rms_read_write_current": {"linux": None, "macos": None, "windows": None},
+        "Padlock DT FIPS": {
+            "max_read_write_current_5v": {"linux": None, "macos": None, "windows": None},
+            "rms_read_write_current_5v": {"linux": None, "macos": None, "windows": None},
+            "max_read_write_current_12v": {"linux": None, "macos": None, "windows": None},
+            "rms_read_write_current_12v": {"linux": None, "macos": None, "windows": None},
         }
     }
 
     changed = power_measurements._apply_csv_to_power(power, csv_path)
 
     assert changed is True
-    assert power["Padlock DT"]["max_read_write_current"]["linux"] == EXPECTED_MAX_RW_CURRENT
-    assert power["Padlock DT"]["rms_read_write_current"]["linux"] == EXPECTED_RMS_RW_CURRENT
+    assert power["Padlock DT FIPS"]["max_read_write_current_12v"]["linux"] == EXPECTED_MAX_RW_CURRENT
+    assert power["Padlock DT FIPS"]["rms_read_write_current_12v"]["linux"] == EXPECTED_RMS_RW_CURRENT
     shutil.rmtree(workspace_tmp)
 
 
@@ -172,7 +171,7 @@ def test_update_report_power_from_csv_path_aborts_when_share_file_missing(monkey
     saved_payloads: list[tuple[Path, dict[str, Any]]] = []
 
     monkeypatch.setattr(power_measurements, "report_path_for", lambda folder_name: report_path)
-    monkeypatch.setattr(power_measurements, "load_report", lambda path: {"power": {"Secure Key 3.0": {}}})
+    monkeypatch.setattr(power_measurements, "load_report", lambda path: {"power": {"Padlock DT FIPS": {}}})
     monkeypatch.setattr(power_measurements, "save_report", lambda path, data: saved_payloads.append((path, data)))
     monkeypatch.setattr(power_measurements, "_wait_for_csv", lambda path, **kwargs: False)
 

@@ -8,7 +8,7 @@ from drive_qual.platforms.performance_common import BLACKMAGIC_DISK_SPEED_TEST_T
 
 FORM_FACTOR_PRODUCTS: dict[str, list[str]] = {
     "2.5": ["Fortress", "Fortress L3", "Padlock 3.0"],
-    "3.5": ["Padlock DT", "Padlock DT FIPS"],
+    "3.5": ["Padlock DT FIPS"],
     "sata (custom)": ["ASK3"],
     "msata": ["Padlock SSD"],
     "emmc": ["ASK3-NX"],
@@ -153,8 +153,12 @@ def _ensure_dut_sections(data: dict[str, Any], duts: list[str]) -> None:
             dut,
             {
                 "max_inrush_current": {"linux": None, "macos": None, "windows": None},
-                "max_read_write_current": {"linux": None, "macos": None, "windows": None},
-                "rms_read_write_current": {"linux": None, "macos": None, "windows": None},
+                "max_inrush_current_5v": {"linux": None, "macos": None, "windows": None},
+                "max_inrush_current_12v": {"linux": None, "macos": None, "windows": None},
+                "max_read_write_current_5v": {"linux": None, "macos": None, "windows": None},
+                "rms_read_write_current_5v": {"linux": None, "macos": None, "windows": None},
+                "max_read_write_current_12v": {"linux": None, "macos": None, "windows": None},
+                "rms_read_write_current_12v": {"linux": None, "macos": None, "windows": None},
             },
         )
         perf_dut = performance.setdefault(

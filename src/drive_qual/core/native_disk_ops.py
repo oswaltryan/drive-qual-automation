@@ -29,6 +29,7 @@ POLL_ATTEMPTS = 20
 POLL_DELAY_SECONDS = 0.5
 LINUX_MKFS_RETRY_ATTEMPTS = 3
 LINUX_MKFS_RETRY_DELAY_SECONDS = 0.5
+MACOS_WRITE_PROBE_FILE = ".drive_qual_write_probe"
 
 
 @dataclass(frozen=True)
@@ -87,6 +88,7 @@ def _prepare_macos_device(device: ApricornDevice) -> PreparedBenchmarkTarget:
     )
     partition_path = _macos_wait_for_partition(candidate.disk_path)
     mount_point = _macos_wait_for_mount(partition_path)
+    _macos_ensure_writable_mount(partition_path, mount_point)
     _mark_macos_volume_no_index(mount_point)
     return PreparedBenchmarkTarget(candidate.disk_path, partition_path, mount_point)
 
@@ -103,6 +105,26 @@ def _mark_macos_volume_no_index(mount_point: str) -> None:
     result = _run_command(["touch", marker_path], check=False, capture_output=True)
     if result.returncode != 0:
         print(f"Warning: could not create {MACOS_NO_INDEX_MARKER} on {mount_point}.")
+
+
+def _macos_ensure_writable_mount(partition_path: str, mount_point: str) -> None:
+    if _macos_probe_mount_write(mount_point):
+        return
+    _run_command(["diskutil", "disableOwnership", partition_path], check=False, capture_output=True)
+    for _ in range(POLL_ATTEMPTS):
+        if _macos_probe_mount_write(mount_point):
+            return
+        time.sleep(POLL_DELAY_SECONDS)
+    raise RuntimeError(f"Mounted APFS volume is not writable at {mount_point}.")
+
+
+def _macos_probe_mount_write(mount_point: str) -> bool:
+    probe_path = f"{mount_point.rstrip('/')}/{MACOS_WRITE_PROBE_FILE}"
+    touch_result = _run_command(["touch", probe_path], check=False, capture_output=True)
+    if touch_result.returncode != 0:
+        return False
+    _run_command(["rm", "-f", probe_path], check=False, capture_output=True)
+    return True
 
 
 def _safe_remove_macos_device(device: ApricornDevice) -> bool:
@@ -203,8 +225,12 @@ def _select_linux_candidate(device: ApricornDevice) -> NativeDiskCandidate:
 
 
 def _select_macos_candidate(device: ApricornDevice) -> NativeDiskCandidate:
-    candidates = _macos_candidates()
-    return _select_candidate(candidates, device)
+    for _ in range(POLL_ATTEMPTS):
+        candidates = _macos_candidates()
+        if candidates:
+            return _select_candidate(candidates, device)
+        time.sleep(POLL_DELAY_SECONDS)
+    raise RuntimeError(f"No native storage devices found for {device_identity(device)}.")
 
 
 def _select_candidate(candidates: list[NativeDiskCandidate], device: ApricornDevice) -> NativeDiskCandidate:
@@ -456,12 +482,15 @@ def _linux_block_device_info(block_path: str) -> dict[str, Any] | None:
 
 
 def _macos_candidates() -> list[NativeDiskCandidate]:
-    result = _run_command(["diskutil", "list", "-plist", "external", "physical"], capture_output=True)
-    payload = plistlib.loads(result.stdout.encode("utf-8"))
-    entries = payload.get("AllDisksAndPartitions", [])
+    entries = _macos_disk_list_entries("external", "physical")
+    if not entries:
+        entries = _macos_disk_list_entries("external")
+    if not entries:
+        entries = _macos_disk_list_entries("physical")
+    if not entries:
+        entries = _macos_disk_list_entries()
+
     candidates: list[NativeDiskCandidate] = []
-    if not isinstance(entries, list):
-        return candidates
     for entry in entries:
         if not isinstance(entry, dict):
             continue
@@ -470,11 +499,28 @@ def _macos_candidates() -> list[NativeDiskCandidate]:
             continue
         disk_path = f"/dev/{device_identifier}"
         info = _macos_disk_info(disk_path)
+        if bool(info.get("Internal")):
+            continue
         model = _string_or_none(info.get("MediaName")) or _string_or_none(info.get("IORegistryEntryName"))
-        serial = _string_or_none(info.get("DeviceIdentifier"))
+        serial = _string_or_none(info.get("SerialNumber")) or _string_or_none(info.get("DeviceIdentifier"))
         description = " ".join(part for part in (disk_path, model) if part)
         candidates.append(NativeDiskCandidate(disk_path=disk_path, description=description, serial=serial, model=model))
     return candidates
+
+
+def _macos_disk_list_entries(*filters: str) -> list[dict[str, Any]]:
+    command = ["diskutil", "list", "-plist", *filters]
+    result = _run_command(command, check=False, capture_output=True)
+    if result.returncode != 0 or not result.stdout:
+        return []
+    try:
+        payload = plistlib.loads(result.stdout.encode("utf-8"))
+    except Exception:
+        return []
+    entries = payload.get("AllDisksAndPartitions", [])
+    if not isinstance(entries, list):
+        return []
+    return [entry for entry in entries if isinstance(entry, dict)]
 
 
 def _macos_disk_info(device_path: str) -> dict[str, Any]:
@@ -538,25 +584,69 @@ def _macos_mountable_device_path(partition_path: str) -> str:
 
 
 def _macos_apfs_volume_path_for_physical_store(partition_path: str) -> str | None:
+    partition_identifier = _device_identifier(partition_path)
+    payload = _macos_apfs_list_payload(partition_path)
+    if partition_identifier and payload:
+        volume_path = _macos_apfs_volume_path_from_payload_for_physical_store(payload, partition_identifier)
+        if volume_path:
+            return volume_path
+
+    container_reference = _macos_apfs_container_reference(partition_path)
+    if not container_reference:
+        return None
+    container_identifier = _device_identifier(container_reference)
+    if not container_identifier:
+        return None
+    container_payload = _macos_apfs_list_payload(container_reference)
+    if not container_payload:
+        return None
+
+    containers = container_payload.get("Containers", [])
+    if not isinstance(containers, list):
+        return None
+
+    for container in containers:
+        if not isinstance(container, dict):
+            continue
+        reference = _normalized(_string_or_none(container.get("ContainerReference")))
+        device_identifier = _normalized(_string_or_none(container.get("DeviceIdentifier")))
+        if container_identifier not in {reference, device_identifier}:
+            continue
+        volume_path = _macos_preferred_apfs_volume_path(container)
+        if volume_path:
+            return volume_path
+
+    # If the list payload omits container identifiers, fall back to the first mountable APFS volume.
+    for container in containers:
+        if not isinstance(container, dict):
+            continue
+        volume_path = _macos_preferred_apfs_volume_path(container)
+        if volume_path:
+            return volume_path
+
+    return None
+
+
+def _macos_apfs_list_payload(target_path: str) -> dict[str, Any] | None:
     result = _run_command(
-        ["diskutil", "apfs", "list", "-plist", partition_path],
+        ["diskutil", "apfs", "list", "-plist", target_path],
         check=False,
         capture_output=True,
     )
     if result.returncode != 0 or not result.stdout:
         return None
-
     try:
         payload = plistlib.loads(result.stdout.encode("utf-8"))
     except Exception:
         return None
     if not isinstance(payload, dict):
         return None
+    return payload
 
-    partition_identifier = _device_identifier(partition_path)
-    if not partition_identifier:
-        return None
 
+def _macos_apfs_volume_path_from_payload_for_physical_store(
+    payload: dict[str, Any], partition_identifier: str
+) -> str | None:
     containers = payload.get("Containers", [])
     if not isinstance(containers, list):
         return None
@@ -569,7 +659,22 @@ def _macos_apfs_volume_path_for_physical_store(partition_path: str) -> str | Non
         volume_path = _macos_preferred_apfs_volume_path(container)
         if volume_path:
             return volume_path
+    return None
 
+
+def _macos_apfs_container_reference(partition_path: str) -> str | None:
+    try:
+        info = _macos_disk_info(partition_path)
+    except RuntimeError:
+        return None
+
+    for key in ("APFSContainerReference", "APFSContainer", "ContainerReference", "APFSContainerDeviceIdentifier"):
+        value = _string_or_none(info.get(key))
+        if not value:
+            continue
+        if value.startswith("/dev/"):
+            return value
+        return f"/dev/{value}"
     return None
 
 

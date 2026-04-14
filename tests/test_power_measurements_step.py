@@ -26,7 +26,7 @@ def _write_report(report_path: Path) -> None:
     report_path.write_text(
         json.dumps(
             {
-                "equipment": {"dut": {"Padlock DT": {"serial_number": "ABC123"}}},
+                "equipment": {"dut": {"Padlock DT FIPS": {"serial_number": "ABC123"}}},
                 "compatibility": {
                     "recognized_by_os": {"linux": None, "macos": None, "windows": None},
                     "hot_pluggable": {"linux": None, "macos": None, "windows": None},
@@ -47,7 +47,7 @@ def _write_report(report_path: Path) -> None:
 def _setup_common_mocks(monkeypatch: MonkeyPatch, dut: ApricornDevice, artifact_os: str = "Windows") -> None:
     monkeypatch.setattr("drive_qual.platforms.power_measurements_mixed.benchmark.require_fio", lambda: "fio")
     monkeypatch.setattr(
-        "drive_qual.platforms.power_measurements_mixed._select_report_dut_name", lambda report_path: "Padlock DT"
+        "drive_qual.platforms.power_measurements_mixed._select_report_dut_name", lambda report_path: "Padlock DT FIPS"
     )
     monkeypatch.setattr(
         "drive_qual.platforms.power_measurements_mixed._resolve_device_for_report_dut",
@@ -73,6 +73,7 @@ def _setup_common_mocks(monkeypatch: MonkeyPatch, dut: ApricornDevice, artifact_
         "drive_qual.platforms.power_measurements_mixed.tektronix.recall_setup",
         lambda **kwargs: None,
     )
+    monkeypatch.setattr("drive_qual.platforms.power_measurements_mixed.tektronix.start_run", lambda: None)
     monkeypatch.setattr("drive_qual.platforms.power_measurements_mixed.tektronix.stop_run", lambda: None)
     monkeypatch.setattr("drive_qual.platforms.power_measurements_mixed.tektronix.save_measurements", lambda path: path)
     monkeypatch.setattr(
@@ -80,6 +81,7 @@ def _setup_common_mocks(monkeypatch: MonkeyPatch, dut: ApricornDevice, artifact_
         lambda path: None,
     )
     monkeypatch.setattr("drive_qual.platforms.power_measurements_mixed._write_measurement_backup", lambda *args: None)
+    monkeypatch.setattr("drive_qual.platforms.power_measurements_mixed._cleanup_test_file", lambda path: True)
 
 
 def test_power_measurements_dispatch_routes_to_mixed_module(monkeypatch: MonkeyPatch) -> None:
@@ -139,6 +141,8 @@ def test_run_max_io_benchmark_non_windows_uses_native_disk_ops_and_not_windows_d
     dut = ApricornDevice(iProduct="Secure Key DT", iSerial="ABC123")
     monkeypatch.setattr("drive_qual.platforms.power_measurements_mixed.sys.platform", platform_name)
     monkeypatch.setattr("drive_qual.platforms.power_measurements_mixed.benchmark.require_fio", lambda: "fio")
+    monkeypatch.setattr("drive_qual.platforms.power_measurements_mixed.tektronix.recall_setup", lambda **kwargs: None)
+    monkeypatch.setattr("drive_qual.platforms.power_measurements_mixed.tektronix.start_run", lambda: None)
 
     prepare_calls: list[ApricornDevice] = []
 
@@ -351,6 +355,7 @@ def test_run_max_io_marks_linux_copy_actions_false_when_benchmark_fails(
         "drive_qual.platforms.power_measurements_mixed.benchmark.benchmark_file_path",
         lambda *args: str(benchmark_file),
     )
+    monkeypatch.setattr("drive_qual.platforms.power_measurements_mixed._cleanup_test_file", lambda path: False)
 
     async def fake_run_fio(*args: Any, **kwargs: Any) -> int:
         return 1
@@ -421,16 +426,21 @@ def test_run_in_rush_marks_hot_pluggable(
 ) -> None:
     report_path = tmp_path / "drive_qualification_report_atomic_tests.json"
     _write_report(report_path)
+    removal_prompts: list[str] = []
 
     dut = ApricornDevice(iProduct="Secure Key 3.0", iSerial="ABC123", driveLetter="D:")
     monkeypatch.setattr("drive_qual.platforms.power_measurements_mixed.sys.platform", platform_name)
 
     monkeypatch.setattr(
-        "drive_qual.platforms.power_measurements_mixed._select_report_dut_name", lambda report_path: "Padlock DT"
+        "drive_qual.platforms.power_measurements_mixed._select_report_dut_name", lambda report_path: "Padlock DT FIPS"
     )
     monkeypatch.setattr(
         "drive_qual.platforms.power_measurements_mixed._refresh_device_for_report_dut",
         lambda report_path, dut_name, prompt, required_fields=None: dut,
+    )
+    monkeypatch.setattr(
+        "drive_qual.platforms.power_measurements_mixed._wait_for_device_removed",
+        lambda expected_dut, prompt: removal_prompts.append(prompt),
     )
     monkeypatch.setattr("drive_qual.platforms.power_measurements_mixed.mk_dir", lambda path: None)
     monkeypatch.setattr(
@@ -457,6 +467,92 @@ def test_run_in_rush_marks_hot_pluggable(
 
     data = json.loads(report_path.read_text(encoding="utf-8"))
     assert data["compatibility"]["hot_pluggable"][slot] is True
+    assert removal_prompts == ["Remove Apricorn device.."]
+
+
+def test_run_power_measurements_step_runs_5v_sequence_before_12v(monkeypatch: MonkeyPatch) -> None:
+    sequence: list[tuple[str, str | None]] = []
+    dut = ApricornDevice(iProduct="AEGIS FIPS DT", iSerial="ABC123")
+
+    monkeypatch.setattr("drive_qual.platforms.power_measurements_mixed.resolve_folder_name", lambda _: "29-0031")
+    monkeypatch.setattr(
+        "drive_qual.platforms.power_measurements_mixed._load_part_number_and_report",
+        lambda folder_name: ("29-0031", Path("/tmp/report.json")),
+    )
+    monkeypatch.setattr(
+        "drive_qual.platforms.power_measurements_mixed._select_report_dut_name", lambda report_path: "Padlock DT FIPS"
+    )
+
+    async def fake_run_max_io(part_number: str, report_path: Path, *, max_io_rail: str | None = None) -> ApricornDevice:
+        sequence.append(("max_io", max_io_rail))
+        return dut
+
+    async def fake_run_in_rush(
+        part_number: str, report_path: Path, expected_dut: ApricornDevice, *, max_io_rail: str | None = None
+    ) -> None:
+        sequence.append(("in_rush", max_io_rail))
+
+    monkeypatch.setattr("drive_qual.platforms.power_measurements_mixed._run_max_io", fake_run_max_io)
+    monkeypatch.setattr("drive_qual.platforms.power_measurements_mixed._run_in_rush", fake_run_in_rush)
+    monkeypatch.setattr(
+        "drive_qual.platforms.power_measurements_mixed.update_power_measurements_from_saved_csvs",
+        lambda part_number=None: None,
+    )
+
+    power_measurements_mixed.run_power_measurements_step()
+
+    assert sequence == [
+        ("max_io", "5V"),
+        ("in_rush", "5V"),
+        ("max_io", "12V"),
+        ("in_rush", "12V"),
+    ]
+
+
+def test_run_max_io_benchmark_formats_before_recall_and_starts_acquisition(
+    monkeypatch: MonkeyPatch, tmp_path: Path
+) -> None:
+    report_path = tmp_path / "drive_qualification_report_atomic_tests.json"
+    _write_report(report_path)
+    dut = ApricornDevice(iProduct="AEGIS FIPS DT", iSerial="ABC123")
+    sequence: list[str] = []
+    benchmark_file = tmp_path / "benchmark_file.dat"
+    benchmark_file.write_text("probe", encoding="utf-8")
+
+    monkeypatch.setattr("drive_qual.platforms.power_measurements_mixed.benchmark.require_fio", lambda: "fio")
+    monkeypatch.setattr(
+        "drive_qual.platforms.power_measurements_mixed._prepare_benchmark_target",
+        lambda dut, report_path, dut_name=None: (sequence.append("format"), (dut, str(tmp_path)))[1],
+    )
+    monkeypatch.setattr(
+        "drive_qual.platforms.power_measurements_mixed.tektronix.recall_setup",
+        lambda **kwargs: sequence.append("recall"),
+    )
+    monkeypatch.setattr("drive_qual.platforms.power_measurements_mixed.tektronix.start_run", lambda: sequence.append("start"))
+    monkeypatch.setattr(
+        "drive_qual.platforms.power_measurements_mixed.benchmark.benchmark_file_path",
+        lambda *args: str(benchmark_file),
+    )
+    monkeypatch.setattr("drive_qual.platforms.power_measurements_mixed._cleanup_test_file", lambda path: True)
+
+    async def fake_run_fio(*args: Any, **kwargs: Any) -> int:
+        return 0
+
+    monkeypatch.setattr("drive_qual.platforms.power_measurements_mixed.benchmark.run_fio", fake_run_fio)
+
+    asyncio.run(_run_max_io_benchmark(dut, report_path, dut_name="Padlock DT FIPS", max_io_rail="5V"))
+
+    assert sequence == ["format", "recall", "start"]
+
+
+def test_try_safe_remove_native_device_returns_false_on_exception(monkeypatch: MonkeyPatch) -> None:
+    dut = ApricornDevice(iProduct="AEGIS FIPS DT", iSerial="ABC123")
+    monkeypatch.setattr(
+        "drive_qual.platforms.power_measurements_mixed.native_disk_ops.safe_remove_device",
+        lambda device: (_ for _ in ()).throw(RuntimeError("boom")),
+    )
+
+    assert power_measurements_mixed._try_safe_remove_native_device(dut) is False
 
 
 def test_load_part_number_and_report_uses_canonical_part_number_report_path(monkeypatch: MonkeyPatch) -> None:

@@ -221,6 +221,11 @@ def stop_run() -> None:
     print("Acquisition stopped.")
 
 
+def start_run() -> None:
+    scpi_command("ACQUIRE:STATE RUN")
+    print("Acquisition started.")
+
+
 def backup_session(path: str) -> None:
     normalized_path = _validate_scope_file_path(path)
     parsed = _parts_from_scope_file(normalized_path)
