@@ -571,9 +571,7 @@ def _macos_wait_for_mount(partition_path: str) -> str:
             _run_command(["diskutil", "mount", mount_target], check=False, capture_output=True)
             mount_attempted_for.add(mount_target)
         time.sleep(POLL_DELAY_SECONDS)
-    raise RuntimeError(
-        f"Timed out waiting for macOS mount point on {last_target} (source partition {partition_path})."
-    )
+    raise RuntimeError(f"Timed out waiting for macOS mount point on {last_target} (source partition {partition_path}).")
 
 
 def _macos_mountable_device_path(partition_path: str) -> str:
@@ -585,26 +583,65 @@ def _macos_mountable_device_path(partition_path: str) -> str:
 
 def _macos_apfs_volume_path_for_physical_store(partition_path: str) -> str | None:
     partition_identifier = _device_identifier(partition_path)
-    payload = _macos_apfs_list_payload(partition_path)
-    if partition_identifier and payload:
-        volume_path = _macos_apfs_volume_path_from_payload_for_physical_store(payload, partition_identifier)
-        if volume_path:
-            return volume_path
+    direct_match = _macos_apfs_volume_path_from_partition_payload(partition_path, partition_identifier)
+    if direct_match:
+        return direct_match
 
+    container_payload, container_identifier = _macos_apfs_container_payload_with_identifier(partition_path)
+    if container_payload is None or container_identifier is None:
+        return None
+
+    return _macos_apfs_volume_path_from_container_payload(container_payload, container_identifier)
+
+
+def _macos_apfs_volume_path_from_partition_payload(partition_path: str, partition_identifier: str | None) -> str | None:
+    if not partition_identifier:
+        return None
+
+    payload = _macos_apfs_list_payload(partition_path)
+    if payload is None:
+        return None
+
+    return _macos_apfs_volume_path_from_payload_for_physical_store(payload, partition_identifier)
+
+
+def _macos_apfs_container_payload_with_identifier(
+    partition_path: str,
+) -> tuple[dict[str, Any] | None, str | None]:
     container_reference = _macos_apfs_container_reference(partition_path)
     if not container_reference:
-        return None
+        return None, None
+
     container_identifier = _device_identifier(container_reference)
     if not container_identifier:
-        return None
-    container_payload = _macos_apfs_list_payload(container_reference)
-    if not container_payload:
-        return None
+        return None, None
 
+    container_payload = _macos_apfs_list_payload(container_reference)
+    if container_payload is None:
+        return None, None
+
+    return container_payload, container_identifier
+
+
+def _macos_apfs_volume_path_from_container_payload(
+    container_payload: dict[str, Any], container_identifier: str
+) -> str | None:
     containers = container_payload.get("Containers", [])
     if not isinstance(containers, list):
         return None
 
+    matched = _macos_apfs_volume_path_for_matching_container(containers, container_identifier)
+    if matched:
+        return matched
+
+    # If the list payload omits container identifiers, fall back to first mountable APFS volume.
+    return _macos_first_mountable_apfs_volume_path(containers)
+
+
+def _macos_apfs_volume_path_for_matching_container(
+    containers: list[Any],
+    container_identifier: str,
+) -> str | None:
     for container in containers:
         if not isinstance(container, dict):
             continue
@@ -612,11 +649,15 @@ def _macos_apfs_volume_path_for_physical_store(partition_path: str) -> str | Non
         device_identifier = _normalized(_string_or_none(container.get("DeviceIdentifier")))
         if container_identifier not in {reference, device_identifier}:
             continue
+
         volume_path = _macos_preferred_apfs_volume_path(container)
         if volume_path:
             return volume_path
 
-    # If the list payload omits container identifiers, fall back to the first mountable APFS volume.
+    return None
+
+
+def _macos_first_mountable_apfs_volume_path(containers: list[Any]) -> str | None:
     for container in containers:
         if not isinstance(container, dict):
             continue
