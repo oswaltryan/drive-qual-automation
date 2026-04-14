@@ -21,6 +21,8 @@ from drive_qual.platforms.power_measurements_mixed import (
     _run_max_io_benchmark,
 )
 
+EXPECTED_BENCHMARK_RUNTIME_SECONDS = 300
+
 
 def _write_report(report_path: Path) -> None:
     report_path.write_text(
@@ -129,10 +131,11 @@ def test_ensure_local_artifact_dir_uses_platform_os_name(
     assert calls == [("69-420", expected_artifact_os, "Max IO")]
 
 
-@pytest.mark.parametrize(("platform_name", "slot"), [("linux", "linux"), ("darwin", "macos")])
-def test_run_max_io_benchmark_non_windows_uses_native_disk_ops_and_not_windows_disk_management(
-    monkeypatch: MonkeyPatch, tmp_path: Path, platform_name: str, slot: str
-) -> None:
+def _setup_non_windows_max_io_benchmark_case(
+    monkeypatch: MonkeyPatch,
+    tmp_path: Path,
+    platform_name: str,
+) -> tuple[Path, ApricornDevice, list[ApricornDevice]]:
     report_path = tmp_path / "drive_qualification_report_atomic_tests.json"
     benchmark_file = tmp_path / "benchmark_file.dat"
     benchmark_file.write_text("probe", encoding="utf-8")
@@ -168,12 +171,25 @@ def test_run_max_io_benchmark_non_windows_uses_native_disk_ops_and_not_windows_d
         unexpected_windows_call,
     )
     monkeypatch.setattr(
-        "drive_qual.platforms.windows.power_measurements.prompt_disk_management_visible", unexpected_windows_call
+        "drive_qual.platforms.windows.power_measurements.prompt_disk_management_visible",
+        unexpected_windows_call,
     )
     monkeypatch.setattr(
         "drive_qual.platforms.windows.power_measurements.run_safe_eject_script",
         unexpected_windows_call,
     )
+
+    return report_path, dut, prepare_calls
+
+
+@pytest.mark.parametrize(("platform_name", "slot"), [("linux", "linux"), ("darwin", "macos")])
+def test_run_max_io_benchmark_non_windows_uses_native_disk_ops_and_not_windows_disk_management(
+    monkeypatch: MonkeyPatch,
+    tmp_path: Path,
+    platform_name: str,
+    slot: str,
+) -> None:
+    report_path, dut, prepare_calls = _setup_non_windows_max_io_benchmark_case(monkeypatch, tmp_path, platform_name)
 
     async def fake_run_fio(*args: Any, **kwargs: Any) -> int:
         return 0
@@ -213,12 +229,18 @@ def test_run_max_io_marks_windows_compatibility_fields(monkeypatch: MonkeyPatch,
     )
     monkeypatch.setattr("drive_qual.platforms.windows.power_measurements.run_safe_eject_script", lambda dut: True)
 
-    async def fake_run_fio(target_dir: str, mode: str, file_size_mb: int, num_passes: int) -> int:
-        return 0 if mode in {"write", "read"} else 1
+    calls: list[tuple[str, int]] = []
+
+    async def fake_run_fio(target_dir: str, *, runtime_seconds: int = 300) -> int:
+        calls.append((target_dir, runtime_seconds))
+        return 0
 
     monkeypatch.setattr("drive_qual.platforms.power_measurements_mixed.benchmark.run_fio", fake_run_fio)
 
     asyncio.run(_run_max_io("69-420", report_path))
+
+    assert calls
+    assert calls[0][1] == EXPECTED_BENCHMARK_RUNTIME_SECONDS
 
     data = json.loads(report_path.read_text(encoding="utf-8"))
     compatibility = data["compatibility"]
@@ -495,10 +517,12 @@ def test_run_power_measurements_step_runs_5v_sequence_before_12v(monkeypatch: Mo
 
     monkeypatch.setattr("drive_qual.platforms.power_measurements_mixed._run_max_io", fake_run_max_io)
     monkeypatch.setattr("drive_qual.platforms.power_measurements_mixed._run_in_rush", fake_run_in_rush)
-    monkeypatch.setattr(
-        "builtins.input",
-        lambda prompt="": prompts.append(prompt) or "",
-    )
+
+    def fake_input(prompt: str = "") -> str:
+        prompts.append(prompt)
+        return ""
+
+    monkeypatch.setattr("builtins.input", fake_input)
     monkeypatch.setattr(
         "drive_qual.platforms.power_measurements_mixed.update_power_measurements_from_saved_csvs",
         lambda part_number=None: None,
@@ -529,15 +553,27 @@ def test_run_max_io_benchmark_formats_before_recall_and_starts_acquisition(
     benchmark_file.write_text("probe", encoding="utf-8")
 
     monkeypatch.setattr("drive_qual.platforms.power_measurements_mixed.benchmark.require_fio", lambda: "fio")
+
+    def fake_prepare_benchmark_target(
+        dut: ApricornDevice,
+        report_path: Path,
+        dut_name: str | None = None,
+    ) -> tuple[ApricornDevice, str]:
+        del report_path, dut_name
+        sequence.append("format")
+        return dut, str(tmp_path)
+
     monkeypatch.setattr(
         "drive_qual.platforms.power_measurements_mixed._prepare_benchmark_target",
-        lambda dut, report_path, dut_name=None: (sequence.append("format"), (dut, str(tmp_path)))[1],
+        fake_prepare_benchmark_target,
     )
     monkeypatch.setattr(
         "drive_qual.platforms.power_measurements_mixed.tektronix.recall_setup",
         lambda **kwargs: sequence.append("recall"),
     )
-    monkeypatch.setattr("drive_qual.platforms.power_measurements_mixed.tektronix.start_run", lambda: sequence.append("start"))
+    monkeypatch.setattr(
+        "drive_qual.platforms.power_measurements_mixed.tektronix.start_run", lambda: sequence.append("start")
+    )
     monkeypatch.setattr(
         "drive_qual.platforms.power_measurements_mixed.benchmark.benchmark_file_path",
         lambda *args: str(benchmark_file),

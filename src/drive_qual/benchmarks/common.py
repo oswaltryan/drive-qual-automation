@@ -26,18 +26,25 @@ def _resolve_tool(*candidates: str) -> str | None:
 def _fio_candidates() -> tuple[str, ...]:
     if sys.platform == "win32":
         return (
-            "fio.exe",
+            "tools/fio-windows.exe",
             "tools/fio.exe",
+            "fio-windows.exe",
+            "fio.exe",
             "fio",
         )
     if sys.platform == "darwin":
         return (
+            "tools/fio-macOS",
+            "tools/fio",
+            "fio-macOS",
             "fio",
             "/opt/homebrew/bin/fio",
             "/usr/local/bin/fio",
-            "tools/fio",
         )
     return (
+        "tools/fio-linux",
+        "tools/linux/fio",
+        "fio-linux",
         "fio",
         "/usr/bin/fio",
         "/usr/local/bin/fio",

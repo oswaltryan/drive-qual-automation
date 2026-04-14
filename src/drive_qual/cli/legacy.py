@@ -69,22 +69,21 @@ def _cleanup_test_file(path: str) -> None:
         print(f"\nError cleaning up test file: {e}")
 
 
-def _report_benchmark_results(write_ret: int, read_ret: int) -> None:
-    if write_ret == 0 and read_ret == 0:
+def _report_benchmark_results(return_code: int) -> None:
+    if return_code == 0:
         print("\nBenchmark completed successfully")
     else:
-        print(f"\nBenchmark failed - Write: {write_ret}, Read: {read_ret}")
+        print(f"\nBenchmark failed - Return code: {return_code}")
 
 
 async def _run_benchmarks(dut: ApricornDevice) -> None:
     if dut.driveLetter is None:
         raise RuntimeError("Drive letter not available for device.")
-    write_ret = await benchmark.run_fio(dut.driveLetter, "write", 10, 100)
-    read_ret = await benchmark.run_fio(dut.driveLetter, "read", 10, 100)
+    benchmark_ret = await benchmark.run_fio(dut.driveLetter, runtime_seconds=300)
 
     test_file = benchmark.benchmark_file_path(dut.driveLetter, "benchmark_file.dat")
     _cleanup_test_file(test_file)
-    _report_benchmark_results(write_ret, read_ret)
+    _report_benchmark_results(benchmark_ret)
 
 
 async def in_rush() -> None:

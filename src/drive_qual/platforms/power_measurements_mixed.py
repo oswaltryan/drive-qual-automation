@@ -236,11 +236,11 @@ def _cleanup_test_file(path: str) -> bool:
         return False
 
 
-def _report_benchmark_results(write_ret: int, read_ret: int) -> None:
-    if write_ret == 0 and read_ret == 0:
+def _report_benchmark_results(return_code: int) -> None:
+    if return_code == 0:
         print("\nBenchmark completed successfully")
     else:
-        print(f"\nBenchmark failed - Write: {write_ret}, Read: {read_ret}")
+        print(f"\nBenchmark failed - Return code: {return_code}")
 
 
 def _try_safe_remove_native_device(dut: ApricornDevice) -> bool:
@@ -357,13 +357,13 @@ async def _run_max_io_benchmark(
         print(f"Running Max IO benchmark on {max_io_rail} rail.")
 
     benchmark_file = benchmark.benchmark_file_path(target_dir, "benchmark_file.dat")
-    write_ret = await benchmark.run_fio(target_dir, "write", 10, 100)
-    _set_current_host_compatibility(report_path, "copy_to_drive", write_ret == 0)
-    read_ret = await benchmark.run_fio(target_dir, "read", 10, 100)
-    _set_current_host_compatibility(report_path, "copy_from_drive", read_ret == 0)
+    benchmark_ret = await benchmark.run_fio(target_dir, runtime_seconds=300)
+    benchmark_ok = benchmark_ret == 0
+    _set_current_host_compatibility(report_path, "copy_to_drive", benchmark_ok)
+    _set_current_host_compatibility(report_path, "copy_from_drive", benchmark_ok)
     cleanup_ok = _cleanup_test_file(benchmark_file)
     _set_current_host_compatibility(report_path, "delete_data", cleanup_ok)
-    _report_benchmark_results(write_ret, read_ret)
+    _report_benchmark_results(benchmark_ret)
     return refreshed_dut
 
 
