@@ -21,7 +21,7 @@ from drive_qual.integrations.apricorn.usb_cli import (
 LINUX_FILESYSTEM = "ext4"
 LINUX_PARTITION_TABLE = "gpt"
 LINUX_VOLUME_LABEL = "DUT"
-MACOS_FILESYSTEM = "ExFAT"
+MACOS_FILESYSTEM = "APFS"
 MACOS_PARTITION_TABLE = "GPTFormat"
 MACOS_VOLUME_LABEL = "DUT"
 MACOS_NO_INDEX_MARKER = ".metadata_never_index"
@@ -508,17 +508,120 @@ def _macos_wait_for_partition(disk_path: str) -> str:
 
 
 def _macos_wait_for_mount(partition_path: str) -> str:
-    mount_attempted = False
+    mount_attempted_for: set[str] = set()
+    last_target = partition_path
     for _ in range(POLL_ATTEMPTS):
-        info = _macos_disk_info(partition_path)
+        mount_target = _macos_mountable_device_path(partition_path)
+        last_target = mount_target
+        try:
+            info = _macos_disk_info(mount_target)
+        except RuntimeError:
+            time.sleep(POLL_DELAY_SECONDS)
+            continue
         mount_point = _string_or_none(info.get("MountPoint"))
         if mount_point:
             return mount_point
-        if not mount_attempted:
-            _run_command(["diskutil", "mount", partition_path], check=False)
-            mount_attempted = True
+        if mount_target not in mount_attempted_for:
+            _run_command(["diskutil", "mount", mount_target], check=False, capture_output=True)
+            mount_attempted_for.add(mount_target)
         time.sleep(POLL_DELAY_SECONDS)
-    raise RuntimeError(f"Timed out waiting for macOS mount point on {partition_path}.")
+    raise RuntimeError(
+        f"Timed out waiting for macOS mount point on {last_target} (source partition {partition_path})."
+    )
+
+
+def _macos_mountable_device_path(partition_path: str) -> str:
+    apfs_volume_path = _macos_apfs_volume_path_for_physical_store(partition_path)
+    if apfs_volume_path:
+        return apfs_volume_path
+    return partition_path
+
+
+def _macos_apfs_volume_path_for_physical_store(partition_path: str) -> str | None:
+    result = _run_command(
+        ["diskutil", "apfs", "list", "-plist", partition_path],
+        check=False,
+        capture_output=True,
+    )
+    if result.returncode != 0 or not result.stdout:
+        return None
+
+    try:
+        payload = plistlib.loads(result.stdout.encode("utf-8"))
+    except Exception:
+        return None
+    if not isinstance(payload, dict):
+        return None
+
+    partition_identifier = _device_identifier(partition_path)
+    if not partition_identifier:
+        return None
+
+    containers = payload.get("Containers", [])
+    if not isinstance(containers, list):
+        return None
+
+    for container in containers:
+        if not isinstance(container, dict):
+            continue
+        if not _macos_container_has_physical_store(container, partition_identifier):
+            continue
+        volume_path = _macos_preferred_apfs_volume_path(container)
+        if volume_path:
+            return volume_path
+
+    return None
+
+
+def _macos_container_has_physical_store(container: dict[str, Any], partition_identifier: str) -> bool:
+    stores = container.get("PhysicalStores", [])
+    if not isinstance(stores, list):
+        return False
+    for store in stores:
+        if not isinstance(store, dict):
+            continue
+        identifier = _normalized(_string_or_none(store.get("DeviceIdentifier")))
+        if identifier == _normalized(partition_identifier):
+            return True
+    return False
+
+
+def _macos_preferred_apfs_volume_path(container: dict[str, Any]) -> str | None:
+    volumes = container.get("Volumes", [])
+    if not isinstance(volumes, list):
+        return None
+
+    preferred: str | None = None
+    fallback: str | None = None
+    for volume in volumes:
+        if not isinstance(volume, dict):
+            continue
+
+        identifier = _string_or_none(volume.get("DeviceIdentifier"))
+        if not identifier:
+            continue
+        volume_path = f"/dev/{identifier}"
+        if fallback is None:
+            fallback = volume_path
+
+        name = _normalized(_string_or_none(volume.get("Name")) or _string_or_none(volume.get("VolumeName")))
+        if name == _normalized(MACOS_VOLUME_LABEL):
+            return volume_path
+
+        role = _normalized(_string_or_none(volume.get("Role")))
+        if not role and preferred is None:
+            preferred = volume_path
+
+    return preferred or fallback
+
+
+def _device_identifier(device_path: str) -> str | None:
+    normalized = _string_or_none(device_path)
+    if not normalized:
+        return None
+    if normalized.startswith("/dev/"):
+        return normalized[5:]
+    return normalized
 
 
 def _macos_data_partition_path(entry: dict[str, Any]) -> str | None:

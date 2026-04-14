@@ -308,6 +308,7 @@ def test_macos_wait_for_mount_attempts_mount_when_not_mounted(monkeypatch) -> No
     )
     commands: list[list[str]] = []
 
+    monkeypatch.setattr(native_disk_ops, "_macos_mountable_device_path", lambda partition_path: partition_path)
     monkeypatch.setattr(native_disk_ops, "_macos_disk_info", lambda partition_path: next(infos))
     monkeypatch.setattr("drive_qual.core.native_disk_ops.time.sleep", lambda _: None)
 
@@ -321,6 +322,71 @@ def test_macos_wait_for_mount_attempts_mount_when_not_mounted(monkeypatch) -> No
 
     assert mount_point == "/Volumes/DUT"
     assert commands == [["diskutil", "mount", "/dev/disk4s2"]]
+
+
+def test_macos_wait_for_mount_mounts_resolved_apfs_volume(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    infos = iter(
+        [
+            {"MountPoint": None},
+            {"MountPoint": "/Volumes/DUT"},
+        ]
+    )
+    commands: list[list[str]] = []
+
+    monkeypatch.setattr(native_disk_ops, "_macos_mountable_device_path", lambda partition_path: "/dev/disk5s1")
+    monkeypatch.setattr(native_disk_ops, "_macos_disk_info", lambda partition_path: next(infos))
+    monkeypatch.setattr("drive_qual.core.native_disk_ops.time.sleep", lambda _: None)
+
+    def fake_run_command(command: list[str], **kwargs: Any) -> object:
+        commands.append(command)
+        return type("Result", (), {"returncode": 0, "stdout": "", "stderr": ""})()
+
+    monkeypatch.setattr(native_disk_ops, "_run_command", fake_run_command)
+
+    mount_point = native_disk_ops._macos_wait_for_mount("/dev/disk4s2")
+
+    assert mount_point == "/Volumes/DUT"
+    assert commands == [["diskutil", "mount", "/dev/disk5s1"]]
+
+
+def test_macos_apfs_volume_path_for_physical_store_prefers_dut_volume(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    apfs_list_plist = """
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Containers</key>
+  <array>
+    <dict>
+      <key>PhysicalStores</key>
+      <array>
+        <dict>
+          <key>DeviceIdentifier</key>
+          <string>disk4s2</string>
+        </dict>
+      </array>
+      <key>Volumes</key>
+      <array>
+        <dict>
+          <key>DeviceIdentifier</key>
+          <string>disk5s1</string>
+          <key>Name</key>
+          <string>DUT</string>
+        </dict>
+      </array>
+    </dict>
+  </array>
+</dict>
+</plist>
+""".strip()
+
+    def fake_run_command(command: list[str], **kwargs: Any) -> object:
+        assert command == ["diskutil", "apfs", "list", "-plist", "/dev/disk4s2"]
+        return type("Result", (), {"returncode": 0, "stdout": apfs_list_plist, "stderr": ""})()
+
+    monkeypatch.setattr(native_disk_ops, "_run_command", fake_run_command)
+
+    assert native_disk_ops._macos_apfs_volume_path_for_physical_store("/dev/disk4s2") == "/dev/disk5s1"
 
 
 def test_safe_remove_macos_device_uses_force_unmount_fallback(monkeypatch) -> None:  # type: ignore[no-untyped-def]
