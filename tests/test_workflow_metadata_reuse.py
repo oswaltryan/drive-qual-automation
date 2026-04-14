@@ -69,6 +69,16 @@ def test_current_session_folder_name_reads_localized_marker(monkeypatch: MonkeyP
     assert report_session.current_session_folder_name() == "69-420"
 
 
+def test_clear_current_session_removes_localized_marker(monkeypatch: MonkeyPatch, tmp_path: Path) -> None:
+    marker_path = _localize_to_tmp(tmp_path, report_session.CURRENT_MARKER)
+    monkeypatch.setattr(report_session, "localize_windows_path", lambda path: _localize_to_tmp(tmp_path, path))
+    _write_current_marker(marker_path, "69-420", product="Apricorn")
+
+    report_session.clear_current_session()
+
+    assert not marker_path.exists()
+
+
 def test_load_report_uses_localized_path(monkeypatch: MonkeyPatch, tmp_path: Path) -> None:
     monkeypatch.setattr(report_session, "localize_windows_path", lambda path: _localize_to_tmp(tmp_path, path))
     local_report_path = _localize_to_tmp(tmp_path, report_session.report_path_for("69-420"))

@@ -512,7 +512,10 @@ def test_run_power_measurements_step_runs_5v_sequence_before_12v(monkeypatch: Mo
         ("max_io", "12V"),
         ("in_rush", "12V"),
     ]
-    assert prompts == ["Connect the scope probes to the 12V rail. Press Enter to start measurements..."]
+    assert prompts == [
+        "Connect the scope probes to the 5V rail. Press Enter to start measurements...",
+        "Connect the scope probes to the 12V rail. Press Enter to start measurements...",
+    ]
 
 
 def test_run_max_io_benchmark_formats_before_recall_and_starts_acquisition(

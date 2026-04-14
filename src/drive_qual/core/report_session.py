@@ -31,6 +31,11 @@ def set_current_session(folder_name: str, product_name: str | None = None) -> No
     marker_path.write_text(json.dumps(session_data) + "\n", encoding="utf-8")
 
 
+def clear_current_session() -> None:
+    marker_path = localize_windows_path(CURRENT_MARKER)
+    marker_path.unlink(missing_ok=True)
+
+
 def current_session_folder_name() -> str | None:
     marker_path = localize_windows_path(CURRENT_MARKER)
     if not marker_path.exists():

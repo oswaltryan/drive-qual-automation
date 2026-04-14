@@ -3,6 +3,7 @@ from __future__ import annotations
 import builtins
 import importlib
 import sys
+from pathlib import Path
 from types import ModuleType
 from typing import Any
 
@@ -10,6 +11,44 @@ import pytest
 from _pytest.monkeypatch import MonkeyPatch
 
 EXPECTED_STEP_ORDER = ("drive_info", "equipment", "power_measurements", "performance")
+
+
+def _complete_report_payload() -> dict[str, Any]:
+    return {
+        "equipment": {
+            "dut": {"Padlock DT FIPS": {"serial_number": "ABC123"}},
+            "windows_host": {
+                "software": [
+                    {"name": "CrystalDiskInfo", "version": "8.8.9"},
+                    {"name": "CrystalDiskMark", "version": "7.0.0"},
+                    {"name": "ATTO", "version": "4.0.0f1"},
+                ]
+            },
+            "linux_host": {"software": [{"name": "Disks (native)", "version": None}]},
+            "macos_host": {"software": [{"name": "Blackmagic Disk Speed Test", "version": "4.2"}]},
+        },
+        "power": {
+            "Padlock DT FIPS": {
+                "max_inrush_current_5v": {"windows": 1.0, "linux": 1.0, "macos": 1.0},
+                "max_inrush_current_12v": {"windows": 1.0, "linux": 1.0, "macos": 1.0},
+                "max_read_write_current_5v": {"windows": 1.0, "linux": 1.0, "macos": 1.0},
+                "rms_read_write_current_5v": {"windows": 1.0, "linux": 1.0, "macos": 1.0},
+                "max_read_write_current_12v": {"windows": 1.0, "linux": 1.0, "macos": 1.0},
+                "rms_read_write_current_12v": {"windows": 1.0, "linux": 1.0, "macos": 1.0},
+            }
+        },
+        "performance": {
+            "Padlock DT FIPS": {
+                "Windows": {
+                    "CrystalDiskInfo": {"screenshot": "cdi.png"},
+                    "CrystalDiskMark": {"read": 100.0, "write": 100.0},
+                    "ATTO": {"read": 100.0, "write": 100.0},
+                },
+                "Linux": {"Disks (native)": {"read": 100.0, "write": 100.0}},
+                "macOS": {"Blackmagic Disk Speed Test": {"read": 100.0, "write": 100.0}},
+            }
+        },
+    }
 
 
 def test_report_workflow_import_does_not_import_software_step(monkeypatch: MonkeyPatch) -> None:
@@ -124,3 +163,35 @@ def test_run_report_workflow_delegates_profile_execution_to_orchestrator(monkeyp
     assert captured["profile"] == "core_perf_v1"
     assert captured["part_number"] == "69-420"
     assert captured["resume"] is True
+
+
+def test_run_report_workflow_clears_current_marker_when_report_is_complete(monkeypatch: MonkeyPatch) -> None:
+    sys.modules.pop("drive_qual.workflows.report", None)
+    module = importlib.import_module("drive_qual.workflows.report")
+    cleared: list[str] = []
+
+    monkeypatch.setattr(module, "execute_orchestrated_workflow", lambda **kwargs: None)
+    monkeypatch.setattr(module, "report_path_for", lambda folder_name: Path(f"Z:/{folder_name}/report.json"))
+    monkeypatch.setattr(module, "load_report", lambda report_path: _complete_report_payload())
+    monkeypatch.setattr(module, "clear_current_session", lambda: cleared.append("cleared"))
+
+    module.run_report_workflow(["drive_info"], part_number="69-420")
+
+    assert cleared == ["cleared"]
+
+
+def test_run_report_workflow_keeps_current_marker_when_report_is_incomplete(monkeypatch: MonkeyPatch) -> None:
+    sys.modules.pop("drive_qual.workflows.report", None)
+    module = importlib.import_module("drive_qual.workflows.report")
+    cleared: list[str] = []
+    payload = _complete_report_payload()
+    payload["power"]["Padlock DT FIPS"]["max_read_write_current_12v"]["windows"] = None
+
+    monkeypatch.setattr(module, "execute_orchestrated_workflow", lambda **kwargs: None)
+    monkeypatch.setattr(module, "report_path_for", lambda folder_name: Path(f"Z:/{folder_name}/report.json"))
+    monkeypatch.setattr(module, "load_report", lambda report_path: payload)
+    monkeypatch.setattr(module, "clear_current_session", lambda: cleared.append("cleared"))
+
+    module.run_report_workflow(["drive_info"], part_number="69-420")
+
+    assert cleared == []

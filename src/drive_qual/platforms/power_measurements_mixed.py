@@ -479,8 +479,8 @@ def run_power_measurements_step() -> None:
     rails = _max_io_rails_for_dut(dut_name)
 
     for rail in rails:
-        if rail == "12V":
-            input("Connect the scope probes to the 12V rail. Press Enter to start measurements...")
+        if rail in {"5V", "12V"}:
+            input(f"Connect the scope probes to the {rail} rail. Press Enter to start measurements...")
         if rail:
             print(f"Starting power-measurement sequence for {rail} rail.")
         dut = asyncio.run(_run_max_io(part_number, report_path, max_io_rail=rail))
