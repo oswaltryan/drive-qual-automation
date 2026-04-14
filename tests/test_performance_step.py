@@ -160,6 +160,8 @@ def test_run_software_step_records_macos_blackmagic_results(monkeypatch: MonkeyP
     )
     monkeypatch.setattr("drive_qual.platforms.macos.performance.time.sleep", lambda _seconds: None)
     monkeypatch.setattr(macos_performance, "_run_blackmagic_automation", lambda dut_name: True)
+    close_calls: list[str] = []
+    monkeypatch.setattr(macos_performance, "_close_blackmagic_app", lambda: close_calls.append("closed"))
     monkeypatch.setattr(
         macos_performance,
         "extract_blackmagic_read_write_from_screenshot",
@@ -189,6 +191,7 @@ def test_run_software_step_records_macos_blackmagic_results(monkeypatch: MonkeyP
         ["Read MB/s", str(EXPECTED_MACOS_READ)],
         ["Write MB/s", str(EXPECTED_MACOS_WRITE)],
     ]
+    assert close_calls == ["closed"]
 
 
 def test_run_software_step_rejects_invalid_macos_blackmagic_values(monkeypatch: MonkeyPatch, tmp_path: Path) -> None:
@@ -221,6 +224,7 @@ def test_run_software_step_rejects_invalid_macos_blackmagic_values(monkeypatch: 
     )
     monkeypatch.setattr(macos_performance, "_run_blackmagic_automation", lambda dut_name: False)
     monkeypatch.setattr(macos_performance, "_launch_blackmagic_app", lambda: False)
+    monkeypatch.setattr(macos_performance, "_close_blackmagic_app", lambda: None)
     monkeypatch.setattr(macos_performance, "extract_blackmagic_read_write_from_screenshot", lambda _path: None)
     monkeypatch.setattr(macos_performance, "_capture_blackmagic_screenshot", lambda path: path.write_bytes(b"png"))
 

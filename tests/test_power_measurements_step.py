@@ -472,6 +472,7 @@ def test_run_in_rush_marks_hot_pluggable(
 
 def test_run_power_measurements_step_runs_5v_sequence_before_12v(monkeypatch: MonkeyPatch) -> None:
     sequence: list[tuple[str, str | None]] = []
+    prompts: list[str] = []
     dut = ApricornDevice(iProduct="AEGIS FIPS DT", iSerial="ABC123")
 
     monkeypatch.setattr("drive_qual.platforms.power_measurements_mixed.resolve_folder_name", lambda _: "29-0031")
@@ -495,6 +496,10 @@ def test_run_power_measurements_step_runs_5v_sequence_before_12v(monkeypatch: Mo
     monkeypatch.setattr("drive_qual.platforms.power_measurements_mixed._run_max_io", fake_run_max_io)
     monkeypatch.setattr("drive_qual.platforms.power_measurements_mixed._run_in_rush", fake_run_in_rush)
     monkeypatch.setattr(
+        "builtins.input",
+        lambda prompt="": prompts.append(prompt) or "",
+    )
+    monkeypatch.setattr(
         "drive_qual.platforms.power_measurements_mixed.update_power_measurements_from_saved_csvs",
         lambda part_number=None: None,
     )
@@ -507,6 +512,7 @@ def test_run_power_measurements_step_runs_5v_sequence_before_12v(monkeypatch: Mo
         ("max_io", "12V"),
         ("in_rush", "12V"),
     ]
+    assert prompts == ["Connect the scope probes to the 12V rail. Press Enter to start measurements..."]
 
 
 def test_run_max_io_benchmark_formats_before_recall_and_starts_acquisition(

@@ -96,6 +96,23 @@ def _launch_blackmagic_app() -> bool:
     return False
 
 
+def _close_blackmagic_app() -> None:
+    subprocess.run(
+        ["osascript", "-e", f'tell application "{BLACKMAGIC_APP_NAME}" to quit'],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    for process_name in _blackmagic_process_name_candidates():
+        subprocess.run(
+            ["pkill", "-x", process_name],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+    time.sleep(1.0)
+
+
 def _blackmagic_process_name_candidates() -> tuple[str, ...]:
     candidates: list[str] = [BLACKMAGIC_APP_NAME]
     info_path = BLACKMAGIC_APP_PATH / "Contents" / "Info.plist"
@@ -345,34 +362,39 @@ def run_software_step(part_number: str | None = None) -> None:  # noqa: PLR0915
         raise RuntimeError(f"Could not map performance results for DUT {dut_name!r}.")
 
     screenshot_path, json_path, csv_path = _blackmagic_artifact_paths(actual_pn, dut_label)
-    automation_result = _collect_blackmagic_automation_result(
-        dut_label,
-        screenshot_path,
-    )
-    read_mb_s, write_mb_s, _value_source = _resolve_blackmagic_read_write_values(
-        tool_name,
-        dut_label,
-        automation_result,
-    )
-    _write_blackmagic_json(
-        json_path,
-        tool_name=tool_name,
-        dut_name=dut_label,
-        read_mb_s=read_mb_s,
-        write_mb_s=write_mb_s,
-    )
-    _write_blackmagic_csv(csv_path, read_mb_s=read_mb_s, write_mb_s=write_mb_s)
+    try:
+        automation_result = _collect_blackmagic_automation_result(
+            dut_label,
+            screenshot_path,
+        )
+        read_mb_s, write_mb_s, _value_source = _resolve_blackmagic_read_write_values(
+            tool_name,
+            dut_label,
+            automation_result,
+        )
+        _write_blackmagic_json(
+            json_path,
+            tool_name=tool_name,
+            dut_name=dut_label,
+            read_mb_s=read_mb_s,
+            write_mb_s=write_mb_s,
+        )
+        _write_blackmagic_csv(csv_path, read_mb_s=read_mb_s, write_mb_s=write_mb_s)
 
-    os_perf = performance.setdefault(report_dut_key, {"Windows": {}, "Linux": {}, "macOS": {}}).setdefault("macOS", {})
-    entry = os_perf.setdefault(tool_name, {"read": None, "write": None})
-    if not isinstance(entry, dict):
-        entry = {"read": None, "write": None}
-        os_perf[tool_name] = entry
-    entry["read"] = read_mb_s
-    entry["write"] = write_mb_s
+        os_perf = performance.setdefault(report_dut_key, {"Windows": {}, "Linux": {}, "macOS": {}}).setdefault(
+            "macOS", {}
+        )
+        entry = os_perf.setdefault(tool_name, {"read": None, "write": None})
+        if not isinstance(entry, dict):
+            entry = {"read": None, "write": None}
+            os_perf[tool_name] = entry
+        entry["read"] = read_mb_s
+        entry["write"] = write_mb_s
 
-    save_report(report_path, data)
-    print(f"Saved macOS benchmark screenshot to: {screenshot_path}")
-    print(f"Saved macOS benchmark JSON to: {json_path}")
-    print(f"Saved macOS benchmark CSV to: {csv_path}")
-    print(f"Updated macOS performance in {report_path}")
+        save_report(report_path, data)
+        print(f"Saved macOS benchmark screenshot to: {screenshot_path}")
+        print(f"Saved macOS benchmark JSON to: {json_path}")
+        print(f"Saved macOS benchmark CSV to: {csv_path}")
+        print(f"Updated macOS performance in {report_path}")
+    finally:
+        _close_blackmagic_app()

@@ -10,5 +10,6 @@ __pycache__/
 .coverage
 htmlcov/
 .cache/
+.DS_Store
 
 tools/linux/.disks-benchmark-like-bin
