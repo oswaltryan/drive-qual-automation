@@ -506,7 +506,14 @@ def test_run_power_measurements_step_runs_5v_sequence_before_12v(monkeypatch: Mo
         "drive_qual.platforms.power_measurements_mixed._select_report_dut_name", lambda report_path: "Padlock DT FIPS"
     )
 
-    async def fake_run_max_io(part_number: str, report_path: Path, *, max_io_rail: str | None = None) -> ApricornDevice:
+    async def fake_run_max_io(
+        part_number: str,
+        report_path: Path,
+        *,
+        dut_name: str | None = None,
+        max_io_rail: str | None = None,
+    ) -> ApricornDevice:
+        assert dut_name == "Padlock DT FIPS"
         sequence.append(("max_io", max_io_rail))
         return dut
 

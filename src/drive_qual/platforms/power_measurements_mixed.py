@@ -415,13 +415,19 @@ def _write_measurement_backup(report_path: Path, csv_path: str, measurement_grou
     print(f"Wrote capture backup entry to {_display_path(backup_path)}")
 
 
-async def _run_max_io(part_number: str, report_path: Path, *, max_io_rail: str | None = None) -> ApricornDevice:
-    dut_name = _select_report_dut_name(report_path)
-    dut = _resolve_device_for_report_dut(report_path, dut_name, "Unlock Apricorn device..")
+async def _run_max_io(
+    part_number: str,
+    report_path: Path,
+    *,
+    dut_name: str | None = None,
+    max_io_rail: str | None = None,
+) -> ApricornDevice:
+    selected_dut_name = dut_name or _select_report_dut_name(report_path)
+    dut = _resolve_device_for_report_dut(report_path, selected_dut_name, "Unlock Apricorn device..")
     _mark_current_host_compatibility(report_path, "recognized_by_os")
     _ensure_local_artifact_dir(part_number, "Max IO")
     try:
-        dut = await _run_max_io_benchmark(dut, report_path, dut_name=dut_name, max_io_rail=max_io_rail)
+        dut = await _run_max_io_benchmark(dut, report_path, dut_name=selected_dut_name, max_io_rail=max_io_rail)
     except Exception as exc:
         rail_suffix = f" ({max_io_rail})" if max_io_rail else ""
         print(f"Critical error during Max IO benchmark{rail_suffix}: {exc}")
@@ -483,7 +489,7 @@ def run_power_measurements_step() -> None:
             input(f"Connect the scope probes to the {rail} rail. Press Enter to start measurements...")
         if rail:
             print(f"Starting power-measurement sequence for {rail} rail.")
-        dut = asyncio.run(_run_max_io(part_number, report_path, max_io_rail=rail))
+        dut = asyncio.run(_run_max_io(part_number, report_path, dut_name=dut_name, max_io_rail=rail))
         asyncio.run(_run_in_rush(part_number, report_path, dut, max_io_rail=rail))
 
     # Final pass re-reads all CSVs to ensure report JSON is consistent.
