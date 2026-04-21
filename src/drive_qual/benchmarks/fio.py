@@ -9,6 +9,7 @@ DEFAULT_RUNTIME_SECONDS = 300
 RAMP_TIME_SECONDS = 3
 IODEPTH = 32
 RANDOM_GENERATOR = "tausworthe64"
+WORKLOAD_SIZE = "1g"
 
 
 def _ioengine_for_platform() -> str:
@@ -38,6 +39,7 @@ def _fio_command(target_dir: str, *, runtime_seconds: int) -> tuple[list[str], s
         "--direct=1",
         f"--random_generator={RANDOM_GENERATOR}",
         f"--filename={filename}",
+        f"--size={WORKLOAD_SIZE}",
         f"--runtime={runtime_seconds}",
         "--time_based=1",
         f"--ramp_time={RAMP_TIME_SECONDS}",

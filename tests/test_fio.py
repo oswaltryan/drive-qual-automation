@@ -23,6 +23,7 @@ def _expected_parity_args(filename: str, ioengine: str, runtime_seconds: int) ->
         "--direct=1",
         "--random_generator=tausworthe64",
         f"--filename={filename}",
+        "--size=1g",
         f"--runtime={runtime_seconds}",
         "--time_based=1",
         "--ramp_time=3",
