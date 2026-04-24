@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from pathlib import Path, PureWindowsPath
 from typing import Any
+from uuid import uuid4
 
 from drive_qual.core.storage_paths import SCOPE_ARTIFACT_ROOT, localize_windows_path
 
@@ -21,14 +22,34 @@ def sanitize_dir_name(value: str) -> str:
     return "".join(cleaned).strip("_")
 
 
+def _write_text_by_replacing(path: Path, content: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temp_path = path.with_name(f".{path.name}.{uuid4().hex}.tmp")
+    try:
+        temp_path.write_text(content, encoding="utf-8")
+    except Exception:
+        temp_path.unlink(missing_ok=True)
+        raise
+
+    try:
+        temp_path.replace(path)
+    except PermissionError:
+        if path.exists():
+            path.unlink()
+            temp_path.replace(path)
+            return
+        raise
+    finally:
+        temp_path.unlink(missing_ok=True)
+
+
 def set_current_session(folder_name: str, product_name: str | None = None) -> None:
     marker_path = localize_windows_path(CURRENT_MARKER)
-    marker_path.parent.mkdir(parents=True, exist_ok=True)
     session_data = {
         "folder": folder_name,
         "product": product_name,
     }
-    marker_path.write_text(json.dumps(session_data) + "\n", encoding="utf-8")
+    _write_text_by_replacing(marker_path, json.dumps(session_data) + "\n")
 
 
 def clear_current_session() -> None:
@@ -97,5 +118,4 @@ def load_report(report_path: Path) -> dict[str, Any]:
 
 def save_report(report_path: Path, data: dict[str, Any]) -> None:
     local_path = localize_windows_path(report_path)
-    local_path.parent.mkdir(parents=True, exist_ok=True)
-    local_path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+    _write_text_by_replacing(local_path, json.dumps(data, indent=2) + "\n")
