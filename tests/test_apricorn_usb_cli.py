@@ -9,6 +9,7 @@ from drive_qual.integrations.apricorn.usb_cli import (
     find_apricorn_device,
     is_same_device,
     list_apricorn_devices,
+    resolve_apricorn_device_by_serial,
     select_apricorn_device,
 )
 from drive_qual.platforms.power_measurements_mixed import (
@@ -17,6 +18,8 @@ from drive_qual.platforms.power_measurements_mixed import (
     _wait_for_device_present,
     _wait_for_device_removed,
 )
+
+EXPECTED_RESOLVED_DRIVE_NUM = 4
 
 
 def test_list_apricorn_devices_filters_non_apricorn_entries() -> None:
@@ -57,6 +60,43 @@ def test_find_apricorn_device_returns_first_filtered_apricorn(monkeypatch: Monke
 
     assert device is not None
     assert device.iProduct == "Secure Key 3.0"
+
+
+def test_list_apricorn_devices_flattens_nested_device_maps() -> None:
+    payload = {
+        "devices": [
+            {
+                "1": {
+                    "iManufacturer": "Apricorn",
+                    "iProduct": "Padlock Ssd",
+                    "iSerial": "000000000000",
+                    "physicalDriveNum": 2,
+                    "driveLetter": "D:",
+                },
+                "2": {
+                    "iManufacturer": "Apricorn",
+                    "iProduct": "Padlock Ssd",
+                    "iSerial": "109500004191",
+                    "physicalDriveNum": 3,
+                    "driveLetter": "E:",
+                },
+                "3": {
+                    "iManufacturer": "Apricorn",
+                    "iProduct": "Padlock Ssd",
+                    "iSerial": "109500003890",
+                    "physicalDriveNum": 4,
+                    "driveLetter": "Not Formatted",
+                },
+            }
+        ]
+    }
+
+    devices = list_apricorn_devices(payload)
+
+    assert [device.iSerial for device in devices] == ["000000000000", "109500004191", "109500003890"]
+    resolved = resolve_apricorn_device_by_serial(payload, "109500003890")
+    assert resolved is not None
+    assert resolved.physicalDriveNum == EXPECTED_RESOLVED_DRIVE_NUM
 
 
 def test_is_same_device_prefers_serial_number() -> None:

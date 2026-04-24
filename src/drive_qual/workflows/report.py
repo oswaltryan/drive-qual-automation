@@ -131,6 +131,39 @@ def _is_performance_measurement_complete(tool_name: str, value: Any) -> bool:
     return _has_value(value.get("read")) and _has_value(value.get("write"))
 
 
+def _is_performance_complete_for_dut(
+    *,
+    equipment: dict[str, Any],
+    performance: dict[str, Any],
+    dut_name: str,
+) -> bool:
+    perf_key = _find_matching_section_key(performance, dut_name)
+    if perf_key is None:
+        return False
+
+    perf_entry = performance.get(perf_key)
+    if not isinstance(perf_entry, dict):
+        return False
+
+    for host_key, os_key in PERFORMANCE_HOSTS:
+        os_perf = perf_entry.get(os_key)
+        if not isinstance(os_perf, dict):
+            return False
+        for software in _software_entries_for_host(equipment, host_key):
+            tool_name = software.get("name")
+            if not isinstance(tool_name, str):
+                continue
+            normalized_tool_name = tool_name.strip()
+            if not normalized_tool_name:
+                continue
+            if not _is_performance_measurement_complete(
+                normalized_tool_name,
+                os_perf.get(normalized_tool_name),
+            ):
+                return False
+    return True
+
+
 def _is_performance_complete(data: dict[str, Any]) -> bool:
     equipment = data.get("equipment")
     performance = data.get("performance")
@@ -142,23 +175,12 @@ def _is_performance_complete(data: dict[str, Any]) -> bool:
         return False
 
     for dut_name in dut_bindings:
-        perf_key = _find_matching_section_key(performance, str(dut_name))
-        if perf_key is None:
+        if not _is_performance_complete_for_dut(
+            equipment=equipment,
+            performance=performance,
+            dut_name=str(dut_name),
+        ):
             return False
-        perf_entry = performance.get(perf_key)
-        if not isinstance(perf_entry, dict):
-            return False
-
-        for host_key, os_key in PERFORMANCE_HOSTS:
-            os_perf = perf_entry.get(os_key)
-            if not isinstance(os_perf, dict):
-                return False
-            for software in _software_entries_for_host(equipment, host_key):
-                tool_name = software.get("name")
-                if not isinstance(tool_name, str) or not tool_name.strip():
-                    continue
-                if not _is_performance_measurement_complete(tool_name.strip(), os_perf.get(tool_name.strip())):
-                    return False
     return True
 
 

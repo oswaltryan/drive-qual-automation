@@ -148,9 +148,9 @@ def list_usb_devices(payload: dict[str, Any]) -> list[dict[str, Any]]:
     for entry in devices:
         if not isinstance(entry, dict) or not entry:
             continue
-        device_info = next(iter(entry.values()))
-        if isinstance(device_info, dict):
-            device_infos.append(device_info)
+        for device_info in entry.values():
+            if isinstance(device_info, dict):
+                device_infos.append(device_info)
     return device_infos
 
 

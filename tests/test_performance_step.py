@@ -198,9 +198,11 @@ def test_run_software_step_rejects_invalid_macos_blackmagic_values(monkeypatch: 
     report_path = tmp_path / "drive_qualification_report_atomic_tests.json"
     report_path.write_text(json.dumps(_report_payload()), encoding="utf-8")
 
-    screenshot_path = tmp_path / "Secure Key DT.png"
-    json_path = tmp_path / "Secure Key DT.json"
-    csv_path = tmp_path / "Secure Key DT.csv"
+    screenshot_path, json_path, csv_path = (
+        tmp_path / "Secure Key DT.png",
+        tmp_path / "Secure Key DT.json",
+        tmp_path / "Secure Key DT.csv",
+    )
     responses = iter(["", "not-a-number", "0", "-1", str(EXPECTED_MACOS_READ), str(EXPECTED_MACOS_WRITE)])
     prompts: list[str] = []
 
