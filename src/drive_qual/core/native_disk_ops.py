@@ -30,6 +30,7 @@ POLL_DELAY_SECONDS = 0.5
 LINUX_MKFS_RETRY_ATTEMPTS = 3
 LINUX_MKFS_RETRY_DELAY_SECONDS = 0.5
 MACOS_WRITE_PROBE_FILE = ".drive_qual_write_probe"
+LINUX_PROTECTED_MOUNTPOINTS = frozenset({"/", "/boot", "/boot/efi"})
 
 
 @dataclass(frozen=True)
@@ -331,7 +332,7 @@ def _linux_disk_path_for_device(device: ApricornDevice) -> str:
 
 def _linux_candidate_for_path(disk_path: str) -> NativeDiskCandidate:
     result = _run_command(
-        ["lsblk", "-J", "-o", "PATH,SERIAL,MODEL,TRAN,RM,HOTPLUG,TYPE", disk_path],
+        ["lsblk", "-J", "--tree", "-o", "PATH,SERIAL,MODEL,TRAN,RM,HOTPLUG,TYPE,MOUNTPOINTS", disk_path],
         capture_output=True,
     )
     payload = json.loads(result.stdout)
@@ -344,6 +345,13 @@ def _linux_candidate_for_path(disk_path: str) -> NativeDiskCandidate:
         raise RuntimeError(f"Invalid Linux disk entry for {disk_path}.")
     if entry.get("type") != "disk":
         raise RuntimeError(f"Resolved Linux block device is not a disk: {disk_path}.")
+    if not _linux_is_external_disk(entry):
+        raise RuntimeError(f"Resolved Linux block device is not an external/removable disk: {disk_path}.")
+
+    protected_mounts = _linux_protected_mount_points(entry)
+    if protected_mounts:
+        mounts = ", ".join(protected_mounts)
+        raise RuntimeError(f"Refusing to operate on Linux system disk {disk_path}; mounted at {mounts}.")
 
     serial = _string_or_none(entry.get("serial"))
     model = _string_or_none(entry.get("model"))
@@ -358,8 +366,33 @@ def _linux_is_external_disk(entry: dict[str, Any]) -> bool:
     return bool(entry.get("rm")) or bool(entry.get("hotplug"))
 
 
+def _linux_protected_mount_points(entry: dict[str, Any]) -> list[str]:
+    mount_points = _linux_collect_mount_points(entry)
+    return sorted(mount_point for mount_point in mount_points if mount_point in LINUX_PROTECTED_MOUNTPOINTS)
+
+
+def _linux_collect_mount_points(entry: dict[str, Any]) -> set[str]:
+    points = _linux_mount_points_for_entry(entry)
+    children = entry.get("children")
+    if isinstance(children, list):
+        for child in children:
+            if isinstance(child, dict):
+                points.update(_linux_collect_mount_points(child))
+    return points
+
+
+def _linux_mount_points_for_entry(entry: dict[str, Any]) -> set[str]:
+    raw_mounts = entry.get("mountpoints")
+    if isinstance(raw_mounts, list):
+        return {mount_point for mount_point in (_string_or_none(value) for value in raw_mounts) if mount_point}
+    if isinstance(raw_mounts, str):
+        mount_point = _string_or_none(raw_mounts)
+        return {mount_point} if mount_point else set()
+    return set()
+
+
 def _linux_device_tree(disk_path: str) -> dict[str, Any]:
-    result = _run_command(["lsblk", "-J", "-o", "PATH,TYPE,MOUNTPOINTS", disk_path], capture_output=True)
+    result = _run_command(["lsblk", "-J", "--tree", "-o", "PATH,TYPE,MOUNTPOINTS", disk_path], capture_output=True)
     payload = json.loads(result.stdout)
     devices = payload.get("blockdevices", [])
     if not isinstance(devices, list) or not devices:

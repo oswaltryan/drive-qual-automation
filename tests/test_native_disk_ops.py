@@ -2,6 +2,9 @@ from __future__ import annotations
 
 from typing import Any
 
+import pytest
+from pytest import MonkeyPatch
+
 from drive_qual.core import native_disk_ops
 from drive_qual.integrations.apricorn.usb_cli import ApricornDevice
 
@@ -39,13 +42,63 @@ def test_select_linux_candidate_uses_device_block_path(monkeypatch) -> None:  # 
         lambda *args, **kwargs: type(
             "Result",
             (),
-            {"stdout": '{"blockdevices":[{"path":"/dev/sda","serial":"ABC123","model":"Padlock 3.0","type":"disk"}]}'},
+            {
+                "stdout": (
+                    '{"blockdevices":[{"path":"/dev/sda","serial":"ABC123","model":"Padlock 3.0",'
+                    '"tran":"usb","rm":true,"hotplug":true,"type":"disk","mountpoints":[null]}]}'
+                )
+            },
         )(),
     )
 
     selected = native_disk_ops._select_linux_candidate(device)
 
     assert selected.disk_path == "/dev/sda"
+
+
+def test_select_linux_candidate_rejects_non_external_disk(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    device = ApricornDevice(iProduct="Padlock 3.0", iSerial="ABC123", blockDevice="/dev/sda")
+
+    monkeypatch.setattr(
+        native_disk_ops,
+        "_run_command",
+        lambda *args, **kwargs: type(
+            "Result",
+            (),
+            {
+                "stdout": (
+                    '{"blockdevices":[{"path":"/dev/sda","serial":"ABC123","model":"Padlock 3.0",'
+                    '"tran":"sata","rm":false,"hotplug":false,"type":"disk","mountpoints":[null]}]}'
+                )
+            },
+        )(),
+    )
+
+    with pytest.raises(RuntimeError, match="external/removable disk"):
+        native_disk_ops._select_linux_candidate(device)
+
+
+def test_select_linux_candidate_rejects_protected_mount_points(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    device = ApricornDevice(iProduct="Padlock 3.0", iSerial="ABC123", blockDevice="/dev/sda")
+
+    monkeypatch.setattr(
+        native_disk_ops,
+        "_run_command",
+        lambda *args, **kwargs: type(
+            "Result",
+            (),
+            {
+                "stdout": (
+                    '{"blockdevices":[{"path":"/dev/sda","serial":"ABC123","model":"Padlock 3.0",'
+                    '"tran":"usb","rm":true,"hotplug":true,"type":"disk","mountpoints":[null],'
+                    '"children":[{"path":"/dev/sda2","type":"part","mountpoints":["/"]}]}]}'
+                )
+            },
+        )(),
+    )
+
+    with pytest.raises(RuntimeError, match="system disk"):
+        native_disk_ops._select_linux_candidate(device)
 
 
 def test_linux_disk_path_for_device_refreshes_from_usb_payload(monkeypatch) -> None:  # type: ignore[no-untyped-def]
@@ -214,6 +267,57 @@ def test_linux_prepare_for_repartition_clears_partition_signatures(monkeypatch) 
         ["sudo", "wipefs", "--all", "--force", "/dev/sda"],
         ["sudo", "udevadm", "settle"],
     ]
+
+
+def test_linux_candidate_for_path_requests_tree_output(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    commands: list[list[str]] = []
+
+    def fake_run_command(command: list[str], **kwargs: Any) -> object:
+        commands.append(command)
+        return type(
+            "Result",
+            (),
+            {
+                "stdout": (
+                    '{"blockdevices":[{"path":"/dev/sda","serial":"ABC123","model":"Padlock 3.0",'
+                    '"tran":"usb","rm":true,"hotplug":true,"type":"disk","mountpoints":[null],'
+                    '"children":[{"path":"/dev/sda1","type":"part","mountpoints":[null]}]}]}'
+                )
+            },
+        )()
+
+    monkeypatch.setattr(native_disk_ops, "_run_command", fake_run_command)
+
+    selected = native_disk_ops._linux_candidate_for_path("/dev/sda")
+
+    assert selected.disk_path == "/dev/sda"
+    assert commands == [
+        ["lsblk", "-J", "--tree", "-o", "PATH,SERIAL,MODEL,TRAN,RM,HOTPLUG,TYPE,MOUNTPOINTS", "/dev/sda"]
+    ]
+
+
+def test_linux_device_tree_requests_tree_output(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    commands: list[list[str]] = []
+
+    def fake_run_command(command: list[str], **kwargs: Any) -> object:
+        commands.append(command)
+        return type(
+            "Result",
+            (),
+            {
+                "stdout": (
+                    '{"blockdevices":[{"path":"/dev/sda","type":"disk","mountpoints":[null],'
+                    '"children":[{"path":"/dev/sda1","type":"part","mountpoints":["/boot"]}]}]}'
+                )
+            },
+        )()
+
+    monkeypatch.setattr(native_disk_ops, "_run_command", fake_run_command)
+
+    tree = native_disk_ops._linux_device_tree("/dev/sda")
+
+    assert tree["path"] == "/dev/sda"
+    assert commands == [["lsblk", "-J", "--tree", "-o", "PATH,TYPE,MOUNTPOINTS", "/dev/sda"]]
 
 
 def test_prepare_macos_device_creates_no_index_marker(monkeypatch) -> None:  # type: ignore[no-untyped-def]
@@ -480,8 +584,8 @@ def test_macos_apfs_volume_path_for_physical_store_prefers_dut_volume(monkeypatc
 
 
 def test_macos_apfs_volume_path_for_physical_store_falls_back_to_container_reference(
-    monkeypatch,
-) -> None:  # type: ignore[no-untyped-def]
+    monkeypatch: MonkeyPatch,
+) -> None:
     apfs_empty_plist = """
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
