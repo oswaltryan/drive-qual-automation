@@ -3,13 +3,15 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import subprocess
 import sys
 import tempfile
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-from PIL import Image, ImageDraw, ImageFont
+if TYPE_CHECKING:
+    from PIL import ImageDraw, ImageFont
 
 MIB = 1024 * 1024
 DEFAULT_NUM_SAMPLES = 125
@@ -20,10 +22,11 @@ CHART_HEIGHT = 361
 PLOT_TOP = 15
 PLOT_BOTTOM = 324
 RIGHT_GUTTER = 73
-THROUGHPUT_Y_MAX = 130.0
-ACCESS_Y_MAX = 50.0
+MIN_THROUGHPUT_Y_MAX = 130.0
+MIN_ACCESS_Y_MAX = 1.0
 MIB_TO_MBS = 1.048576
 MIN_POINTS = 2
+Y_AXIS_INTERVALS = 10
 
 
 def _parse_args(argv: list[str]) -> tuple[str, int, int, int, list[str]]:
@@ -67,6 +70,8 @@ def _extract_option_value(args: list[str], option: str) -> str | None:
 
 
 def _load_font(size: int) -> ImageFont.FreeTypeFont | ImageFont.ImageFont:
+    from PIL import ImageFont
+
     for candidate in (
         "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
         "/usr/share/fonts/truetype/liberation2/LiberationSans-Regular.ttf",
@@ -110,10 +115,39 @@ def _access_points(payload: dict[str, Any]) -> list[tuple[float, float]]:
     return points
 
 
-def _compute_plot_left(font: ImageFont.FreeTypeFont | ImageFont.ImageFont) -> int:
+def _format_axis_value(value: float) -> str:
+    if math.isclose(value, round(value), abs_tol=0.005):
+        return str(int(round(value)))
+    return f"{value:.1f}".rstrip("0").rstrip(".")
+
+
+def _nice_axis_max(max_value: float, minimum: float) -> float:
+    if not math.isfinite(max_value) or max_value <= minimum:
+        return minimum
+
+    raw_step = max_value / Y_AXIS_INTERVALS
+    magnitude = float(10 ** math.floor(math.log10(raw_step)))
+    fraction = raw_step / magnitude
+
+    for candidate in (1.0, 1.25, 1.5, 2.0, 2.5, 3.0, 4.0, 5.0, 7.5, 10.0):
+        if fraction <= candidate:
+            return float(candidate * magnitude * Y_AXIS_INTERVALS)
+
+    return float(10.0 * magnitude * Y_AXIS_INTERVALS)
+
+
+def _max_y_value(*point_sets: list[tuple[float, float]]) -> float:
+    return max((y for points in point_sets for _, y in points), default=0.0)
+
+
+def _compute_plot_left(font: ImageFont.FreeTypeFont | ImageFont.ImageFont, throughput_y_max: float) -> int:
+    from PIL import Image, ImageDraw
+
     probe = Image.new("RGB", (10, 10))
     probe_draw = ImageDraw.Draw(probe)
-    left_labels = [f"{i * 13} MB/s" for i in range(11)]
+    left_labels = [
+        f"{_format_axis_value((i / Y_AXIS_INTERVALS) * throughput_y_max)} MB/s" for i in range(Y_AXIS_INTERVALS + 1)
+    ]
     max_width = max(probe_draw.textbbox((0, 0), text, font=font)[2] for text in left_labels)
     return max_width + 14
 
@@ -123,36 +157,39 @@ def _draw_grid_and_axes(
     font: ImageFont.FreeTypeFont | ImageFont.ImageFont,
     plot_left: int,
     plot_right: int,
+    *,
+    throughput_y_max: float,
+    access_y_max: float,
 ) -> None:
     plot_w = plot_right - plot_left
     plot_h = PLOT_BOTTOM - PLOT_TOP
 
     draw.rectangle((plot_left, PLOT_TOP, plot_right, PLOT_BOTTOM), fill="#dedede")
 
-    for i in range(11):
-        x = plot_left + round((i / 10.0) * plot_w)
+    for i in range(Y_AXIS_INTERVALS + 1):
+        x = plot_left + round((i / Y_AXIS_INTERVALS) * plot_w)
         draw.line((x, PLOT_TOP, x, PLOT_BOTTOM), fill="#9f9f9f", width=1)
 
-    for i in range(11):
-        y = PLOT_BOTTOM - round((i / 10.0) * plot_h)
+    for i in range(Y_AXIS_INTERVALS + 1):
+        y = PLOT_BOTTOM - round((i / Y_AXIS_INTERVALS) * plot_h)
         draw.line((plot_left, y, plot_right, y), fill="#9f9f9f", width=1)
 
-    for i in range(11):
-        x = plot_left + round((i / 10.0) * plot_w)
+    for i in range(Y_AXIS_INTERVALS + 1):
+        x = plot_left + round((i / Y_AXIS_INTERVALS) * plot_w)
         label = f"{i * 10}%"
         bbox = draw.textbbox((0, 0), label, font=font)
         draw.text((x - (bbox[2] - bbox[0]) // 2, PLOT_BOTTOM + 4), label, fill="#f0f0f0", font=font)
 
-    for i in range(11):
-        y = PLOT_BOTTOM - round((i / 10.0) * plot_h)
+    for i in range(Y_AXIS_INTERVALS + 1):
+        y = PLOT_BOTTOM - round((i / Y_AXIS_INTERVALS) * plot_h)
 
-        left_label = f"{i * 13} MB/s"
+        left_label = f"{_format_axis_value((i / Y_AXIS_INTERVALS) * throughput_y_max)} MB/s"
         left_bbox = draw.textbbox((0, 0), left_label, font=font)
         left_w = left_bbox[2] - left_bbox[0]
         left_h = left_bbox[3] - left_bbox[1]
         draw.text((plot_left - left_w - 8, y - left_h // 2), left_label, fill="#f0f0f0", font=font)
 
-        right_label = f"{i * 5} ms"
+        right_label = f"{_format_axis_value((i / Y_AXIS_INTERVALS) * access_y_max)} ms"
         right_bbox = draw.textbbox((0, 0), right_label, font=font)
         right_h = right_bbox[3] - right_bbox[1]
         draw.text((plot_right + 8, y - right_h // 2), right_label, fill="#f0f0f0", font=font)
@@ -185,11 +222,12 @@ def _draw_access_series(
     draw: ImageDraw.ImageDraw,
     points: list[tuple[float, float]],
     plot_bounds: tuple[int, int],
+    y_max: float,
 ) -> None:
     if not points:
         return
 
-    coords = [_to_plot_xy(x, y, ACCESS_Y_MAX, plot_bounds) for x, y in points]
+    coords = [_to_plot_xy(x, y, y_max, plot_bounds) for x, y in points]
 
     if len(coords) >= MIN_POINTS:
         draw.line(coords, fill=(153, 230, 153, 90), width=1)
@@ -204,22 +242,33 @@ def _draw_access_series(
 
 
 def _render_gnome_disks_like_chart(payload: dict[str, Any], output_path: Path) -> None:
+    from PIL import Image, ImageDraw
+
     read_points = _throughput_points(payload, "read_samples")
     write_points = _throughput_points(payload, "write_samples")
     access_points = _access_points(payload)
+    throughput_y_max = _nice_axis_max(_max_y_value(read_points, write_points), MIN_THROUGHPUT_Y_MAX)
+    access_y_max = _nice_axis_max(_max_y_value(access_points), MIN_ACCESS_Y_MAX)
 
     font = _load_font(14)
-    plot_left = _compute_plot_left(font)
+    plot_left = _compute_plot_left(font, throughput_y_max)
     plot_right = CHART_WIDTH - RIGHT_GUTTER
     plot_bounds = (plot_left, plot_right)
 
     image = Image.new("RGB", (CHART_WIDTH, CHART_HEIGHT), "#2f3136")
     draw = ImageDraw.Draw(image, "RGBA")
 
-    _draw_grid_and_axes(draw, font, plot_left, plot_right)
-    _draw_series(draw, read_points, THROUGHPUT_Y_MAX, "#5f66ff", plot_bounds)
-    _draw_series(draw, write_points, THROUGHPUT_Y_MAX, "#ff5e5e", plot_bounds)
-    _draw_access_series(draw, access_points, plot_bounds)
+    _draw_grid_and_axes(
+        draw,
+        font,
+        plot_left,
+        plot_right,
+        throughput_y_max=throughput_y_max,
+        access_y_max=access_y_max,
+    )
+    _draw_series(draw, read_points, throughput_y_max, "#5f66ff", plot_bounds)
+    _draw_series(draw, write_points, throughput_y_max, "#ff5e5e", plot_bounds)
+    _draw_access_series(draw, access_points, plot_bounds, access_y_max)
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
     image.save(output_path)
