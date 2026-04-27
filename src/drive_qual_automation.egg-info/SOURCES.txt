@@ -38,6 +38,9 @@ src/drive_qual/platforms/macos/performance.py
 src/drive_qual/platforms/windows/__init__.py
 src/drive_qual/platforms/windows/performance.py
 src/drive_qual/platforms/windows/power_measurements.py
+src/drive_qual/reports/__init__.py
+src/drive_qual/reports/evaluation.py
+src/drive_qual/reports/generate.py
 src/drive_qual/workflows/__init__.py
 src/drive_qual/workflows/drive_info.py
 src/drive_qual/workflows/equipment.py
@@ -54,11 +57,13 @@ tests/test_apricorn_usb_cli.py
 tests/test_benchmark_paths.py
 tests/test_config.py
 tests/test_fio.py
+tests/test_linux_disks_chart.py
 tests/test_macos_blackmagic.py
 tests/test_native_disk_ops.py
 tests/test_performance_step.py
 tests/test_power_measurements_paths.py
 tests/test_power_measurements_step.py
+tests/test_report_generation.py
 tests/test_report_workflow.py
 tests/test_smoke.py
 tests/test_workflow_metadata_reuse.py

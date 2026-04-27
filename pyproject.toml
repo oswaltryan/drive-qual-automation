@@ -10,11 +10,13 @@ dependencies = [
     "pymodbus",
     "pywinauto>=0.6.9; sys_platform == 'win32'",
     "pillow>=12.1.1",
+    "python-docx>=1.1.2",
 ]
 
 [project.scripts]
 drive-qual = "drive_qual.cli.legacy:main"
 drive-qual-report = "drive_qual.cli.report:run_report_workflow_cli"
+drive-qual-report-generate = "drive_qual.reports.generate:run_report_generate_cli"
 
 [tool.uv]
 package = true

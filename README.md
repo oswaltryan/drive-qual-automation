@@ -125,7 +125,60 @@ Available workflow steps:
    benchmark, captures a screenshot, extracts MB/s values via OCR, and writes
    JSON/CSV results (with manual fallback).
 
-### 2. Legacy CLI
+### 2. Word Report Generation
+
+Generate the qualification report document from an existing report folder. The
+output is a Word `.docx` report shaped after the current qualification report
+template: front-matter sections, compact result tables, compliance data, result
+notes, and an appendix for raw data and measurements.
+
+```bash
+uv run drive-qual-report-generate --part-number 69-420
+```
+
+For offline review from a copied folder, point the generator at the local root
+that contains the per-part-number folder:
+
+```bash
+uv run drive-qual-report-generate --part-number 69-420 --source-root C:\Users\ROswalt\Desktop\reports
+```
+
+By default, the generator writes `drive_qualification_report.docx` next to the
+source report JSON. Use `--output` to choose a different `.docx` path.
+
+The generated report includes these major sections:
+
+- `Drive Qualification Report.`
+- revision table
+- `Drive Info`
+- `Qualification Equipment`
+- `Test Procedure`
+- `Test Results`
+- `Power Data`
+- `Compatibility Data`
+- `Temperature Data`
+- `Disk Performance`
+- `Compliance/Reliability Test`
+- `Datasheet`
+- `Disk Performance Raw Data & Screenshots`
+- `Drive Qualification Result`
+- `Notes and Considerations`
+- `Appendix`
+
+Report generation is read-only with respect to the source report folder. It
+evaluates current thresholds while rendering, but it does not rewrite the source
+JSON.
+
+Current rendered status rules:
+
+- Max I/O RMS current: pass below `900 mA`, warn from `900 mA` through
+  `999.99 mA`, fail at or above `1000 mA`.
+- In-Rush current: warn above `900 mA`.
+- Max I/O minimum voltage fields, when present: fail at or below `4.7 V`.
+- Temperature speed of `0` or an explicit temperature-test error is rendered as
+  a failure.
+
+### 3. Legacy CLI
 
 There is also a `drive-qual` CLI:
 
@@ -137,7 +190,7 @@ This entry point is older and Windows-focused. It coordinates device prompts,
 Tektronix setup recall, fio-based benchmarking, and artifact capture. The
 current report-oriented workflow is centered on `drive-qual-report`.
 
-### 3. Data Drive Setup
+### 4. Data Drive Setup
 
 To prepare or validate the qualification data drive structure:
 
@@ -152,7 +205,7 @@ This script:
 - creates missing `Linux`, `macOS`, and `Windows` directories
 - initializes or merges `progress_tracker.json`
 
-### 4. Post-Process Measurements
+### 5. Post-Process Measurements
 
 To extract current values from saved scope CSV output:
 
@@ -277,6 +330,10 @@ Important files and modules:
   and report writeback
 - `src/drive_qual/platforms/windows/performance.py`
   Windows-only GUI automation for CrystalDiskInfo, CrystalDiskMark, and ATTO
+- `src/drive_qual/reports/evaluation.py`
+  report status evaluation for power and temperature thresholds
+- `src/drive_qual/reports/generate.py`
+  Word `.docx` report generation and the `drive-qual-report-generate` CLI
 - `src/drive_qual/benchmarks/`
   split benchmark helpers for shared path handling plus `fio` and Windows-only `diskspd` execution
 - `src/drive_qual/workflows/setup_directories.py`
@@ -331,11 +388,17 @@ The project writes two broad categories of output:
 
 - report JSON under the configured report root
 - measurement and performance artifacts under the scope artifact root
+- generated Word reports from the report JSON and available artifacts
 
 The configured platform roots come from `drive_qual.toml`. On macOS, that means
 the workflow reads and writes through the configured `/Volumes/...` mount path
 while preserving the Windows-style report/artifact contract in the JSON and
 path helpers.
+
+For report generation on an offline test machine, copy the per-part-number
+folder locally and pass the parent folder with `--source-root`. The copied
+folder should preserve the same layout as the fileshare, for example
+`C:\Reports\69-420\drive_qualification_report_atomic_tests.json`.
 
 Examples:
 
@@ -359,6 +422,8 @@ Examples:
 - macOS Blackmagic structured CSV:
   `Z:\69-420\macOS\Blackmagic Disk Speed Test\<dut>_<timestamp>.csv`
   with `Metric,Value` plus read/write rows
+- generated Word report:
+  `Z:\69-420\drive_qualification_report.docx`
 
 The report content is progressively enriched by each step rather than generated
 all at once.
