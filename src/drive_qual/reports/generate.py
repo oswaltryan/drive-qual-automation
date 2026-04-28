@@ -370,7 +370,7 @@ def _add_platform_artifact_table(document: Any, part_root: Path, dut_name: str, 
     if os_name == "Windows":
         row = table.add_row().cells
         row[0].text = "Drive Information"
-        _add_matching_artifacts_to_cell(row[1], part_root, dut_name, os_name, "Drive Information", inches)
+        _add_drive_information_artifacts_to_row(row, part_root, dut_name, os_name, "Drive Information", inches)
     _set_table_column_widths(table, [inches(APPENDIX_OS_LABEL_WIDTH_INCHES), inches(APPENDIX_OS_ARTIFACT_WIDTH_INCHES)])
 
 
@@ -511,6 +511,25 @@ def _add_performance_artifacts_to_row(
         performance_csvs,
         table_width=inches(APPENDIX_OS_ARTIFACT_WIDTH_INCHES),
     )
+
+
+def _add_drive_information_artifacts_to_row(
+    row_cells: Any,
+    part_root: Path,
+    dut_name: str,
+    os_name: str,
+    label: str,
+    inches: Any,
+) -> None:
+    label_cell = row_cells[0]
+    artifact_cell = row_cells[1]
+    artifacts = _matching_artifacts(part_root, dut_name, os_name, label)
+    image_artifacts = _image_artifacts(artifacts)
+    if not image_artifacts:
+        artifact_cell.text = _artifact_names(part_root, artifacts)
+        return
+    _add_artifact_objects_to_cell(label_cell, image_artifacts, inches)
+    artifact_cell.text = _artifact_names(part_root, _non_image_artifacts(artifacts))
 
 
 def _add_artifact_images_to_cell(
@@ -1207,6 +1226,10 @@ def _matching_artifacts(part_root: Path, dut_name: str, os_name: str, label: str
 
 def _image_artifacts(artifacts: Iterable[Path]) -> list[Path]:
     return [artifact for artifact in artifacts if artifact.suffix.casefold() in IMAGE_EXTENSIONS]
+
+
+def _non_image_artifacts(artifacts: Iterable[Path]) -> list[Path]:
+    return [artifact for artifact in artifacts if artifact.suffix.casefold() not in IMAGE_EXTENSIONS]
 
 
 def _measurement_csvs(artifacts: Iterable[Path]) -> list[Path]:

@@ -13,8 +13,8 @@ from _pytest.monkeypatch import MonkeyPatch
 from drive_qual.reports.evaluation import Status, case_material_for_product, evaluate_power, evaluate_temperature
 
 EXPECTED_INLINE_IMAGE_COUNT = 0
-EXPECTED_POWER_OBJECT_COUNT = 4
-EXPECTED_MEDIA_FILE_COUNT = 4
+EXPECTED_POWER_OBJECT_COUNT = 5
+EXPECTED_MEDIA_FILE_COUNT = 5
 EXPECTED_WINDOWS_PERFORMANCE_OBJECT_COUNT = 2
 WINDOWS_PERFORMANCE_BLANK_LINES_BEFORE_FIRST_OBJECT = 10
 WINDOWS_PERFORMANCE_BLANK_LINES_BETWEEN_OBJECTS = 13
@@ -133,6 +133,7 @@ def test_generate_report_docx_embeds_appendix_images_instead_of_paths() -> None:
     _write_png(windows_dir / "Padlock DT CrystalDiskMark Performance.png")
     (windows_dir / "._Padlock DT CrystalDiskMark Performance.png").write_text("not a png", encoding="utf-8")
     _write_performance_csv(windows_dir / "Padlock DT CrystalDiskMark Performance.csv")
+    _write_png(windows_dir / "Padlock DT CrystalDiskInfo Drive Information.png")
     (linux_dir / "Padlock DT Max IO Summary.csv").write_text("time,current\n", encoding="utf-8")
 
     module = importlib.import_module("drive_qual.reports.generate")
@@ -168,9 +169,11 @@ def _assert_appendix_object_layout(document: Any, output_path: Path) -> None:
     assert _table_cell_object_count(document.tables[6], 1, 0) == 1
     assert _table_cell_object_count(document.tables[6], 2, 0) == 1
     assert _table_cell_object_count(document.tables[6], 3, 0) == EXPECTED_WINDOWS_PERFORMANCE_OBJECT_COUNT
+    assert _table_cell_object_count(document.tables[6], 4, 0) == 1
     assert _table_cell_object_count(document.tables[6], 1, 1) == 0
     assert _table_cell_object_count(document.tables[6], 2, 1) == 0
     assert _table_cell_object_count(document.tables[6], 3, 1) == 0
+    assert _table_cell_object_count(document.tables[6], 4, 1) == 0
     assert _cell_paragraph_texts(document.tables[6], 1, 0)[:2] == ["Inrush Summary", ""]
     assert _cell_paragraph_texts(document.tables[6], 2, 0)[:2] == ["Max IO Summary", ""]
     assert (
@@ -188,8 +191,15 @@ def _assert_appendix_object_layout(document: Any, output_path: Path) -> None:
         "Padlock DT Max IO Summary.png",
         "Padlock DT ATTO Performance.png",
         "Padlock DT CrystalDiskMark Performance.png",
+        "Padlock DT CrystalDiskInfo Drive Information.png",
     ]
-    assert _embedded_object_shape_ids(output_path) == ["_x0000_i1009", "_x0000_i1011", "_x0000_i1013", "_x0000_i1015"]
+    assert _embedded_object_shape_ids(output_path) == [
+        "_x0000_i1009",
+        "_x0000_i1011",
+        "_x0000_i1013",
+        "_x0000_i1015",
+        "_x0000_i1017",
+    ]
     assert all(object_id < MAX_WORD_OBJECT_ID for object_id in _embedded_object_ids(output_path))
 
 
