@@ -21,6 +21,7 @@ INRUSH_WARN_MA = 900.0
 APPENDIX_IMAGE_WIDTH_INCHES = 5.7
 IMAGE_EXTENSIONS = {".bmp", ".gif", ".jpeg", ".jpg", ".png", ".tif", ".tiff"}
 MEASUREMENT_LABELS = {"Inrush Summary", "Max IO Summary"}
+EXCLUDED_ACCUM_FIELDS = {"Accum-Pk-Pk", "Accum-Std Dev", "Accum-Population"}
 CSV_ENCODING_CANDIDATES = ("utf-8", "utf-8-sig", "cp1252", "latin-1")
 STATUS_COLORS = {
     Status.PASS: "C6EFCE",
@@ -680,7 +681,7 @@ def _accum_fields(rows: list[dict[str, str]]) -> list[str]:
     fields: list[str] = []
     for row in rows:
         for key in row:
-            if key.startswith("Accum-") and key not in fields:
+            if key.startswith("Accum-") and key not in EXCLUDED_ACCUM_FIELDS and key not in fields:
                 fields.append(key)
     return fields
 

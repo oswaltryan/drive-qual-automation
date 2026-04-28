@@ -232,9 +232,12 @@ def _write_measurement_csv(path: Path) -> None:
                 "TekScope,Version 2.0.3",
                 "",
                 "Measurement Results",
-                "Name,Measurement,Label,Source,Mean',Accum-Mean,Accum-Min,Accum-Max",
-                'Meas1,Maximum,Maximum," Ch 4 ",448.62 mA,448.48 mA,444.94 mA,453.56 mA',
-                'Meas3,RMS,RMS," Ch 4 ",258.70 mA,258.60 mA,258.04 mA,259.17 mA',
+                "Name,Measurement,Label,Source,Mean',Accum-Mean,Accum-Min,Accum-Max,Accum-Pk-Pk,"
+                "Accum-Std Dev,Accum-Population",
+                'Meas1,Maximum,Maximum," Ch 4 ",448.62 mA,448.48 mA,444.94 mA,453.56 mA,'
+                "8.6250 mA,1.5484 mA,132",
+                'Meas3,RMS,RMS," Ch 4 ",258.70 mA,258.60 mA,258.04 mA,259.17 mA,'
+                "1.1256 mA,212.51 uA,132",
             ]
         ),
         encoding="utf-8",
