@@ -522,8 +522,8 @@ def _add_measurement_summary_for_image(
 def _add_artifact_objects_to_cell(cell: Any, image_artifacts: Iterable[Path], inches: Any) -> None:
     first = not any(paragraph.text for paragraph in cell.paragraphs)
     for artifact in image_artifacts:
-        label_paragraph = cell.paragraphs[0] if first else cell.add_paragraph()
-        label_paragraph.add_run("Raw Image:")
+        if not first:
+            cell.add_paragraph()
         object_paragraph = cell.add_paragraph()
         _add_embedded_package_to_paragraph(object_paragraph, artifact, width=inches(OBJECT_ICON_WIDTH_INCHES))
         first = False

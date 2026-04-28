@@ -155,8 +155,8 @@ def _assert_appendix_object_layout(document: Any, output_path: Path) -> None:
     assert _table_cell_object_count(document.tables[6], 2, 0) == 1
     assert _table_cell_object_count(document.tables[6], 1, 1) == 0
     assert _table_cell_object_count(document.tables[6], 2, 1) == 0
-    assert _cell_paragraph_texts(document.tables[6], 1, 0)[:2] == ["Inrush Summary", "Raw Image:"]
-    assert _cell_paragraph_texts(document.tables[6], 2, 0)[:2] == ["Max IO Summary", "Raw Image:"]
+    assert _cell_paragraph_texts(document.tables[6], 1, 0)[:2] == ["Inrush Summary", ""]
+    assert _cell_paragraph_texts(document.tables[6], 2, 0)[:2] == ["Max IO Summary", ""]
     assert _table_cell_drawing_count(document.tables[6], 2, 1) == 0
     assert _table_cell_drawing_count(document.tables[6], 3, 1) == 1
     assert _embedded_object_payload_names(output_path) == [
