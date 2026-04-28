@@ -2,11 +2,15 @@ from __future__ import annotations
 
 import argparse
 import csv
+import io
 import json
 import re
+import struct
+import zlib
 from collections.abc import Callable, Iterable
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from drive_qual.core.report_session import TEMPLATE_NAME, report_path_for, resolve_folder_name
 from drive_qual.core.storage_paths import localize_windows_path
@@ -28,6 +32,16 @@ EXCLUDED_ACCUM_FIELDS = {"Accum-Pk-Pk", "Accum-Std Dev", "Accum-Population"}
 EXCLUDED_MEASUREMENT_ROWS = {"Meas9"}
 CSV_ENCODING_CANDIDATES = ("utf-8", "utf-8-sig", "cp1252", "latin-1")
 EMU_PER_TWIP = 635
+OBJECT_ICON_WIDTH_INCHES = 0.72
+CFB_SECTOR_SIZE = 512
+CFB_MINI_SECTOR_SIZE = 64
+CFB_MINI_STREAM_CUTOFF = 4096
+CFB_END_OF_CHAIN = -2
+CFB_FREE_SECTOR = -1
+CFB_FAT_SECTOR = -3
+CFB_NO_STREAM = -1
+OLE_MARKER_BYTES = b"\x01\x00\x00\x02" + (b"\x00" * 16)
+PACKAGE_CLSID = bytes.fromhex("0c00030000000000c000000000000046")
 STATUS_COLORS = {
     Status.PASS: "C6EFCE",
     Status.WARN: "FFEB9C",
@@ -138,7 +152,7 @@ def _load_docx_tools() -> tuple[Any, Any, Callable[[Any, Status], None]]:
         ) from exc
 
     def shade_cell(cell: Any, status: Status) -> None:
-        tc_pr = cell._tc.get_or_add_tcPr()  # noqa: SLF001
+        tc_pr = cell._tc.get_or_add_tcPr()
         shading = OxmlElement("w:shd")
         shading.set(qn("w:fill"), STATUS_COLORS[status])
         tc_pr.append(shading)
@@ -344,7 +358,10 @@ def _add_platform_artifact_table(document: Any, part_root: Path, dut_name: str, 
     for label in ("Inrush Summary", "Max IO Summary", "Performance"):
         row = table.add_row().cells
         row[0].text = label
-        _add_matching_artifacts_to_cell(row[1], part_root, dut_name, os_name, label, inches)
+        if label in MEASUREMENT_LABELS:
+            _add_measurement_artifacts_to_row(row, part_root, dut_name, os_name, label, inches)
+        else:
+            _add_matching_artifacts_to_cell(row[1], part_root, dut_name, os_name, label, inches)
     if os_name == "Windows":
         row = table.add_row().cells
         row[0].text = "Drive Information"
@@ -380,7 +397,7 @@ def _load_docx_xml_tools() -> tuple[Any, Any]:
 
 
 def _set_table_preferred_width(table: Any, width: Any, oxml_element: Any, qn: Any) -> None:
-    tbl_pr = table._tbl.tblPr  # noqa: SLF001
+    tbl_pr = table._tbl.tblPr
     tbl_width = tbl_pr.find(qn("w:tblW"))
     if tbl_width is None:
         tbl_width = oxml_element("w:tblW")
@@ -390,7 +407,7 @@ def _set_table_preferred_width(table: Any, width: Any, oxml_element: Any, qn: An
 
 
 def _set_table_grid(table: Any, widths: list[Any], oxml_element: Any, qn: Any) -> None:
-    tbl = table._tbl  # noqa: SLF001
+    tbl = table._tbl
     existing_grid = tbl.find(qn("w:tblGrid"))
     if existing_grid is not None:
         tbl.remove(existing_grid)
@@ -403,7 +420,7 @@ def _set_table_grid(table: Any, widths: list[Any], oxml_element: Any, qn: Any) -
 
 
 def _set_cell_preferred_width(cell: Any, width: Any, oxml_element: Any, qn: Any) -> None:
-    tc_pr = cell._tc.get_or_add_tcPr()  # noqa: SLF001
+    tc_pr = cell._tc.get_or_add_tcPr()
     tc_width = tc_pr.find(qn("w:tcW"))
     if tc_width is None:
         tc_width = oxml_element("w:tcW")
@@ -422,15 +439,44 @@ def _add_matching_artifacts_to_cell(
     artifacts = _matching_artifacts(part_root, dut_name, os_name, label)
     image_artifacts = _image_artifacts(artifacts)
     if image_artifacts:
-        _add_artifact_images_to_cell(
-            cell,
-            image_artifacts,
-            _measurement_csvs(artifacts) if label in MEASUREMENT_LABELS else [],
-            width=inches(APPENDIX_IMAGE_WIDTH_INCHES),
-            measurement_table_width=inches(APPENDIX_OS_ARTIFACT_WIDTH_INCHES),
-        )
+        measurement_csvs = _measurement_csvs(artifacts) if label in MEASUREMENT_LABELS else []
+        if label in MEASUREMENT_LABELS:
+            _add_artifact_objects_to_cell(cell, image_artifacts, inches)
+        else:
+            _add_artifact_images_to_cell(
+                cell,
+                image_artifacts,
+                measurement_csvs,
+                width=inches(APPENDIX_IMAGE_WIDTH_INCHES),
+                measurement_table_width=inches(APPENDIX_OS_ARTIFACT_WIDTH_INCHES),
+            )
         return
     cell.text = _artifact_names(part_root, artifacts)
+
+
+def _add_measurement_artifacts_to_row(
+    row_cells: Any,
+    part_root: Path,
+    dut_name: str,
+    os_name: str,
+    label: str,
+    inches: Any,
+) -> None:
+    label_cell = row_cells[0]
+    artifact_cell = row_cells[1]
+    artifacts = _matching_artifacts(part_root, dut_name, os_name, label)
+    image_artifacts = _image_artifacts(artifacts)
+    measurement_csvs = _measurement_csvs(artifacts)
+    if not image_artifacts:
+        artifact_cell.text = _artifact_names(part_root, artifacts)
+        return
+    _add_artifact_objects_to_cell(label_cell, image_artifacts, inches)
+    _add_measurement_summaries_to_cell(
+        artifact_cell,
+        image_artifacts,
+        measurement_csvs,
+        measurement_table_width=inches(APPENDIX_OS_ARTIFACT_WIDTH_INCHES),
+    )
 
 
 def _add_artifact_images_to_cell(
@@ -471,6 +517,377 @@ def _add_measurement_summary_for_image(
     _set_table_column_widths(table, [column_width] * len(rows[0]))
     cell.add_paragraph("")
     return True
+
+
+def _add_artifact_objects_to_cell(cell: Any, image_artifacts: Iterable[Path], inches: Any) -> None:
+    first = not any(paragraph.text for paragraph in cell.paragraphs)
+    for artifact in image_artifacts:
+        label_paragraph = cell.paragraphs[0] if first else cell.add_paragraph()
+        label_paragraph.add_run("Raw Image:")
+        object_paragraph = cell.add_paragraph()
+        _add_embedded_package_to_paragraph(object_paragraph, artifact, width=inches(OBJECT_ICON_WIDTH_INCHES))
+        first = False
+
+
+def _add_measurement_summaries_to_cell(
+    cell: Any,
+    image_artifacts: Iterable[Path],
+    measurement_csvs: list[Path],
+    *,
+    measurement_table_width: Any,
+) -> None:
+    cell.text = ""
+    for artifact in image_artifacts:
+        _add_measurement_summary_for_image(cell, artifact, measurement_csvs, measurement_table_width)
+
+
+def _add_embedded_package_to_paragraph(paragraph: Any, artifact: Path, *, width: Any) -> None:
+    object_r_id = _relate_to_embedded_package(paragraph.part, artifact)
+    icon_r_id = _relate_to_object_icon(paragraph.part)
+    shape_id = f"_x0000_i{1000 + _relationship_number(object_r_id)}"
+    object_id = f"_{zlib.crc32(f'{artifact.name}:{object_r_id}'.encode()) % 2_000_000_000}"
+    run = paragraph.add_run()
+    run_element = run._r
+    run_element.append(
+        _embedded_package_xml(
+            object_r_id=object_r_id,
+            icon_r_id=icon_r_id,
+            shape_id=shape_id,
+            object_id=object_id,
+            width_pt=_points(width),
+        )
+    )
+
+
+def _relationship_number(r_id: str) -> int:
+    suffix = r_id.removeprefix("rId")
+    return int(suffix) if suffix.isdecimal() else 0
+
+
+def _relate_to_embedded_package(part: Any, artifact: Path) -> str:
+    from docx.opc.constants import CONTENT_TYPE as CT
+    from docx.opc.constants import RELATIONSHIP_TYPE as RT
+    from docx.opc.packuri import PackURI
+    from docx.opc.part import Part
+
+    package = part.package
+    partname = package.next_partname("/word/embeddings/oleObject%d.bin")
+    ole_part = Part(
+        PackURI(str(partname)),
+        CT.OFC_OLE_OBJECT,
+        _ole_package_blob(label=artifact.name, filename=artifact.name, payload=artifact.read_bytes()),
+        package,
+    )
+    return cast(str, part.relate_to(ole_part, RT.OLE_OBJECT))
+
+
+def _relate_to_object_icon(part: Any) -> str:
+    from docx.opc.constants import RELATIONSHIP_TYPE as RT
+
+    package = part.package
+    icon_part = package.get_or_add_image_part(_object_icon_stream())
+    return cast(str, part.relate_to(icon_part, RT.IMAGE))
+
+
+def _object_icon_stream() -> io.BytesIO:
+    from PIL import Image
+
+    stream = io.BytesIO()
+    image = Image.new("RGB", (32, 32), color=(217, 225, 242))
+    image.save(stream, format="PNG")
+    stream.seek(0)
+    cast(Any, stream).name = "embedded-package-icon.png"
+    return stream
+
+
+def _embedded_package_xml(*, object_r_id: str, icon_r_id: str, shape_id: str, object_id: str, width_pt: float) -> Any:
+    from docx.oxml import parse_xml
+
+    height_pt = width_pt
+    return parse_xml(
+        f"""
+        <w:object
+            xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"
+            xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"
+            xmlns:v="urn:schemas-microsoft-com:vml"
+            xmlns:o="urn:schemas-microsoft-com:office:office"
+            w:dxaOrig="{int(width_pt * 20)}"
+            w:dyaOrig="{int(height_pt * 20)}">
+            <v:shapetype id="_x0000_t75" coordsize="21600,21600" o:spt="75"
+                o:preferrelative="t" path="m@4@5l@4@11@9@11@9@5xe" filled="f" stroked="f">
+                <v:stroke joinstyle="miter"/>
+                <v:formulas>
+                    <v:f eqn="if lineDrawn pixelLineWidth 0"/>
+                    <v:f eqn="sum @0 1 0"/>
+                    <v:f eqn="sum 0 0 @1"/>
+                    <v:f eqn="prod @2 1 2"/>
+                    <v:f eqn="prod @3 21600 pixelWidth"/>
+                    <v:f eqn="prod @3 21600 pixelHeight"/>
+                    <v:f eqn="sum @0 0 1"/>
+                    <v:f eqn="prod @6 1 2"/>
+                    <v:f eqn="prod @7 21600 pixelWidth"/>
+                    <v:f eqn="sum @8 21600 0"/>
+                    <v:f eqn="prod @7 21600 pixelHeight"/>
+                    <v:f eqn="sum @10 21600 0"/>
+                </v:formulas>
+                <v:path o:extrusionok="f" gradientshapeok="t" o:connecttype="rect"/>
+                <o:lock v:ext="edit" aspectratio="t"/>
+            </v:shapetype>
+            <v:shape id="{shape_id}" type="#_x0000_t75"
+                style="width:{width_pt:.2f}pt;height:{height_pt:.2f}pt" o:ole="">
+                <v:imagedata r:id="{icon_r_id}" o:title=""/>
+            </v:shape>
+            <o:OLEObject Type="Embed" ProgID="Package" ShapeID="{shape_id}"
+                DrawAspect="Icon" ObjectID="{object_id}" r:id="{object_r_id}"/>
+        </w:object>
+        """
+    )
+
+
+def _points(width: Any) -> float:
+    return int(width) / 12700.0
+
+
+def _ole_package_blob(*, label: str, filename: str, payload: bytes) -> bytes:
+    streams = [
+        _CfbStream("\x01Ole", OLE_MARKER_BYTES),
+        _CfbStream("\x01Ole10Native", _ole10_native_stream(label=label, filename=filename, payload=payload)),
+    ]
+    return _write_cfb(streams)
+
+
+def _ole10_native_stream(*, label: str, filename: str, payload: bytes) -> bytes:
+    label_bytes = _asciiz(label)
+    filename_bytes = _asciiz(filename)
+    command_bytes = filename.encode("utf-8")
+    body = b"".join(
+        [
+            struct.pack("<H", 2),
+            label_bytes,
+            filename_bytes,
+            struct.pack("<H", 0),
+            struct.pack("<H", 3),
+            struct.pack("<I", len(command_bytes)),
+            command_bytes,
+            struct.pack("<I", len(payload)),
+            payload,
+        ]
+    )
+    return struct.pack("<I", len(body)) + body
+
+
+def _asciiz(value: str) -> bytes:
+    return value.encode("utf-8", errors="replace") + b"\x00"
+
+
+@dataclass
+class _CfbStream:
+    name: str
+    data: bytes
+    start: int = CFB_END_OF_CHAIN
+
+    @property
+    def size(self) -> int:
+        return len(self.data)
+
+    @property
+    def mini(self) -> bool:
+        return len(self.data) < CFB_MINI_STREAM_CUTOFF
+
+
+@dataclass(frozen=True)
+class _DirectoryEntry:
+    name: str
+    entry_type: int
+    right: int = CFB_NO_STREAM
+    child: int = CFB_NO_STREAM
+    start: int = CFB_END_OF_CHAIN
+    size: int = 0
+    clsid: bytes = b"\x00" * 16
+
+
+@dataclass(frozen=True)
+class _FatLayout:
+    sector_count: int
+    fat_sector_count: int
+    minifat_start: int
+    minifat_sector_count: int
+    directory_start: int
+    root_start: int
+    root_sector_count: int
+    regular_streams: list[_CfbStream]
+
+
+def _write_cfb(streams: list[_CfbStream]) -> bytes:
+    mini_stream, mini_fat = _build_mini_stream(streams)
+    regular_streams = [stream for stream in streams if not stream.mini]
+    minifat_stream = _pack_fat(mini_fat)
+    minifat_sector_count = _sector_count(minifat_stream)
+    root_sector_count = _sector_count(mini_stream)
+    regular_sector_count = sum(_sector_count(stream.data) for stream in regular_streams)
+    nonfat_sector_count = minifat_sector_count + 1 + root_sector_count + regular_sector_count
+    fat_sector_count = _fat_sector_count(nonfat_sector_count)
+    first_minifat_sector = fat_sector_count if mini_fat else CFB_END_OF_CHAIN
+    first_directory_sector = fat_sector_count + minifat_sector_count
+    current_sector = first_directory_sector + 1
+    root_start = current_sector if mini_stream else CFB_END_OF_CHAIN
+    current_sector += root_sector_count
+    for stream in regular_streams:
+        stream.start = current_sector
+        current_sector += _sector_count(stream.data)
+    directory_stream = _build_directory_stream(streams, root_start=root_start, root_size=len(mini_stream))
+    sector_payloads = [b""] * fat_sector_count
+    sector_payloads.extend(_chunk_sectors(minifat_stream))
+    sector_payloads.extend(_chunk_sectors(directory_stream))
+    sector_payloads.extend(_chunk_sectors(mini_stream))
+    for stream in regular_streams:
+        sector_payloads.extend(_chunk_sectors(stream.data))
+    fat = _build_fat(
+        _FatLayout(
+            sector_count=len(sector_payloads),
+            fat_sector_count=fat_sector_count,
+            minifat_start=first_minifat_sector,
+            minifat_sector_count=minifat_sector_count,
+            directory_start=first_directory_sector,
+            root_start=root_start,
+            root_sector_count=root_sector_count,
+            regular_streams=regular_streams,
+        )
+    )
+    fat_sectors = _chunk_sectors(_pack_fat(fat))
+    sector_payloads[:fat_sector_count] = fat_sectors
+    header = _cfb_header(fat_sector_count, first_directory_sector, first_minifat_sector, minifat_sector_count)
+    return header + b"".join(_pad(payload, CFB_SECTOR_SIZE) for payload in sector_payloads)
+
+
+def _build_mini_stream(streams: list[_CfbStream]) -> tuple[bytes, list[int]]:
+    mini_sectors: list[bytes] = []
+    mini_fat: list[int] = []
+    for stream in streams:
+        if not stream.mini:
+            continue
+        stream.start = len(mini_sectors)
+        chunks = _chunk_units(stream.data, CFB_MINI_SECTOR_SIZE)
+        mini_sectors.extend(chunks)
+        for offset in range(len(chunks)):
+            mini_fat.append(stream.start + offset + 1 if offset < len(chunks) - 1 else CFB_END_OF_CHAIN)
+    return b"".join(mini_sectors), mini_fat
+
+
+def _build_directory_stream(streams: list[_CfbStream], *, root_start: int, root_size: int) -> bytes:
+    entries = [
+        _directory_entry(
+            _DirectoryEntry(
+                "Root Entry",
+                5,
+                child=1 if streams else CFB_NO_STREAM,
+                start=root_start,
+                size=root_size,
+                clsid=PACKAGE_CLSID,
+            )
+        )
+    ]
+    for index, stream in enumerate(streams, start=1):
+        right = index + 1 if index < len(streams) else CFB_NO_STREAM
+        entries.append(
+            _directory_entry(_DirectoryEntry(stream.name, 2, right=right, start=stream.start, size=stream.size))
+        )
+    return _pad(b"".join(entries), CFB_SECTOR_SIZE)
+
+
+def _directory_entry(spec: _DirectoryEntry) -> bytes:
+    name_bytes = spec.name.encode("utf-16le") + b"\x00\x00"
+    entry = bytearray(128)
+    entry[: len(name_bytes)] = name_bytes
+    struct.pack_into("<H", entry, 64, len(name_bytes))
+    entry[66] = spec.entry_type
+    entry[67] = 1
+    struct.pack_into("<iii", entry, 68, CFB_NO_STREAM, spec.right, spec.child)
+    entry[80:96] = spec.clsid
+    struct.pack_into("<i", entry, 116, spec.start)
+    struct.pack_into("<Q", entry, 120, spec.size)
+    return bytes(entry)
+
+
+def _build_fat(layout: _FatLayout) -> list[int]:
+    fat: list[int] = [CFB_FREE_SECTOR] * layout.sector_count
+    for index in range(layout.fat_sector_count):
+        fat[index] = CFB_FAT_SECTOR
+    _mark_fat_chain(fat, layout.minifat_start, layout.minifat_sector_count)
+    _mark_fat_chain(fat, layout.directory_start, 1)
+    _mark_fat_chain(fat, layout.root_start, layout.root_sector_count)
+    for stream in layout.regular_streams:
+        _mark_fat_chain(fat, stream.start, _sector_count(stream.data))
+    return fat
+
+
+def _mark_fat_chain(fat: list[int], start: int, count: int) -> None:
+    if start < 0 or count == 0:
+        return
+    for offset in range(count):
+        fat[start + offset] = start + offset + 1 if offset < count - 1 else CFB_END_OF_CHAIN
+
+
+def _cfb_header(
+    fat_sector_count: int,
+    first_directory_sector: int,
+    first_minifat_sector: int,
+    minifat_sector_count: int,
+) -> bytes:
+    header = bytearray(CFB_SECTOR_SIZE)
+    header[:8] = bytes.fromhex("d0cf11e0a1b11ae1")
+    struct.pack_into("<HHHHH", header, 24, 0x003E, 0x0003, 0xFFFE, 9, 6)
+    struct.pack_into(
+        "<IIiIIi",
+        header,
+        40,
+        0,
+        fat_sector_count,
+        first_directory_sector,
+        0,
+        CFB_MINI_STREAM_CUTOFF,
+        first_minifat_sector,
+    )
+    struct.pack_into("<Ii", header, 64, minifat_sector_count, CFB_END_OF_CHAIN)
+    struct.pack_into("<I", header, 72, 0)
+    for index in range(109):
+        value = index if index < fat_sector_count else CFB_FREE_SECTOR
+        struct.pack_into("<i", header, 76 + index * 4, value)
+    return bytes(header)
+
+
+def _pack_fat(fat: list[int]) -> bytes:
+    if not fat:
+        return b""
+    padding = (_sector_count(struct.pack(f"<{len(fat)}i", *fat)) * 128) - len(fat)
+    padded = fat + ([CFB_FREE_SECTOR] * padding)
+    return struct.pack(f"<{len(padded)}i", *padded)
+
+
+def _fat_sector_count(payload_sector_count: int) -> int:
+    fat_sector_count = 1
+    while fat_sector_count * 128 < payload_sector_count + fat_sector_count:
+        fat_sector_count += 1
+    return fat_sector_count
+
+
+def _chunk_sectors(data: bytes) -> list[bytes]:
+    return _chunk_units(data, CFB_SECTOR_SIZE)
+
+
+def _chunk_units(data: bytes, unit_size: int) -> list[bytes]:
+    if not data:
+        return []
+    return [data[index : index + unit_size] for index in range(0, len(data), unit_size)]
+
+
+def _sector_count(data: bytes) -> int:
+    return (len(data) + CFB_SECTOR_SIZE - 1) // CFB_SECTOR_SIZE
+
+
+def _pad(data: bytes, size: int) -> bytes:
+    remainder = len(data) % size
+    return data if remainder == 0 else data + (b"\x00" * (size - remainder))
 
 
 def _matching_measurement_csv(image_artifact: Path, measurement_csvs: list[Path]) -> Path | None:

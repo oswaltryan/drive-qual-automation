@@ -4,14 +4,18 @@ import builtins
 import importlib
 import json
 import sys
+import zipfile
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from _pytest.monkeypatch import MonkeyPatch
 
 from drive_qual.reports.evaluation import Status, case_material_for_product, evaluate_power, evaluate_temperature
 
-EXPECTED_EMBEDDED_IMAGE_COUNT = 2
+EXPECTED_INLINE_IMAGE_COUNT = 1
+EXPECTED_POWER_OBJECT_COUNT = 2
+EXPECTED_MEDIA_FILE_COUNT = 2
+MAX_WORD_OBJECT_ID = 2_000_000_000
 
 
 def test_report_generation_import_does_not_import_docx(monkeypatch: MonkeyPatch) -> None:
@@ -117,6 +121,8 @@ def test_generate_report_docx_embeds_appendix_images_instead_of_paths() -> None:
     linux_dir.mkdir(parents=True, exist_ok=True)
     report_path = part_dir / "drive_qualification_report_atomic_tests.json"
     report_path.write_text(json.dumps(_report_payload()), encoding="utf-8")
+    _write_png(windows_dir / "Padlock DT Inrush Summary.png")
+    _write_measurement_csv(windows_dir / "Padlock DT Inrush Summary.csv")
     _write_png(windows_dir / "Padlock DT Max IO Summary.png")
     _write_measurement_csv(windows_dir / "Padlock DT Max IO Summary.csv")
     _write_png(windows_dir / "Padlock DT CrystalDiskMark Performance.png")
@@ -129,11 +135,9 @@ def test_generate_report_docx_embeds_appendix_images_instead_of_paths() -> None:
     document_text = "\n".join(paragraph.text for paragraph in document.paragraphs)
     document_text += "\n".join(cell.text for table in document.tables for row in table.rows for cell in row.cells)
 
-    assert len(document.inline_shapes) == EXPECTED_EMBEDDED_IMAGE_COUNT
+    _assert_appendix_object_layout(document, output_path)
     assert "Artifact | Path" not in table_headers
     assert str(windows_dir) not in document_text
-    assert _table_cell_drawing_count(document.tables[6], 2, 1) == 1
-    assert _table_cell_drawing_count(document.tables[6], 3, 1) == 1
     assert _nested_table_rows(document.tables[6].rows[2].cells[1]) == [
         ["Name", "Measurement", "Accum-Mean", "Accum-Min", "Accum-Max"],
         ["Meas1", "Maximum", "448.48 mA", "444.94 mA", "453.56 mA"],
@@ -141,6 +145,26 @@ def test_generate_report_docx_embeds_appendix_images_instead_of_paths() -> None:
     ]
     assert _nested_table_columns_evenly_fill_parent(document.tables[6].rows[2].cells[1])
     assert document.tables[7].rows[2].cells[1].text == "Linux\\Padlock DT Max IO Summary.csv"
+
+
+def _assert_appendix_object_layout(document: Any, output_path: Path) -> None:
+    assert len(document.inline_shapes) == EXPECTED_INLINE_IMAGE_COUNT
+    assert _embedded_object_count(output_path) == EXPECTED_POWER_OBJECT_COUNT
+    assert _media_file_count(output_path) == EXPECTED_MEDIA_FILE_COUNT
+    assert _table_cell_object_count(document.tables[6], 1, 0) == 1
+    assert _table_cell_object_count(document.tables[6], 2, 0) == 1
+    assert _table_cell_object_count(document.tables[6], 1, 1) == 0
+    assert _table_cell_object_count(document.tables[6], 2, 1) == 0
+    assert _cell_paragraph_texts(document.tables[6], 1, 0)[:2] == ["Inrush Summary", "Raw Image:"]
+    assert _cell_paragraph_texts(document.tables[6], 2, 0)[:2] == ["Max IO Summary", "Raw Image:"]
+    assert _table_cell_drawing_count(document.tables[6], 2, 1) == 0
+    assert _table_cell_drawing_count(document.tables[6], 3, 1) == 1
+    assert _embedded_object_payload_names(output_path) == [
+        "Padlock DT Inrush Summary.png",
+        "Padlock DT Max IO Summary.png",
+    ]
+    assert _embedded_object_shape_ids(output_path) == ["_x0000_i1009", "_x0000_i1011"]
+    assert all(object_id < MAX_WORD_OBJECT_ID for object_id in _embedded_object_ids(output_path))
 
 
 def test_power_evaluation_applies_max_io_thresholds() -> None:
@@ -223,7 +247,9 @@ def test_case_material_classification_defaults_to_plastic() -> None:
 def _write_png(path: Path) -> None:
     from PIL import Image
 
-    image = Image.new("RGB", (80, 40), color=(0, 128, 255))
+    image = Image.new("RGB", (320, 320))
+    pixels = [((x * 13 + y * 7) % 256, (x * 5 + y * 17) % 256, (x * y) % 256) for y in range(320) for x in range(320)]
+    image.putdata(cast(Any, pixels))
     image.save(path)
 
 
@@ -246,7 +272,61 @@ def _write_measurement_csv(path: Path) -> None:
 
 
 def _table_cell_drawing_count(document_table: Any, row_index: int, cell_index: int) -> int:
-    return len(document_table.rows[row_index].cells[cell_index]._tc.xpath(".//w:drawing"))  # noqa: SLF001
+    return len(_cell_xml(document_table, row_index, cell_index).xpath(".//w:drawing"))
+
+
+def _table_cell_object_count(document_table: Any, row_index: int, cell_index: int) -> int:
+    return len(_cell_xml(document_table, row_index, cell_index).xpath(".//w:object"))
+
+
+def _cell_xml(document_table: Any, row_index: int, cell_index: int) -> Any:
+    return document_table.rows[row_index].cells[cell_index]._tc
+
+
+def _cell_paragraph_texts(document_table: Any, row_index: int, cell_index: int) -> list[str]:
+    return [paragraph.text for paragraph in document_table.rows[row_index].cells[cell_index].paragraphs]
+
+
+def _embedded_object_count(path: Path) -> int:
+    with zipfile.ZipFile(path) as docx_zip:
+        return len([name for name in docx_zip.namelist() if name.startswith("word/embeddings/oleObject")])
+
+
+def _media_file_count(path: Path) -> int:
+    with zipfile.ZipFile(path) as docx_zip:
+        return len([name for name in docx_zip.namelist() if name.startswith("word/media/")])
+
+
+def _embedded_object_payload_names(path: Path) -> list[str]:
+    with zipfile.ZipFile(path) as docx_zip:
+        object_names = [name for name in docx_zip.namelist() if name.startswith("word/embeddings/oleObject")]
+        return [_ole10_native_label(docx_zip.read(name)) for name in object_names]
+
+
+def _embedded_object_shape_ids(path: Path) -> list[str]:
+    return [match.split('"')[1] for match in _embedded_object_xml_matches(path, 'ShapeID="')]
+
+
+def _embedded_object_ids(path: Path) -> list[int]:
+    return [int(match.split('"')[1].removeprefix("_")) for match in _embedded_object_xml_matches(path, 'ObjectID="')]
+
+
+def _embedded_object_xml_matches(path: Path, marker: str) -> list[str]:
+    with zipfile.ZipFile(path) as docx_zip:
+        xml = docx_zip.read("word/document.xml").decode("utf-8")
+    return [token for token in xml.split() if token.startswith(marker)]
+
+
+def _ole10_native_label(blob: bytes) -> str:
+    marker = "\x01Ole10Native".encode("utf-16le")
+    directory_offset = blob.find(marker)
+    assert directory_offset >= 0
+    stream_start = int.from_bytes(blob[directory_offset + 116 : directory_offset + 120], "little", signed=True)
+    sector_offset = (stream_start + 1) * 512
+    stream = blob[sector_offset : sector_offset + 512]
+    label_start = 6
+    label_end = stream.index(b"\x00", label_start)
+    return stream[label_start:label_end].decode("utf-8")
 
 
 def _nested_table_rows(cell: Any) -> list[list[str]]:
