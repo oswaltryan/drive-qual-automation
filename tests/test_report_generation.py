@@ -11,6 +11,8 @@ from _pytest.monkeypatch import MonkeyPatch
 
 from drive_qual.reports.evaluation import Status, case_material_for_product, evaluate_power, evaluate_temperature
 
+EXPECTED_EMBEDDED_IMAGE_COUNT = 2
+
 
 def test_report_generation_import_does_not_import_docx(monkeypatch: MonkeyPatch) -> None:
     sys.modules.pop("drive_qual.reports.generate", None)
@@ -98,6 +100,37 @@ def test_generate_report_docx_matches_reference_section_shape() -> None:
         "DUT | CDM-R | CDM-W | BM(R) | BM(W) | ATTO-R | ATTO-W",
         "Program | Iterations/Loops | Result",
     ]
+    assert "Artifact | Path" not in table_headers
+
+
+def test_generate_report_docx_embeds_appendix_images_instead_of_paths() -> None:
+    from docx import Document
+
+    source_root = Path("tests/.tmp/test_report_generation_images")
+    part_dir = source_root / "69-420"
+    windows_dir = part_dir / "Windows"
+    linux_dir = part_dir / "Linux"
+    windows_dir.mkdir(parents=True, exist_ok=True)
+    linux_dir.mkdir(parents=True, exist_ok=True)
+    report_path = part_dir / "drive_qualification_report_atomic_tests.json"
+    report_path.write_text(json.dumps(_report_payload()), encoding="utf-8")
+    _write_png(windows_dir / "Padlock DT Max IO Summary.png")
+    _write_png(windows_dir / "Padlock DT CrystalDiskMark Performance.png")
+    (linux_dir / "Padlock DT Max IO Summary.csv").write_text("time,current\n", encoding="utf-8")
+
+    module = importlib.import_module("drive_qual.reports.generate")
+    output_path = module.generate_report_docx(part_number="69-420", source_root=source_root)
+    document = Document(output_path)
+    table_headers = [" | ".join(cell.text for cell in table.rows[0].cells) for table in document.tables]
+    document_text = "\n".join(paragraph.text for paragraph in document.paragraphs)
+    document_text += "\n".join(cell.text for table in document.tables for row in table.rows for cell in row.cells)
+
+    assert len(document.inline_shapes) == EXPECTED_EMBEDDED_IMAGE_COUNT
+    assert "Artifact | Path" not in table_headers
+    assert str(windows_dir) not in document_text
+    assert _table_cell_drawing_count(document.tables[6], 2, 1) == 1
+    assert _table_cell_drawing_count(document.tables[6], 3, 1) == 1
+    assert document.tables[7].rows[2].cells[1].text == "Linux\\Padlock DT Max IO Summary.csv"
 
 
 def test_power_evaluation_applies_max_io_thresholds() -> None:
@@ -175,6 +208,17 @@ def test_case_material_classification_defaults_to_plastic() -> None:
     assert case_material_for_product("Fortress L3") == "aluminum"
     assert case_material_for_product("Padlock DT FIPS") == "aluminum"
     assert case_material_for_product("Padlock NVX") == "plastic"
+
+
+def _write_png(path: Path) -> None:
+    from PIL import Image
+
+    image = Image.new("RGB", (80, 40), color=(0, 128, 255))
+    image.save(path)
+
+
+def _table_cell_drawing_count(document_table: Any, row_index: int, cell_index: int) -> int:
+    return len(document_table.rows[row_index].cells[cell_index]._tc.xpath(".//w:drawing"))  # noqa: SLF001
 
 
 def _report_payload() -> dict[str, Any]:

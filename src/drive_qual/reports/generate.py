@@ -17,6 +17,8 @@ MA_PER_A = 1000.0
 MAX_IO_RMS_FAIL_MA = 1000.0
 MAX_IO_RMS_WARN_MA = 900.0
 INRUSH_WARN_MA = 900.0
+APPENDIX_IMAGE_WIDTH_INCHES = 5.7
+IMAGE_EXTENSIONS = {".bmp", ".gif", ".jpeg", ".jpg", ".png", ".tif", ".tiff"}
 STATUS_COLORS = {
     Status.PASS: "C6EFCE",
     Status.WARN: "FFEB9C",
@@ -107,9 +109,9 @@ def write_docx_report(
     _add_disk_performance(document, data.get("performance"))
     _add_compliance(document, data.get("compliance"), shade_cell)
     document.add_heading("Datasheet", level=2)
-    _add_raw_screenshot_index(document, report_path.parent)
+    _add_raw_screenshot_index(document)
     _add_result_and_notes(document, evaluated)
-    _add_appendix(document, data, report_path.parent)
+    _add_appendix(document, data, report_path.parent, Inches)
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
     document.save(output_path)
@@ -306,17 +308,9 @@ def _add_compliance(document: Any, compliance: object, shade_cell: Callable[[Any
     table.add_row()
 
 
-def _add_raw_screenshot_index(document: Any, part_root: Path) -> None:
+def _add_raw_screenshot_index(document: Any) -> None:
     document.add_heading("Disk Performance Raw Data & Screenshots", level=2)
-    artifacts = _artifact_files(part_root)
-    if not artifacts:
-        document.add_paragraph("No artifacts found.")
-        return
-    table = _table(document, ["Artifact", "Path"])
-    for artifact in artifacts:
-        row = table.add_row().cells
-        row[0].text = str(artifact.relative_to(part_root))
-        row[1].text = str(artifact)
+    document.add_paragraph("")
 
 
 def _add_result_and_notes(document: Any, evaluated: EvaluatedReport) -> None:
@@ -326,25 +320,25 @@ def _add_result_and_notes(document: Any, evaluated: EvaluatedReport) -> None:
     document.add_paragraph("")
 
 
-def _add_appendix(document: Any, data: dict[str, Any], part_root: Path) -> None:
+def _add_appendix(document: Any, data: dict[str, Any], part_root: Path, inches: Any) -> None:
     document.add_heading("Appendix", level=2)
     duts = _report_duts(data)
     for dut_name in duts:
         document.add_heading(f"Disk Performance Raw Data & Measurements ({dut_name})", level=2)
         for os_name in ("Windows", "Linux", "MAC"):
-            _add_platform_artifact_table(document, part_root, dut_name, os_name)
+            _add_platform_artifact_table(document, part_root, dut_name, os_name, inches)
 
 
-def _add_platform_artifact_table(document: Any, part_root: Path, dut_name: str, os_name: str) -> None:
+def _add_platform_artifact_table(document: Any, part_root: Path, dut_name: str, os_name: str, inches: Any) -> None:
     table = _table(document, [os_name, ""])
     for label in ("Inrush Summary", "Max IO Summary", "Performance"):
         row = table.add_row().cells
         row[0].text = label
-        row[1].text = _matching_artifact_text(part_root, dut_name, os_name, label)
+        _add_matching_artifacts_to_cell(row[1], part_root, dut_name, os_name, label, inches)
     if os_name == "Windows":
         row = table.add_row().cells
         row[0].text = "Drive Information"
-        row[1].text = _matching_artifact_text(part_root, dut_name, os_name, "Drive Information")
+        _add_matching_artifacts_to_cell(row[1], part_root, dut_name, os_name, "Drive Information", inches)
 
 
 def _table(document: Any, headers: Iterable[str]) -> Any:
@@ -354,6 +348,34 @@ def _table(document: Any, headers: Iterable[str]) -> Any:
     for cell, header in zip(table.rows[0].cells, header_list, strict=True):
         cell.text = header
     return table
+
+
+def _add_matching_artifacts_to_cell(
+    cell: Any, part_root: Path, dut_name: str, os_name: str, label: str, inches: Any
+) -> None:
+    artifacts = _matching_artifacts(part_root, dut_name, os_name, label)
+    image_artifacts = _image_artifacts(artifacts)
+    if image_artifacts:
+        _add_images_to_cell(cell, image_artifacts, width=inches(APPENDIX_IMAGE_WIDTH_INCHES))
+        return
+    cell.text = _artifact_names(part_root, artifacts)
+
+
+def _add_images_to_cell(cell: Any, artifacts: Iterable[Path], *, width: Any) -> None:
+    cell.text = ""
+    paragraphs = cell.paragraphs
+    first = True
+    for artifact in artifacts:
+        paragraph = paragraphs[0] if first and paragraphs else cell.add_paragraph()
+        first = False
+        _add_picture_to_paragraph(paragraph, artifact, width=width)
+
+
+def _add_picture_to_paragraph(paragraph: Any, artifact: Path, *, width: Any) -> None:
+    try:
+        paragraph.add_run().add_picture(str(artifact), width=width)
+    except Exception:
+        paragraph.add_run(str(artifact.name))
 
 
 def _list_line(document: Any, text: str) -> None:
@@ -464,9 +486,7 @@ def _has_temperature_value(values: dict[str, Any]) -> bool:
     return any(values.get(key) is not None for key in ("read_mb_s", "write_mb_s")) or bool(values.get("error"))
 
 
-def _set_temperature_cell(
-    cell: Any, value: object, error: object, shade_cell: Callable[[Any, Status], None]
-) -> None:
+def _set_temperature_cell(cell: Any, value: object, error: object, shade_cell: Callable[[Any, Status], None]) -> None:
     if error:
         cell.text = str(error)
         shade_cell(cell, Status.FAIL)
@@ -539,10 +559,15 @@ def _result_sentence(evaluated: EvaluatedReport) -> str:
 def _artifact_files(part_root: Path) -> list[Path]:
     if not part_root.exists():
         return []
-    return sorted(path for path in part_root.rglob("*") if path.is_file() and path.name != TEMPLATE_NAME)
+    excluded_names = {TEMPLATE_NAME, DEFAULT_OUTPUT_NAME}
+    return sorted(path for path in part_root.rglob("*") if path.is_file() and path.name not in excluded_names)
 
 
 def _matching_artifact_text(part_root: Path, dut_name: str, os_name: str, label: str) -> str:
+    return _artifact_names(part_root, _matching_artifacts(part_root, dut_name, os_name, label))
+
+
+def _matching_artifacts(part_root: Path, dut_name: str, os_name: str, label: str) -> list[Path]:
     os_token = "macOS" if os_name == "MAC" else os_name
     category_tokens = {
         "Inrush Summary": ("in rush", "inrush"),
@@ -551,7 +576,7 @@ def _matching_artifact_text(part_root: Path, dut_name: str, os_name: str, label:
         "Drive Information": ("crystaldiskinfo", "drive information", "drive info"),
     }[label]
     dut_norm = _normalize_text(dut_name)
-    matches: list[str] = []
+    matches: list[Path] = []
     for artifact in _artifact_files(part_root):
         text = _normalize_text(str(artifact.relative_to(part_root)))
         if _normalize_text(os_token) not in text:
@@ -559,8 +584,16 @@ def _matching_artifact_text(part_root: Path, dut_name: str, os_name: str, label:
         if dut_norm not in text and not any(part in text for part in dut_norm.split()):
             continue
         if any(_normalize_text(token) in text for token in category_tokens):
-            matches.append(str(artifact))
-    return "\n".join(matches[:4])
+            matches.append(artifact)
+    return matches[:4]
+
+
+def _image_artifacts(artifacts: Iterable[Path]) -> list[Path]:
+    return [artifact for artifact in artifacts if artifact.suffix.casefold() in IMAGE_EXTENSIONS]
+
+
+def _artifact_names(part_root: Path, artifacts: Iterable[Path]) -> str:
+    return "\n".join(str(artifact.relative_to(part_root)) for artifact in artifacts)
 
 
 def _report_duts(data: dict[str, Any]) -> list[str]:
