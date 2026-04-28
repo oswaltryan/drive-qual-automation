@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import csv
 import json
 import re
 from collections.abc import Callable, Iterable
@@ -19,6 +20,8 @@ MAX_IO_RMS_WARN_MA = 900.0
 INRUSH_WARN_MA = 900.0
 APPENDIX_IMAGE_WIDTH_INCHES = 5.7
 IMAGE_EXTENSIONS = {".bmp", ".gif", ".jpeg", ".jpg", ".png", ".tif", ".tiff"}
+MEASUREMENT_LABELS = {"Inrush Summary", "Max IO Summary"}
+CSV_ENCODING_CANDIDATES = ("utf-8", "utf-8-sig", "cp1252", "latin-1")
 STATUS_COLORS = {
     Status.PASS: "C6EFCE",
     Status.WARN: "FFEB9C",
@@ -357,19 +360,52 @@ def _add_matching_artifacts_to_cell(
     artifacts = _matching_artifacts(part_root, dut_name, os_name, label)
     image_artifacts = _image_artifacts(artifacts)
     if image_artifacts:
-        _add_images_to_cell(cell, image_artifacts, width=inches(APPENDIX_IMAGE_WIDTH_INCHES))
+        _add_artifact_images_to_cell(
+            cell,
+            image_artifacts,
+            _measurement_csvs(artifacts) if label in MEASUREMENT_LABELS else [],
+            width=inches(APPENDIX_IMAGE_WIDTH_INCHES),
+        )
         return
     cell.text = _artifact_names(part_root, artifacts)
 
 
-def _add_images_to_cell(cell: Any, artifacts: Iterable[Path], *, width: Any) -> None:
+def _add_artifact_images_to_cell(
+    cell: Any, image_artifacts: Iterable[Path], measurement_csvs: list[Path], *, width: Any
+) -> None:
     cell.text = ""
-    paragraphs = cell.paragraphs
     first = True
-    for artifact in artifacts:
-        paragraph = paragraphs[0] if first and paragraphs else cell.add_paragraph()
-        first = False
+    for artifact in image_artifacts:
+        added_summary = _add_measurement_summary_for_image(cell, artifact, measurement_csvs)
+        paragraph = cell.paragraphs[0] if first and not added_summary else cell.add_paragraph()
         _add_picture_to_paragraph(paragraph, artifact, width=width)
+        first = False
+
+
+def _add_measurement_summary_for_image(cell: Any, image_artifact: Path, measurement_csvs: list[Path]) -> bool:
+    csv_path = _matching_measurement_csv(image_artifact, measurement_csvs)
+    if csv_path is None:
+        return False
+    rows = _accum_measurement_rows(csv_path)
+    if not rows:
+        return False
+    table = cell.add_table(rows=1, cols=len(rows[0]))
+    table.style = "Table Grid"
+    for index, header in enumerate(rows[0]):
+        table.rows[0].cells[index].text = header
+    for values in rows[1:]:
+        row = table.add_row().cells
+        for index, value in enumerate(values):
+            row[index].text = value
+    cell.add_paragraph("")
+    return True
+
+
+def _matching_measurement_csv(image_artifact: Path, measurement_csvs: list[Path]) -> Path | None:
+    same_stem = [csv_path for csv_path in measurement_csvs if csv_path.stem == image_artifact.stem]
+    if same_stem:
+        return same_stem[0]
+    return measurement_csvs[0] if len(measurement_csvs) == 1 else None
 
 
 def _add_picture_to_paragraph(paragraph: Any, artifact: Path, *, width: Any) -> None:
@@ -586,11 +622,67 @@ def _matching_artifacts(part_root: Path, dut_name: str, os_name: str, label: str
             continue
         if any(_normalize_text(token) in text for token in category_tokens):
             matches.append(artifact)
-    return matches[:4]
+    return matches if label in MEASUREMENT_LABELS else matches[:4]
 
 
 def _image_artifacts(artifacts: Iterable[Path]) -> list[Path]:
     return [artifact for artifact in artifacts if artifact.suffix.casefold() in IMAGE_EXTENSIONS]
+
+
+def _measurement_csvs(artifacts: Iterable[Path]) -> list[Path]:
+    return [artifact for artifact in artifacts if artifact.suffix.casefold() == ".csv"]
+
+
+def _accum_measurement_rows(csv_path: Path) -> list[list[str]]:
+    rows = _measurement_rows(csv_path)
+    accum_fields = _accum_fields(rows)
+    if not accum_fields:
+        return []
+    table_rows = [["Name", "Measurement", *accum_fields]]
+    for row in rows:
+        values = [row.get("Name", ""), row.get("Measurement", "")]
+        values.extend(row.get(field, "") for field in accum_fields)
+        table_rows.append(values)
+    return table_rows
+
+
+def _measurement_rows(csv_path: Path) -> list[dict[str, str]]:
+    lines = _decoded_csv_lines(csv_path)
+    if not lines:
+        return []
+    header_index = next((index for index, line in enumerate(lines) if line.startswith("Name,")), None)
+    if header_index is None:
+        return []
+    reader = csv.DictReader(lines[header_index:])
+    return [
+        {str(key): str(value).strip() for key, value in row.items() if key is not None and value is not None}
+        for row in reader
+        if row.get("Name", "").strip()
+    ]
+
+
+def _decoded_csv_lines(csv_path: Path) -> list[str]:
+    try:
+        raw = csv_path.read_bytes()
+    except OSError:
+        return []
+    for encoding in CSV_ENCODING_CANDIDATES:
+        try:
+            return raw.decode(encoding).splitlines()
+        except UnicodeDecodeError:
+            continue
+    return []
+
+
+def _accum_fields(rows: list[dict[str, str]]) -> list[str]:
+    if not rows:
+        return []
+    fields: list[str] = []
+    for row in rows:
+        for key in row:
+            if key.startswith("Accum-") and key not in fields:
+                fields.append(key)
+    return fields
 
 
 def _artifact_names(part_root: Path, artifacts: Iterable[Path]) -> str:

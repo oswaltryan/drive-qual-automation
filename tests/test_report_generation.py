@@ -117,6 +117,7 @@ def test_generate_report_docx_embeds_appendix_images_instead_of_paths() -> None:
     report_path = part_dir / "drive_qualification_report_atomic_tests.json"
     report_path.write_text(json.dumps(_report_payload()), encoding="utf-8")
     _write_png(windows_dir / "Padlock DT Max IO Summary.png")
+    _write_measurement_csv(windows_dir / "Padlock DT Max IO Summary.csv")
     _write_png(windows_dir / "Padlock DT CrystalDiskMark Performance.png")
     (linux_dir / "Padlock DT Max IO Summary.csv").write_text("time,current\n", encoding="utf-8")
 
@@ -132,6 +133,11 @@ def test_generate_report_docx_embeds_appendix_images_instead_of_paths() -> None:
     assert str(windows_dir) not in document_text
     assert _table_cell_drawing_count(document.tables[6], 2, 1) == 1
     assert _table_cell_drawing_count(document.tables[6], 3, 1) == 1
+    assert _nested_table_rows(document.tables[6].rows[2].cells[1]) == [
+        ["Name", "Measurement", "Accum-Mean", "Accum-Min", "Accum-Max"],
+        ["Meas1", "Maximum", "448.48 mA", "444.94 mA", "453.56 mA"],
+        ["Meas3", "RMS", "258.60 mA", "258.04 mA", "259.17 mA"],
+    ]
     assert document.tables[7].rows[2].cells[1].text == "Linux\\Padlock DT Max IO Summary.csv"
 
 
@@ -219,8 +225,29 @@ def _write_png(path: Path) -> None:
     image.save(path)
 
 
+def _write_measurement_csv(path: Path) -> None:
+    path.write_text(
+        "\n".join(
+            [
+                "TekScope,Version 2.0.3",
+                "",
+                "Measurement Results",
+                "Name,Measurement,Label,Source,Mean',Accum-Mean,Accum-Min,Accum-Max",
+                'Meas1,Maximum,Maximum," Ch 4 ",448.62 mA,448.48 mA,444.94 mA,453.56 mA',
+                'Meas3,RMS,RMS," Ch 4 ",258.70 mA,258.60 mA,258.04 mA,259.17 mA',
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+
 def _table_cell_drawing_count(document_table: Any, row_index: int, cell_index: int) -> int:
     return len(document_table.rows[row_index].cells[cell_index]._tc.xpath(".//w:drawing"))  # noqa: SLF001
+
+
+def _nested_table_rows(cell: Any) -> list[list[str]]:
+    table = cell.tables[0]
+    return [[nested_cell.text for nested_cell in row.cells] for row in table.rows]
 
 
 def _has_paragraph_between_tables(document: Any, first_header: str, second_header: str) -> bool:
