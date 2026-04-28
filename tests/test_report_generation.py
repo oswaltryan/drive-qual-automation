@@ -12,9 +12,12 @@ from _pytest.monkeypatch import MonkeyPatch
 
 from drive_qual.reports.evaluation import Status, case_material_for_product, evaluate_power, evaluate_temperature
 
-EXPECTED_INLINE_IMAGE_COUNT = 1
-EXPECTED_POWER_OBJECT_COUNT = 2
-EXPECTED_MEDIA_FILE_COUNT = 3
+EXPECTED_INLINE_IMAGE_COUNT = 0
+EXPECTED_POWER_OBJECT_COUNT = 4
+EXPECTED_MEDIA_FILE_COUNT = 4
+EXPECTED_WINDOWS_PERFORMANCE_OBJECT_COUNT = 2
+WINDOWS_PERFORMANCE_BLANK_LINES_BEFORE_FIRST_OBJECT = 10
+WINDOWS_PERFORMANCE_BLANK_LINES_BETWEEN_OBJECTS = 13
 MAX_WORD_OBJECT_ID = 2_000_000_000
 
 
@@ -125,25 +128,36 @@ def test_generate_report_docx_embeds_appendix_images_instead_of_paths() -> None:
     _write_measurement_csv(windows_dir / "Padlock DT Inrush Summary.csv")
     _write_png(windows_dir / "Padlock DT Max IO Summary.png")
     _write_measurement_csv(windows_dir / "Padlock DT Max IO Summary.csv")
+    _write_png(windows_dir / "Padlock DT ATTO Performance.png")
+    _write_performance_csv(windows_dir / "Padlock DT ATTO Performance.csv")
     _write_png(windows_dir / "Padlock DT CrystalDiskMark Performance.png")
+    (windows_dir / "._Padlock DT CrystalDiskMark Performance.png").write_text("not a png", encoding="utf-8")
+    _write_performance_csv(windows_dir / "Padlock DT CrystalDiskMark Performance.csv")
     (linux_dir / "Padlock DT Max IO Summary.csv").write_text("time,current\n", encoding="utf-8")
 
     module = importlib.import_module("drive_qual.reports.generate")
     output_path = module.generate_report_docx(part_number="69-420", source_root=source_root)
     document = Document(output_path)
-    table_headers = [" | ".join(cell.text for cell in table.rows[0].cells) for table in document.tables]
-    document_text = "\n".join(paragraph.text for paragraph in document.paragraphs)
-    document_text += "\n".join(cell.text for table in document.tables for row in table.rows for cell in row.cells)
 
     _assert_appendix_object_layout(document, output_path)
-    assert "Artifact | Path" not in table_headers
-    assert str(windows_dir) not in document_text
+    assert "Artifact | Path" not in _table_headers(document)
+    assert str(windows_dir) not in _document_text(document)
     assert _nested_table_rows(document.tables[6].rows[2].cells[1]) == [
         ["Name", "Measurement", "Accum-Mean", "Accum-Min", "Accum-Max"],
         ["Meas1", "Maximum", "448.48 mA", "444.94 mA", "453.56 mA"],
         ["Meas3", "RMS", "258.60 mA", "258.04 mA", "259.17 mA"],
     ]
     assert _nested_table_columns_evenly_fill_parent(document.tables[6].rows[2].cells[1])
+    assert _nested_tables_rows(document.tables[6].rows[3].cells[1]) == [
+        ["ATTO", ""],
+        ["Metric", "Value"],
+        ["Read MB/s", "350.93"],
+        ["Write MB/s", "345.04"],
+        ["Crystal Disk Mark", ""],
+        ["Metric", "Value"],
+        ["Read MB/s", "350.93"],
+        ["Write MB/s", "345.04"],
+    ]
     assert document.tables[7].rows[2].cells[1].text == "Linux\\Padlock DT Max IO Summary.csv"
 
 
@@ -153,18 +167,39 @@ def _assert_appendix_object_layout(document: Any, output_path: Path) -> None:
     assert _media_file_count(output_path) == EXPECTED_MEDIA_FILE_COUNT
     assert _table_cell_object_count(document.tables[6], 1, 0) == 1
     assert _table_cell_object_count(document.tables[6], 2, 0) == 1
+    assert _table_cell_object_count(document.tables[6], 3, 0) == EXPECTED_WINDOWS_PERFORMANCE_OBJECT_COUNT
     assert _table_cell_object_count(document.tables[6], 1, 1) == 0
     assert _table_cell_object_count(document.tables[6], 2, 1) == 0
+    assert _table_cell_object_count(document.tables[6], 3, 1) == 0
     assert _cell_paragraph_texts(document.tables[6], 1, 0)[:2] == ["Inrush Summary", ""]
     assert _cell_paragraph_texts(document.tables[6], 2, 0)[:2] == ["Max IO Summary", ""]
+    assert (
+        _cell_paragraph_texts(document.tables[6], 3, 0)[1:11]
+        == [""] * WINDOWS_PERFORMANCE_BLANK_LINES_BEFORE_FIRST_OBJECT
+    )
+    assert (
+        _performance_object_gap(document.tables[6], first_object_index=11)
+        == WINDOWS_PERFORMANCE_BLANK_LINES_BETWEEN_OBJECTS
+    )
     assert _table_cell_drawing_count(document.tables[6], 2, 1) == 0
-    assert _table_cell_drawing_count(document.tables[6], 3, 1) == 1
+    assert _table_cell_drawing_count(document.tables[6], 3, 1) == 0
     assert _embedded_object_payload_names(output_path) == [
         "Padlock DT Inrush Summary.png",
         "Padlock DT Max IO Summary.png",
+        "Padlock DT ATTO Performance.png",
+        "Padlock DT CrystalDiskMark Performance.png",
     ]
-    assert _embedded_object_shape_ids(output_path) == ["_x0000_i1009", "_x0000_i1011"]
+    assert _embedded_object_shape_ids(output_path) == ["_x0000_i1009", "_x0000_i1011", "_x0000_i1013", "_x0000_i1015"]
     assert all(object_id < MAX_WORD_OBJECT_ID for object_id in _embedded_object_ids(output_path))
+
+
+def _table_headers(document: Any) -> list[str]:
+    return [" | ".join(cell.text for cell in table.rows[0].cells) for table in document.tables]
+
+
+def _document_text(document: Any) -> str:
+    text = "\n".join(paragraph.text for paragraph in document.paragraphs)
+    return text + "\n".join(cell.text for table in document.tables for row in table.rows for cell in row.cells)
 
 
 def test_power_evaluation_applies_max_io_thresholds() -> None:
@@ -276,6 +311,10 @@ def _write_measurement_csv(path: Path) -> None:
     )
 
 
+def _write_performance_csv(path: Path) -> None:
+    path.write_text("Metric,Value\nRead MB/s,350.93\nWrite MB/s,345.04\n", encoding="utf-8")
+
+
 def _table_cell_drawing_count(document_table: Any, row_index: int, cell_index: int) -> int:
     return len(_cell_xml(document_table, row_index, cell_index).xpath(".//w:drawing"))
 
@@ -290,6 +329,18 @@ def _cell_xml(document_table: Any, row_index: int, cell_index: int) -> Any:
 
 def _cell_paragraph_texts(document_table: Any, row_index: int, cell_index: int) -> list[str]:
     return [paragraph.text for paragraph in document_table.rows[row_index].cells[cell_index].paragraphs]
+
+
+def _performance_object_gap(document_table: Any, *, first_object_index: int) -> int:
+    paragraphs = document_table.rows[3].cells[0].paragraphs
+    second_object_index = next(
+        index for index in range(first_object_index + 1, len(paragraphs)) if _paragraph_object_count(paragraphs[index])
+    )
+    return second_object_index - first_object_index - 1
+
+
+def _paragraph_object_count(paragraph: Any) -> int:
+    return len(paragraph._p.xpath(".//w:object"))
 
 
 def _embedded_object_count(path: Path) -> int:
@@ -337,6 +388,10 @@ def _ole10_native_label(blob: bytes) -> str:
 def _nested_table_rows(cell: Any) -> list[list[str]]:
     table = cell.tables[0]
     return [[nested_cell.text for nested_cell in row.cells] for row in table.rows]
+
+
+def _nested_tables_rows(cell: Any) -> list[list[str]]:
+    return [[nested_cell.text for nested_cell in row.cells] for table in cell.tables for row in table.rows]
 
 
 def _nested_table_columns_evenly_fill_parent(cell: Any) -> bool:

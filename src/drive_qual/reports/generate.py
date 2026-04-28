@@ -28,11 +28,14 @@ APPENDIX_OS_ARTIFACT_WIDTH_INCHES = 6.34
 APPENDIX_MEASUREMENT_COLUMN_WIDTH_FRACTION = 0.97
 IMAGE_EXTENSIONS = {".bmp", ".gif", ".jpeg", ".jpg", ".png", ".tif", ".tiff"}
 MEASUREMENT_LABELS = {"Inrush Summary", "Max IO Summary"}
+PERFORMANCE_LABEL = "Performance"
 EXCLUDED_ACCUM_FIELDS = {"Accum-Pk-Pk", "Accum-Std Dev", "Accum-Population"}
 EXCLUDED_MEASUREMENT_ROWS = {"Meas9"}
 CSV_ENCODING_CANDIDATES = ("utf-8", "utf-8-sig", "cp1252", "latin-1")
 EMU_PER_TWIP = 635
 OBJECT_ICON_WIDTH_INCHES = 0.72
+WINDOWS_PERFORMANCE_BLANK_LINES_BEFORE_FIRST_OBJECT = 10
+WINDOWS_PERFORMANCE_BLANK_LINES_BETWEEN_OBJECTS = 13
 CFB_SECTOR_SIZE = 512
 CFB_MINI_SECTOR_SIZE = 64
 CFB_MINI_STREAM_CUTOFF = 4096
@@ -360,6 +363,8 @@ def _add_platform_artifact_table(document: Any, part_root: Path, dut_name: str, 
         row[0].text = label
         if label in MEASUREMENT_LABELS:
             _add_measurement_artifacts_to_row(row, part_root, dut_name, os_name, label, inches)
+        elif label == PERFORMANCE_LABEL:
+            _add_performance_artifacts_to_row(row, part_root, dut_name, os_name, label, inches)
         else:
             _add_matching_artifacts_to_cell(row[1], part_root, dut_name, os_name, label, inches)
     if os_name == "Windows":
@@ -479,6 +484,35 @@ def _add_measurement_artifacts_to_row(
     )
 
 
+def _add_performance_artifacts_to_row(
+    row_cells: Any,
+    part_root: Path,
+    dut_name: str,
+    os_name: str,
+    label: str,
+    inches: Any,
+) -> None:
+    label_cell = row_cells[0]
+    artifact_cell = row_cells[1]
+    artifacts = _matching_artifacts(part_root, dut_name, os_name, label)
+    image_artifacts = _image_artifacts(artifacts)
+    performance_csvs = _measurement_csvs(artifacts)
+    if not image_artifacts:
+        artifact_cell.text = _artifact_names(part_root, artifacts)
+        return
+    sorted_images = _sorted_performance_images(image_artifacts) if os_name == "Windows" else image_artifacts
+    if os_name == "Windows":
+        _add_windows_performance_objects_to_cell(label_cell, sorted_images, inches)
+    else:
+        _add_artifact_objects_to_cell(label_cell, sorted_images, inches)
+    _add_csv_tables_to_cell(
+        artifact_cell,
+        sorted_images,
+        performance_csvs,
+        table_width=inches(APPENDIX_OS_ARTIFACT_WIDTH_INCHES),
+    )
+
+
 def _add_artifact_images_to_cell(
     cell: Any,
     image_artifacts: Iterable[Path],
@@ -529,6 +563,21 @@ def _add_artifact_objects_to_cell(cell: Any, image_artifacts: Iterable[Path], in
         first = False
 
 
+def _add_windows_performance_objects_to_cell(cell: Any, image_artifacts: Iterable[Path], inches: Any) -> None:
+    first = True
+    for artifact in image_artifacts:
+        blank_count = (
+            WINDOWS_PERFORMANCE_BLANK_LINES_BEFORE_FIRST_OBJECT
+            if first
+            else WINDOWS_PERFORMANCE_BLANK_LINES_BETWEEN_OBJECTS
+        )
+        for _ in range(blank_count):
+            cell.add_paragraph()
+        object_paragraph = cell.add_paragraph()
+        _add_embedded_package_to_paragraph(object_paragraph, artifact, width=inches(OBJECT_ICON_WIDTH_INCHES))
+        first = False
+
+
 def _add_measurement_summaries_to_cell(
     cell: Any,
     image_artifacts: Iterable[Path],
@@ -539,6 +588,43 @@ def _add_measurement_summaries_to_cell(
     cell.text = ""
     for artifact in image_artifacts:
         _add_measurement_summary_for_image(cell, artifact, measurement_csvs, measurement_table_width)
+
+
+def _add_csv_tables_to_cell(
+    cell: Any,
+    image_artifacts: Iterable[Path],
+    csv_paths: list[Path],
+    *,
+    table_width: Any,
+) -> None:
+    cell.text = ""
+    for artifact in image_artifacts:
+        csv_path = _matching_measurement_csv(artifact, csv_paths)
+        if csv_path is None:
+            continue
+        rows = _generic_csv_rows(csv_path)
+        if rows:
+            _add_nested_table(cell, [[_performance_utility_label(artifact)], *rows], table_width)
+            cell.add_paragraph("")
+
+
+def _add_nested_table(cell: Any, rows: list[list[str]], table_width: Any) -> None:
+    normalized_rows = _normalize_table_rows(rows)
+    table = cell.add_table(rows=1, cols=len(normalized_rows[0]))
+    table.style = "Table Grid"
+    for index, header in enumerate(normalized_rows[0]):
+        table.rows[0].cells[index].text = header
+    for values in normalized_rows[1:]:
+        row = table.add_row().cells
+        for index, value in enumerate(values):
+            row[index].text = value
+    column_width = int((table_width // len(normalized_rows[0])) * APPENDIX_MEASUREMENT_COLUMN_WIDTH_FRACTION)
+    _set_table_column_widths(table, [column_width] * len(normalized_rows[0]))
+
+
+def _normalize_table_rows(rows: list[list[str]]) -> list[list[str]]:
+    width = max(len(row) for row in rows)
+    return [row + ([""] * (width - len(row))) for row in rows]
 
 
 def _add_embedded_package_to_paragraph(paragraph: Any, artifact: Path, *, width: Any) -> None:
@@ -1087,7 +1173,11 @@ def _artifact_files(part_root: Path) -> list[Path]:
     if not part_root.exists():
         return []
     excluded_names = {TEMPLATE_NAME, DEFAULT_OUTPUT_NAME}
-    return sorted(path for path in part_root.rglob("*") if path.is_file() and path.name not in excluded_names)
+    return sorted(
+        path
+        for path in part_root.rglob("*")
+        if path.is_file() and path.name not in excluded_names and not path.name.startswith("._")
+    )
 
 
 def _matching_artifact_text(part_root: Path, dut_name: str, os_name: str, label: str) -> str:
@@ -1151,6 +1241,44 @@ def _measurement_rows(csv_path: Path) -> list[dict[str, str]]:
         for row in reader
         if row.get("Name", "").strip()
     ]
+
+
+def _generic_csv_rows(csv_path: Path) -> list[list[str]]:
+    lines = _decoded_csv_lines(csv_path)
+    if not lines:
+        return []
+    rows = [row for row in csv.reader(lines) if any(cell.strip() for cell in row)]
+    if not rows:
+        return []
+    return _normalize_table_rows(rows)
+
+
+def _performance_utility_label(artifact: Path) -> str:
+    text = _normalize_text(str(artifact))
+    if "atto" in text:
+        return "ATTO"
+    if "blackmagic" in text:
+        return "Blackmagic"
+    if "crystaldiskmark" in text or "crystal disk mark" in text:
+        return "Crystal Disk Mark"
+    if "disks" in text:
+        return "Disks"
+    return artifact.stem
+
+
+def _sorted_performance_images(image_artifacts: Iterable[Path]) -> list[Path]:
+    return sorted(image_artifacts, key=lambda artifact: (_performance_utility_sort_key(artifact), str(artifact)))
+
+
+def _performance_utility_sort_key(artifact: Path) -> int:
+    label = _performance_utility_label(artifact)
+    order = {
+        "ATTO": 0,
+        "Crystal Disk Mark": 1,
+        "Blackmagic": 2,
+        "Disks": 3,
+    }
+    return order.get(label, len(order))
 
 
 def _decoded_csv_lines(csv_path: Path) -> list[str]:
