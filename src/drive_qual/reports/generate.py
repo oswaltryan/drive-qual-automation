@@ -543,7 +543,7 @@ def _add_measurement_summaries_to_cell(
 
 def _add_embedded_package_to_paragraph(paragraph: Any, artifact: Path, *, width: Any) -> None:
     object_r_id = _relate_to_embedded_package(paragraph.part, artifact)
-    icon_r_id = _relate_to_object_icon(paragraph.part)
+    icon_r_id = _relate_to_object_icon(paragraph.part, artifact)
     shape_id = f"_x0000_i{1000 + _relationship_number(object_r_id)}"
     object_id = f"_{zlib.crc32(f'{artifact.name}:{object_r_id}'.encode()) % 2_000_000_000}"
     run = paragraph.add_run()
@@ -581,22 +581,23 @@ def _relate_to_embedded_package(part: Any, artifact: Path) -> str:
     return cast(str, part.relate_to(ole_part, RT.OLE_OBJECT))
 
 
-def _relate_to_object_icon(part: Any) -> str:
+def _relate_to_object_icon(part: Any, artifact: Path) -> str:
     from docx.opc.constants import RELATIONSHIP_TYPE as RT
 
     package = part.package
-    icon_part = package.get_or_add_image_part(_object_icon_stream())
+    icon_part = package.get_or_add_image_part(_object_preview_stream(artifact))
     return cast(str, part.relate_to(icon_part, RT.IMAGE))
 
 
-def _object_icon_stream() -> io.BytesIO:
+def _object_preview_stream(artifact: Path) -> io.BytesIO:
     from PIL import Image
 
     stream = io.BytesIO()
-    image = Image.new("RGB", (32, 32), color=(217, 225, 242))
+    image = Image.open(artifact)
+    image.thumbnail((96, 96))
     image.save(stream, format="PNG")
     stream.seek(0)
-    cast(Any, stream).name = "embedded-package-icon.png"
+    cast(Any, stream).name = f"{artifact.stem}-preview.png"
     return stream
 
 

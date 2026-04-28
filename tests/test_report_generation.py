@@ -14,7 +14,7 @@ from drive_qual.reports.evaluation import Status, case_material_for_product, eva
 
 EXPECTED_INLINE_IMAGE_COUNT = 1
 EXPECTED_POWER_OBJECT_COUNT = 2
-EXPECTED_MEDIA_FILE_COUNT = 2
+EXPECTED_MEDIA_FILE_COUNT = 3
 MAX_WORD_OBJECT_ID = 2_000_000_000
 
 
@@ -247,8 +247,13 @@ def test_case_material_classification_defaults_to_plastic() -> None:
 def _write_png(path: Path) -> None:
     from PIL import Image
 
+    seed = sum(path.name.encode("utf-8"))
     image = Image.new("RGB", (320, 320))
-    pixels = [((x * 13 + y * 7) % 256, (x * 5 + y * 17) % 256, (x * y) % 256) for y in range(320) for x in range(320)]
+    pixels = [
+        ((x * 13 + y * 7 + seed) % 256, (x * 5 + y * 17 + seed) % 256, (x * y + seed) % 256)
+        for y in range(320)
+        for x in range(320)
+    ]
     image.putdata(cast(Any, pixels))
     image.save(path)
 
