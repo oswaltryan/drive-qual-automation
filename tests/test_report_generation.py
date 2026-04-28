@@ -103,6 +103,7 @@ def test_generate_report_docx_matches_reference_section_shape() -> None:
     assert "Artifact | Path" not in table_headers
     assert _has_paragraph_between_tables(document, "Windows | ", "Linux | ")
     assert _has_paragraph_between_tables(document, "Linux | ", "MAC | ")
+    assert _first_column_is_narrower_than_artifact_column(document.tables[6])
 
 
 def test_generate_report_docx_embeds_appendix_images_instead_of_paths() -> None:
@@ -138,6 +139,7 @@ def test_generate_report_docx_embeds_appendix_images_instead_of_paths() -> None:
         ["Meas1", "Maximum", "448.48 mA", "444.94 mA", "453.56 mA"],
         ["Meas3", "RMS", "258.60 mA", "258.04 mA", "259.17 mA"],
     ]
+    assert _nested_table_columns_evenly_fill_parent(document.tables[6].rows[2].cells[1])
     assert document.tables[7].rows[2].cells[1].text == "Linux\\Padlock DT Max IO Summary.csv"
 
 
@@ -234,10 +236,9 @@ def _write_measurement_csv(path: Path) -> None:
                 "Measurement Results",
                 "Name,Measurement,Label,Source,Mean',Accum-Mean,Accum-Min,Accum-Max,Accum-Pk-Pk,"
                 "Accum-Std Dev,Accum-Population",
-                'Meas1,Maximum,Maximum," Ch 4 ",448.62 mA,448.48 mA,444.94 mA,453.56 mA,'
-                "8.6250 mA,1.5484 mA,132",
-                'Meas3,RMS,RMS," Ch 4 ",258.70 mA,258.60 mA,258.04 mA,259.17 mA,'
-                "1.1256 mA,212.51 uA,132",
+                'Meas1,Maximum,Maximum," Ch 4 ",448.62 mA,448.48 mA,444.94 mA,453.56 mA,8.6250 mA,1.5484 mA,132',
+                'Meas3,RMS,RMS," Ch 4 ",258.70 mA,258.60 mA,258.04 mA,259.17 mA,1.1256 mA,212.51 uA,132',
+                'Meas9,Peak,Peak," Ch 4 ",999.00 mA,999.00 mA,998.00 mA,1000.00 mA,2.0000 mA,1.0000 mA,132',
             ]
         ),
         encoding="utf-8",
@@ -251,6 +252,17 @@ def _table_cell_drawing_count(document_table: Any, row_index: int, cell_index: i
 def _nested_table_rows(cell: Any) -> list[list[str]]:
     table = cell.tables[0]
     return [[nested_cell.text for nested_cell in row.cells] for row in table.rows]
+
+
+def _nested_table_columns_evenly_fill_parent(cell: Any) -> bool:
+    widths = [nested_cell.width for nested_cell in cell.tables[0].rows[0].cells]
+    return all(width is not None for width in widths) and len(set(widths)) == 1 and sum(widths) < cell.width
+
+
+def _first_column_is_narrower_than_artifact_column(table: Any) -> bool:
+    first_width = table.rows[0].cells[0].width
+    second_width = table.rows[0].cells[1].width
+    return first_width is not None and second_width is not None and first_width * 2 <= second_width
 
 
 def _has_paragraph_between_tables(document: Any, first_header: str, second_header: str) -> bool:

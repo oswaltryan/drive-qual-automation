@@ -43,8 +43,9 @@ repos:
         -   types-requests
         -   types-PyYAML
         -   types-Pillow
+        -   python-docx>=1.1.2
         # Add testing deps so mypy can check tests too
-        -   pytest
+        -   pytest==8.2.0
         -   pytest-asyncio
 
     -   id: pytest
@@ -59,3 +60,5 @@ repos:
         -   pytest-asyncio
         -   pytest-mock
         -   pytest-cov
+        -   pillow>=12.1.1
+        -   python-docx>=1.1.2

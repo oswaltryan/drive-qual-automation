@@ -19,10 +19,15 @@ MAX_IO_RMS_FAIL_MA = 1000.0
 MAX_IO_RMS_WARN_MA = 900.0
 INRUSH_WARN_MA = 900.0
 APPENDIX_IMAGE_WIDTH_INCHES = 5.7
+APPENDIX_OS_LABEL_WIDTH_INCHES = 0.96
+APPENDIX_OS_ARTIFACT_WIDTH_INCHES = 6.34
+APPENDIX_MEASUREMENT_COLUMN_WIDTH_FRACTION = 0.97
 IMAGE_EXTENSIONS = {".bmp", ".gif", ".jpeg", ".jpg", ".png", ".tif", ".tiff"}
 MEASUREMENT_LABELS = {"Inrush Summary", "Max IO Summary"}
 EXCLUDED_ACCUM_FIELDS = {"Accum-Pk-Pk", "Accum-Std Dev", "Accum-Population"}
+EXCLUDED_MEASUREMENT_ROWS = {"Meas9"}
 CSV_ENCODING_CANDIDATES = ("utf-8", "utf-8-sig", "cp1252", "latin-1")
+EMU_PER_TWIP = 635
 STATUS_COLORS = {
     Status.PASS: "C6EFCE",
     Status.WARN: "FFEB9C",
@@ -344,6 +349,7 @@ def _add_platform_artifact_table(document: Any, part_root: Path, dut_name: str, 
         row = table.add_row().cells
         row[0].text = "Drive Information"
         _add_matching_artifacts_to_cell(row[1], part_root, dut_name, os_name, "Drive Information", inches)
+    _set_table_column_widths(table, [inches(APPENDIX_OS_LABEL_WIDTH_INCHES), inches(APPENDIX_OS_ARTIFACT_WIDTH_INCHES)])
 
 
 def _table(document: Any, headers: Iterable[str]) -> Any:
@@ -353,6 +359,61 @@ def _table(document: Any, headers: Iterable[str]) -> Any:
     for cell, header in zip(table.rows[0].cells, header_list, strict=True):
         cell.text = header
     return table
+
+
+def _set_table_column_widths(table: Any, widths: list[Any]) -> None:
+    OxmlElement, qn = _load_docx_xml_tools()
+    table.autofit = False
+    _set_table_preferred_width(table, sum(widths), OxmlElement, qn)
+    _set_table_grid(table, widths, OxmlElement, qn)
+    for row in table.rows:
+        for index, width in enumerate(widths):
+            row.cells[index].width = width
+            _set_cell_preferred_width(row.cells[index], width, OxmlElement, qn)
+
+
+def _load_docx_xml_tools() -> tuple[Any, Any]:
+    from docx.oxml import OxmlElement
+    from docx.oxml.ns import qn
+
+    return OxmlElement, qn
+
+
+def _set_table_preferred_width(table: Any, width: Any, oxml_element: Any, qn: Any) -> None:
+    tbl_pr = table._tbl.tblPr  # noqa: SLF001
+    tbl_width = tbl_pr.find(qn("w:tblW"))
+    if tbl_width is None:
+        tbl_width = oxml_element("w:tblW")
+        tbl_pr.append(tbl_width)
+    tbl_width.set(qn("w:type"), "dxa")
+    tbl_width.set(qn("w:w"), str(_twips(width)))
+
+
+def _set_table_grid(table: Any, widths: list[Any], oxml_element: Any, qn: Any) -> None:
+    tbl = table._tbl  # noqa: SLF001
+    existing_grid = tbl.find(qn("w:tblGrid"))
+    if existing_grid is not None:
+        tbl.remove(existing_grid)
+    tbl_grid = oxml_element("w:tblGrid")
+    for width in widths:
+        grid_col = oxml_element("w:gridCol")
+        grid_col.set(qn("w:w"), str(_twips(width)))
+        tbl_grid.append(grid_col)
+    tbl.insert(1, tbl_grid)
+
+
+def _set_cell_preferred_width(cell: Any, width: Any, oxml_element: Any, qn: Any) -> None:
+    tc_pr = cell._tc.get_or_add_tcPr()  # noqa: SLF001
+    tc_width = tc_pr.find(qn("w:tcW"))
+    if tc_width is None:
+        tc_width = oxml_element("w:tcW")
+        tc_pr.append(tc_width)
+    tc_width.set(qn("w:type"), "dxa")
+    tc_width.set(qn("w:w"), str(_twips(width)))
+
+
+def _twips(width: Any) -> int:
+    return max(int(int(width) / EMU_PER_TWIP), 1)
 
 
 def _add_matching_artifacts_to_cell(
@@ -366,24 +427,32 @@ def _add_matching_artifacts_to_cell(
             image_artifacts,
             _measurement_csvs(artifacts) if label in MEASUREMENT_LABELS else [],
             width=inches(APPENDIX_IMAGE_WIDTH_INCHES),
+            measurement_table_width=inches(APPENDIX_OS_ARTIFACT_WIDTH_INCHES),
         )
         return
     cell.text = _artifact_names(part_root, artifacts)
 
 
 def _add_artifact_images_to_cell(
-    cell: Any, image_artifacts: Iterable[Path], measurement_csvs: list[Path], *, width: Any
+    cell: Any,
+    image_artifacts: Iterable[Path],
+    measurement_csvs: list[Path],
+    *,
+    width: Any,
+    measurement_table_width: Any,
 ) -> None:
     cell.text = ""
     first = True
     for artifact in image_artifacts:
-        added_summary = _add_measurement_summary_for_image(cell, artifact, measurement_csvs)
+        added_summary = _add_measurement_summary_for_image(cell, artifact, measurement_csvs, measurement_table_width)
         paragraph = cell.paragraphs[0] if first and not added_summary else cell.add_paragraph()
         _add_picture_to_paragraph(paragraph, artifact, width=width)
         first = False
 
 
-def _add_measurement_summary_for_image(cell: Any, image_artifact: Path, measurement_csvs: list[Path]) -> bool:
+def _add_measurement_summary_for_image(
+    cell: Any, image_artifact: Path, measurement_csvs: list[Path], measurement_table_width: Any
+) -> bool:
     csv_path = _matching_measurement_csv(image_artifact, measurement_csvs)
     if csv_path is None:
         return False
@@ -398,6 +467,8 @@ def _add_measurement_summary_for_image(cell: Any, image_artifact: Path, measurem
         row = table.add_row().cells
         for index, value in enumerate(values):
             row[index].text = value
+    column_width = int((measurement_table_width // len(rows[0])) * APPENDIX_MEASUREMENT_COLUMN_WIDTH_FRACTION)
+    _set_table_column_widths(table, [column_width] * len(rows[0]))
     cell.add_paragraph("")
     return True
 
@@ -641,6 +712,8 @@ def _accum_measurement_rows(csv_path: Path) -> list[list[str]]:
         return []
     table_rows = [["Name", "Measurement", *accum_fields]]
     for row in rows:
+        if row.get("Name") in EXCLUDED_MEASUREMENT_ROWS:
+            continue
         values = [row.get("Name", ""), row.get("Measurement", "")]
         values.extend(row.get(field, "") for field in accum_fields)
         table_rows.append(values)

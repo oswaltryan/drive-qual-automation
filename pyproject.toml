@@ -78,6 +78,10 @@ python_version = "3.12"
 strict = true
 mypy_path = ["src"]
 
+[[tool.mypy.overrides]]
+module = ["docx", "docx.*"]
+ignore_missing_imports = true
+
 
 [tool.pytest.ini_options]
 minversion = "6.0"
