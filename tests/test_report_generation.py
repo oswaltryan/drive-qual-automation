@@ -101,6 +101,8 @@ def test_generate_report_docx_matches_reference_section_shape() -> None:
         "Program | Iterations/Loops | Result",
     ]
     assert "Artifact | Path" not in table_headers
+    assert _has_paragraph_between_tables(document, "Windows | ", "Linux | ")
+    assert _has_paragraph_between_tables(document, "Linux | ", "MAC | ")
 
 
 def test_generate_report_docx_embeds_appendix_images_instead_of_paths() -> None:
@@ -219,6 +221,24 @@ def _write_png(path: Path) -> None:
 
 def _table_cell_drawing_count(document_table: Any, row_index: int, cell_index: int) -> int:
     return len(document_table.rows[row_index].cells[cell_index]._tc.xpath(".//w:drawing"))  # noqa: SLF001
+
+
+def _has_paragraph_between_tables(document: Any, first_header: str, second_header: str) -> bool:
+    labels = _body_block_labels(document)
+    first_index = labels.index(f"table:{first_header}")
+    second_index = labels.index(f"table:{second_header}")
+    return "paragraph" in labels[first_index + 1 : second_index]
+
+
+def _body_block_labels(document: Any) -> list[str]:
+    table_headers = iter(" | ".join(cell.text for cell in table.rows[0].cells) for table in document.tables)
+    labels: list[str] = []
+    for child in document.element.body.iterchildren():
+        if child.tag.endswith("}tbl"):
+            labels.append(f"table:{next(table_headers)}")
+        elif child.tag.endswith("}p"):
+            labels.append("paragraph")
+    return labels
 
 
 def _report_payload() -> dict[str, Any]:

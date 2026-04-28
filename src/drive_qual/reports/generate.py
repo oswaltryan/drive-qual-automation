@@ -327,6 +327,7 @@ def _add_appendix(document: Any, data: dict[str, Any], part_root: Path, inches: 
         document.add_heading(f"Disk Performance Raw Data & Measurements ({dut_name})", level=2)
         for os_name in ("Windows", "Linux", "MAC"):
             _add_platform_artifact_table(document, part_root, dut_name, os_name, inches)
+            document.add_paragraph("")
 
 
 def _add_platform_artifact_table(document: Any, part_root: Path, dut_name: str, os_name: str, inches: Any) -> None:
