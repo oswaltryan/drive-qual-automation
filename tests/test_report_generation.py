@@ -174,8 +174,17 @@ def _assert_appendix_object_layout(document: Any, output_path: Path) -> None:
     assert _table_cell_object_count(document.tables[6], 2, 1) == 0
     assert _table_cell_object_count(document.tables[6], 3, 1) == 0
     assert _table_cell_object_count(document.tables[6], 4, 1) == 0
-    assert _cell_paragraph_texts(document.tables[6], 1, 0)[:2] == ["Inrush Summary", ""]
-    assert _cell_paragraph_texts(document.tables[6], 2, 0)[:2] == ["Max IO Summary", ""]
+    assert _cell_paragraph_texts(document.tables[6], 1, 0)[:2] == ["Inrush", ""]
+    assert _cell_paragraph_texts(document.tables[6], 2, 0)[:2] == ["Max IO", ""]
+    assert _table_column_paragraphs_are_centered(document.tables[6], 0)
+    assert _table_column_paragraphs_are_centered(document.tables[7], 0)
+    assert _table_column_paragraphs_are_centered(document.tables[8], 0)
+    assert _cell_child_tags(document.tables[6], 1, 1) == ["tcPr", "p", "tbl", "p"]
+    assert _cell_child_tags(document.tables[6], 2, 1) == ["tcPr", "p", "tbl", "p"]
+    assert _empty_cell_paragraph_line_sizes(document.tables[6], 1, 1) == ["20", "20"]
+    assert _empty_cell_paragraph_line_sizes(document.tables[6], 2, 1) == ["20", "20"]
+    assert _cell_child_tags(document.tables[6], 3, 1) == ["tcPr", "p", "tbl", "p", "p", "tbl", "p"]
+    assert _empty_cell_paragraph_line_sizes(document.tables[6], 3, 1) == ["20", "20"]
     assert (
         _cell_paragraph_texts(document.tables[6], 3, 0)[1:11]
         == [""] * WINDOWS_PERFORMANCE_BLANK_LINES_BEFORE_FIRST_OBJECT
@@ -337,8 +346,31 @@ def _cell_xml(document_table: Any, row_index: int, cell_index: int) -> Any:
     return document_table.rows[row_index].cells[cell_index]._tc
 
 
+def _cell_child_tags(document_table: Any, row_index: int, cell_index: int) -> list[str]:
+    return [child.tag.rsplit("}", 1)[-1] for child in _cell_xml(document_table, row_index, cell_index)]
+
+
+def _empty_cell_paragraph_line_sizes(document_table: Any, row_index: int, cell_index: int) -> list[str]:
+    return [
+        spacing.get("{http://schemas.openxmlformats.org/wordprocessingml/2006/main}line")
+        for paragraph in document_table.rows[row_index].cells[cell_index].paragraphs
+        if not paragraph.text
+        for spacing in paragraph._p.xpath("./w:pPr/w:spacing")
+    ]
+
+
 def _cell_paragraph_texts(document_table: Any, row_index: int, cell_index: int) -> list[str]:
     return [paragraph.text for paragraph in document_table.rows[row_index].cells[cell_index].paragraphs]
+
+
+def _cell_paragraph_alignments(document_table: Any, row_index: int, cell_index: int) -> list[int | None]:
+    return [paragraph.alignment for paragraph in document_table.rows[row_index].cells[cell_index].paragraphs]
+
+
+def _table_column_paragraphs_are_centered(document_table: Any, column_index: int) -> bool:
+    return all(
+        paragraph.alignment == 1 for row in document_table.rows for paragraph in row.cells[column_index].paragraphs
+    )
 
 
 def _performance_object_gap(document_table: Any, *, first_object_index: int) -> int:

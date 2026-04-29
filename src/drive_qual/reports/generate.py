@@ -167,8 +167,8 @@ def _set_margins(document: Any, inches: Any) -> None:
     for section in document.sections:
         section.left_margin = inches(0.6)
         section.right_margin = inches(0.6)
-        section.top_margin = inches(0.6)
-        section.bottom_margin = inches(0.6)
+        section.top_margin = inches(0.5)
+        section.bottom_margin = inches(0.5)
 
 
 def _add_revision_table(document: Any) -> None:
@@ -360,7 +360,7 @@ def _add_platform_artifact_table(document: Any, part_root: Path, dut_name: str, 
     table = _table(document, [os_name, ""])
     for label in ("Inrush Summary", "Max IO Summary", "Performance"):
         row = table.add_row().cells
-        row[0].text = label
+        row[0].text = _appendix_row_label(label)
         if label in MEASUREMENT_LABELS:
             _add_measurement_artifacts_to_row(row, part_root, dut_name, os_name, label, inches)
         elif label == PERFORMANCE_LABEL:
@@ -371,7 +371,14 @@ def _add_platform_artifact_table(document: Any, part_root: Path, dut_name: str, 
         row = table.add_row().cells
         row[0].text = "Drive Information"
         _add_drive_information_artifacts_to_row(row, part_root, dut_name, os_name, "Drive Information", inches)
+    _center_table_column(table, 0)
     _set_table_column_widths(table, [inches(APPENDIX_OS_LABEL_WIDTH_INCHES), inches(APPENDIX_OS_ARTIFACT_WIDTH_INCHES)])
+
+
+def _appendix_row_label(label: str) -> str:
+    if label in MEASUREMENT_LABELS:
+        return label.removesuffix(" Summary")
+    return label
 
 
 def _table(document: Any, headers: Iterable[str]) -> Any:
@@ -476,6 +483,7 @@ def _add_measurement_artifacts_to_row(
         artifact_cell.text = _artifact_names(part_root, artifacts)
         return
     _add_artifact_objects_to_cell(label_cell, image_artifacts, inches)
+    _center_cell_paragraphs(label_cell)
     _add_measurement_summaries_to_cell(
         artifact_cell,
         image_artifacts,
@@ -550,7 +558,12 @@ def _add_artifact_images_to_cell(
 
 
 def _add_measurement_summary_for_image(
-    cell: Any, image_artifact: Path, measurement_csvs: list[Path], measurement_table_width: Any
+    cell: Any,
+    image_artifact: Path,
+    measurement_csvs: list[Path],
+    measurement_table_width: Any,
+    *,
+    add_trailing_paragraph: bool = True,
 ) -> bool:
     csv_path = _matching_measurement_csv(image_artifact, measurement_csvs)
     if csv_path is None:
@@ -568,7 +581,8 @@ def _add_measurement_summary_for_image(
             row[index].text = value
     column_width = int((measurement_table_width // len(rows[0])) * APPENDIX_MEASUREMENT_COLUMN_WIDTH_FRACTION)
     _set_table_column_widths(table, [column_width] * len(rows[0]))
-    cell.add_paragraph("")
+    if add_trailing_paragraph:
+        cell.add_paragraph("")
     return True
 
 
@@ -580,6 +594,18 @@ def _add_artifact_objects_to_cell(cell: Any, image_artifacts: Iterable[Path], in
         object_paragraph = cell.add_paragraph()
         _add_embedded_package_to_paragraph(object_paragraph, artifact, width=inches(OBJECT_ICON_WIDTH_INCHES))
         first = False
+
+
+def _center_cell_paragraphs(cell: Any) -> None:
+    from docx.enum.text import WD_ALIGN_PARAGRAPH
+
+    for paragraph in cell.paragraphs:
+        paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
+
+
+def _center_table_column(table: Any, column_index: int) -> None:
+    for row in table.rows:
+        _center_cell_paragraphs(row.cells[column_index])
 
 
 def _add_windows_performance_objects_to_cell(cell: Any, image_artifacts: Iterable[Path], inches: Any) -> None:
@@ -606,7 +632,14 @@ def _add_measurement_summaries_to_cell(
 ) -> None:
     cell.text = ""
     for artifact in image_artifacts:
-        _add_measurement_summary_for_image(cell, artifact, measurement_csvs, measurement_table_width)
+        _add_measurement_summary_for_image(
+            cell,
+            artifact,
+            measurement_csvs,
+            measurement_table_width,
+            add_trailing_paragraph=False,
+        )
+    _minimize_empty_cell_paragraphs(cell)
 
 
 def _add_csv_tables_to_cell(
@@ -617,14 +650,52 @@ def _add_csv_tables_to_cell(
     table_width: Any,
 ) -> None:
     cell.text = ""
+    matching_tables: list[tuple[Path, list[list[str]]]] = []
     for artifact in image_artifacts:
         csv_path = _matching_measurement_csv(artifact, csv_paths)
         if csv_path is None:
             continue
         rows = _generic_csv_rows(csv_path)
         if rows:
-            _add_nested_table(cell, [[_performance_utility_label(artifact)], *rows], table_width)
-            cell.add_paragraph("")
+            matching_tables.append((artifact, rows))
+    for index, (artifact, rows) in enumerate(matching_tables):
+        if index:
+            _add_minimized_empty_paragraph(cell)
+        _add_nested_table(cell, [[_performance_utility_label(artifact)], *rows], table_width)
+    _minimize_trailing_empty_cell_paragraph(cell)
+
+
+def _minimize_empty_cell_paragraphs(cell: Any) -> None:
+    for paragraph in cell.paragraphs:
+        if paragraph.text or paragraph._p.xpath(".//w:drawing | .//w:object"):
+            continue
+        _minimize_empty_paragraph(paragraph)
+
+
+def _minimize_trailing_empty_cell_paragraph(cell: Any) -> None:
+    if not cell.paragraphs:
+        return
+    paragraph = cell.paragraphs[-1]
+    if paragraph.text or paragraph._p.xpath(".//w:drawing | .//w:object"):
+        return
+    _minimize_empty_paragraph(paragraph)
+
+
+def _minimize_empty_paragraph(paragraph: Any) -> None:
+    from docx.shared import Pt
+
+    paragraph.paragraph_format.space_before = Pt(0)
+    paragraph.paragraph_format.space_after = Pt(0)
+    paragraph.paragraph_format.line_spacing = Pt(1)
+    if not paragraph.runs:
+        paragraph.add_run()
+    for run in paragraph.runs:
+        run.font.size = Pt(1)
+
+
+def _add_minimized_empty_paragraph(cell: Any) -> None:
+    paragraph = cell.add_paragraph("")
+    _minimize_empty_paragraph(paragraph)
 
 
 def _add_nested_table(cell: Any, rows: list[list[str]], table_width: Any) -> None:
