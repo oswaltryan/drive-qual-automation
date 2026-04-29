@@ -12,7 +12,13 @@ from typing import Any, cast
 
 from _pytest.monkeypatch import MonkeyPatch
 
-from drive_qual.reports.evaluation import Status, case_material_for_product, evaluate_power, evaluate_temperature
+from drive_qual.reports.evaluation import (
+    Status,
+    case_material_for_product,
+    evaluate_power,
+    evaluate_report,
+    evaluate_temperature,
+)
 
 EXPECTED_INLINE_IMAGE_COUNT = 1
 EXPECTED_POWER_OBJECT_COUNT = 7
@@ -90,7 +96,6 @@ def test_generate_report_docx_matches_reference_section_shape() -> None:
         if paragraph.style is not None and paragraph.style.name.startswith("Heading")
     ]
     table_headers = [" | ".join(cell.text for cell in table.rows[0].cells) for table in document.tables]
-
     expected_base_headings = [
         "Drive Qualification Report",
         "Executive Summary",
@@ -122,6 +127,11 @@ def test_generate_report_docx_matches_reference_section_shape() -> None:
     assert not _table_contains_text(document.tables[2], "Appears in Device Manager & Disk Management")
     assert _table_contains_text(document.tables[4], "USB-IF Mass Storage Compliance")
     assert not _table_contains_text(document.tables[4], "USB-IF Mass Storage Compliance (MSC)")
+    summary = next(
+        paragraph for paragraph in document.paragraphs if paragraph.text.startswith("Results require review")
+    )
+    assert summary.text == "Results require review in sections: Power Data."
+    assert [run.text for run in summary.runs if run.bold] == ["Power Data"]
     _assert_result_table_alignment(document)
     assert "Artifact | Path" not in table_headers
     assert _has_paragraph_between_tables(document, "Windows | ", "Linux | ")
@@ -366,6 +376,68 @@ def test_power_evaluation_applies_voltage_and_inrush_rules() -> None:
     assert statuses["Max I/O minimum voltage 5V (macos)"] == Status.MISSING
     assert statuses["In-Rush current 5V (windows)"] == Status.PASS
     assert statuses["In-Rush current 5V (linux)"] == Status.WARN
+
+
+def test_report_evaluation_records_warning_sections_by_document_heading() -> None:
+    result = evaluate_report(
+        {
+            "power": {
+                "Padlock DT": {
+                    "rms_read_write_current_5v": {
+                        "windows": 899,
+                        "linux": 900,
+                    }
+                }
+            }
+        }
+    )
+
+    assert [(warning.section, warning.dut, warning.label) for warning in result.warnings] == [
+        ("Power Data", "Padlock DT", "Max I/O RMS current 5V (linux)")
+    ]
+
+
+def test_report_evaluation_records_review_sections_by_document_heading() -> None:
+    result = evaluate_report(
+        {
+            "power": {
+                "Padlock SSD": {
+                    "max_inrush_current": {"windows": 1480, "linux": 1080, "macos": 1520},
+                }
+            },
+            "temperature": {"Padlock SSD": {"performance": {"20c": {"read_mb_s": None, "write_mb_s": None}}}},
+            "compliance": {
+                "usb_if_msc_result": None,
+                "disk_tester_reliability_result": None,
+            },
+        }
+    )
+
+    assert result.review_sections == ["Power Data", "Compliance/Reliability Test", "Temperature Data"]
+
+
+def test_power_evaluation_uses_visible_grouped_power_rows_for_missing_counts() -> None:
+    expected_warning_count = 3
+    result = evaluate_report(
+        {
+            "power": {
+                "Padlock SSD": {
+                    "max_inrush_current": {"windows": 1480, "linux": 1080, "macos": 1520},
+                    "max_inrush_current_5v": {"windows": None, "linux": None, "macos": None},
+                    "max_inrush_current_12v": {"windows": None, "linux": None, "macos": None},
+                    "max_read_write_current": {"windows": 671.66, "linux": 708.44, "macos": 680.06},
+                    "max_read_write_current_5v": {"windows": None, "linux": None, "macos": None},
+                    "max_read_write_current_12v": {"windows": None, "linux": None, "macos": None},
+                    "rms_read_write_current": {"windows": 342.37, "linux": 346.88, "macos": 338.13},
+                    "rms_read_write_current_5v": {"windows": None, "linux": None, "macos": None},
+                    "rms_read_write_current_12v": {"windows": None, "linux": None, "macos": None},
+                }
+            }
+        }
+    )
+
+    assert next(row.value for row in result.summary if row.label == "Missing") == 0
+    assert next(row.value for row in result.summary if row.label == "Warnings") == expected_warning_count
 
 
 def test_temperature_evaluation_marks_zero_and_errors_red() -> None:
@@ -739,7 +811,7 @@ def _report_payload() -> dict[str, Any]:
             "Padlock DT": {
                 "max_inrush_current_5v": {"linux": 700, "macos": 800, "windows": 750},
                 "max_read_write_current_5v": {"linux": 850, "macos": 860, "windows": 870},
-                "rms_read_write_current_5v": {"linux": 500, "macos": 510, "windows": 520},
+                "rms_read_write_current_5v": {"linux": 900, "macos": 510, "windows": 520},
             }
         },
         "performance": {

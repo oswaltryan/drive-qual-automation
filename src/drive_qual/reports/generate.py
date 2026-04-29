@@ -39,6 +39,7 @@ EMU_PER_TWIP = 635
 OBJECT_ICON_WIDTH_INCHES = 0.72
 WINDOWS_PERFORMANCE_BLANK_LINES_BEFORE_FIRST_OBJECT = 10
 WINDOWS_PERFORMANCE_BLANK_LINES_BETWEEN_OBJECTS = 13
+TWO_SECTION_COUNT = 2
 CFB_SECTOR_SIZE = 512
 CFB_MINI_SECTOR_SIZE = 64
 CFB_MINI_STREAM_CUTOFF = 4096
@@ -469,7 +470,7 @@ def _add_compliance(document: Any, compliance: object, shade_cell: Callable[[Any
 
 def _add_executive_summary(document: Any, evaluated: EvaluatedReport) -> None:
     _add_heading(document, "Executive Summary", level=2)
-    document.add_paragraph(_result_sentence(evaluated))
+    _add_review_sections_summary(document, evaluated.review_sections)
 
 
 def _add_appendix(document: Any, data: dict[str, Any], part_root: Path, inches: Any) -> None:
@@ -1435,14 +1436,26 @@ def _result_status(result: str) -> Status:
     return Status.MISSING
 
 
-def _result_sentence(evaluated: EvaluatedReport) -> str:
-    failures = next((int(row.value) for row in evaluated.summary if row.label == "Failures"), 0)
-    warnings = next((int(row.value) for row in evaluated.summary if row.label == "Warnings"), 0)
-    if failures:
-        return f"Review required: {failures} failing result(s) and {warnings} warning(s) were detected."
-    if warnings:
-        return f"Drive performed with {warnings} warning result(s) requiring review."
-    return "Drive performed nominally across recorded qualification data."
+def _add_review_sections_summary(document: Any, review_sections: list[str]) -> None:
+    paragraph = document.add_paragraph()
+    if not review_sections:
+        paragraph.add_run("No sections require review.")
+        return
+    paragraph.add_run("Results require review in sections: ")
+    for index, section in enumerate(review_sections):
+        if index > 0:
+            paragraph.add_run(_section_list_separator(index, len(review_sections)))
+        run = paragraph.add_run(section)
+        run.bold = True
+    paragraph.add_run(".")
+
+
+def _section_list_separator(index: int, count: int) -> str:
+    if count == TWO_SECTION_COUNT:
+        return " and "
+    if index == count - 1:
+        return ", and "
+    return ", "
 
 
 def _artifact_files(part_root: Path) -> list[Path]:

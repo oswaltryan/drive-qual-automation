@@ -26,6 +26,17 @@ class EvaluatedReport:
     summary: list[EvaluatedValue]
     power: dict[str, list[EvaluatedValue]]
     temperature: dict[str, list[EvaluatedValue]]
+    warnings: list[ReviewFinding]
+    review_sections: list[str]
+
+
+@dataclass(frozen=True)
+class ReviewFinding:
+    section: str
+    dut: str
+    label: str
+    status: Status
+    reason: str
 
 
 ALUMINUM_PRODUCTS = {
@@ -51,6 +62,11 @@ MAX_IO_MIN_VOLTAGE_FIELDS = {
     "min_read_write_voltage_5v": "Max I/O minimum voltage 5V",
     "min_read_write_voltage_12v": "Max I/O minimum voltage 12V",
 }
+MAX_IO_PEAK_FIELDS = {
+    "max_read_write_current": "Max read/write current",
+    "max_read_write_current_5v": "Max read/write current 5V",
+    "max_read_write_current_12v": "Max read/write current 12V",
+}
 INRUSH_FIELDS = {
     "max_inrush_current": "In-Rush current",
     "max_inrush_current_5v": "In-Rush current 5V",
@@ -62,7 +78,15 @@ def evaluate_report(data: dict[str, Any]) -> EvaluatedReport:
     power = evaluate_power(data.get("power"))
     temperature = evaluate_temperature(data.get("temperature"))
     summary = _build_summary(power, temperature)
-    return EvaluatedReport(summary=summary, power=power, temperature=temperature)
+    warnings = _build_warning_findings(power, temperature)
+    review_sections = _build_review_sections(data, power, temperature)
+    return EvaluatedReport(
+        summary=summary,
+        power=power,
+        temperature=temperature,
+        warnings=warnings,
+        review_sections=review_sections,
+    )
 
 
 def case_material_for_product(product_name: str) -> str:
@@ -82,7 +106,9 @@ def evaluate_power(power: object) -> dict[str, list[EvaluatedValue]]:
             continue
         rows: list[EvaluatedValue] = []
         rows.extend(_evaluate_power_field_group(fields, MAX_IO_RMS_FIELDS, _evaluate_max_io_rms))
-        rows.extend(_evaluate_power_field_group(fields, MAX_IO_MIN_VOLTAGE_FIELDS, _evaluate_max_io_min_voltage))
+        rows.extend(_evaluate_power_field_group(fields, MAX_IO_PEAK_FIELDS, _evaluate_present_power_value))
+        if any(field_name in fields for field_name in MAX_IO_MIN_VOLTAGE_FIELDS):
+            rows.extend(_evaluate_power_field_group(fields, MAX_IO_MIN_VOLTAGE_FIELDS, _evaluate_max_io_min_voltage))
         rows.extend(_evaluate_power_field_group(fields, INRUSH_FIELDS, _evaluate_inrush))
         evaluated[str(dut_name)] = rows
     return evaluated
@@ -118,15 +144,37 @@ def _evaluate_power_field_group(
     evaluator: Any,
 ) -> list[EvaluatedValue]:
     rows: list[EvaluatedValue] = []
-    for field_name, field_label in field_labels.items():
-        raw_slot = fields.get(field_name)
-        if raw_slot is None and field_name in MAX_IO_MIN_VOLTAGE_FIELDS:
-            continue
-        slot = raw_slot if isinstance(raw_slot, dict) else {}
-        for os_key in OS_KEYS:
-            label = f"{field_label} ({os_key})"
-            rows.append(evaluator(label, slot.get(os_key)))
+    slots = [
+        (field_label, slot)
+        for field_name, field_label in field_labels.items()
+        if isinstance((slot := fields.get(field_name)), dict)
+    ]
+    if not slots:
+        return rows
+    for os_key in OS_KEYS:
+        label, value = _best_power_field_value(slots, os_key)
+        rows.append(evaluator(f"{label} ({os_key})", value))
     return rows
+
+
+def _best_power_field_value(slots: list[tuple[str, dict[str, Any]]], os_key: str) -> tuple[str, object]:
+    best_label = slots[0][0]
+    best_value: float | None = None
+    for field_label, slot in slots:
+        numeric = _to_float(slot.get(os_key))
+        if numeric is not None and (best_value is None or numeric > best_value):
+            best_label = field_label
+            best_value = numeric
+    if best_value is not None:
+        return best_label, best_value
+    return best_label, None
+
+
+def _evaluate_present_power_value(label: str, value: object) -> EvaluatedValue:
+    numeric = _to_float(value)
+    if numeric is None:
+        return EvaluatedValue(label, value, Status.MISSING, "No power value was recorded.")
+    return EvaluatedValue(label, numeric, Status.PASS, "Power value was recorded.")
 
 
 def _evaluate_max_io_rms(label: str, value: object) -> EvaluatedValue:
@@ -214,6 +262,84 @@ def _build_summary(
 
 def _count_status(rows: list[EvaluatedValue], status: Status) -> int:
     return sum(1 for row in rows if row.status == status)
+
+
+def _build_warning_findings(
+    power: dict[str, list[EvaluatedValue]], temperature: dict[str, list[EvaluatedValue]]
+) -> list[ReviewFinding]:
+    findings = _section_warning_findings("Power Data", power)
+    findings.extend(_section_warning_findings("Temperature Data", temperature))
+    return findings
+
+
+def _section_warning_findings(section: str, values_by_dut: dict[str, list[EvaluatedValue]]) -> list[ReviewFinding]:
+    return [
+        ReviewFinding(section, dut, row.label, row.status, row.reason)
+        for dut, rows in values_by_dut.items()
+        for row in rows
+        if row.status == Status.WARN
+    ]
+
+
+def _build_review_sections(
+    data: dict[str, Any],
+    power: dict[str, list[EvaluatedValue]],
+    temperature: dict[str, list[EvaluatedValue]],
+) -> list[str]:
+    sections: list[str] = []
+    if _has_review_status(power):
+        sections.append("Power Data")
+    if _compatibility_requires_review(data.get("compatibility")):
+        sections.append("Compatibility Data")
+    if _performance_requires_review(data.get("performance")):
+        sections.append("Disk Performance")
+    if _compliance_requires_review(data.get("compliance")):
+        sections.append("Compliance/Reliability Test")
+    if _has_review_status(temperature):
+        sections.append("Temperature Data")
+    return sections
+
+
+def _has_review_status(values_by_dut: dict[str, list[EvaluatedValue]]) -> bool:
+    return any(
+        row.status in {Status.WARN, Status.FAIL, Status.MISSING} for rows in values_by_dut.values() for row in rows
+    )
+
+
+def _compatibility_requires_review(compatibility: object) -> bool:
+    if not isinstance(compatibility, dict):
+        return False
+    return any(
+        isinstance(slot, dict) and any(value is False for value in slot.values()) for slot in compatibility.values()
+    )
+
+
+def _performance_requires_review(performance: object) -> bool:
+    if not isinstance(performance, dict):
+        return False
+    required_tools = (
+        ("Windows", "CrystalDiskMark", ("read", "write")),
+        ("Windows", "ATTO", ("read", "write")),
+        ("macOS", "Blackmagic Disk Speed Test", ("read", "write")),
+    )
+    for platforms in performance.values():
+        if not isinstance(platforms, dict):
+            return True
+        for platform, tool, metrics in required_tools:
+            tool_data = platforms.get(platform, {}).get(tool) if isinstance(platforms.get(platform), dict) else None
+            if not isinstance(tool_data, dict) or any(_to_float(tool_data.get(metric)) is None for metric in metrics):
+                return True
+    return False
+
+
+def _compliance_requires_review(compliance: object) -> bool:
+    if not isinstance(compliance, dict):
+        return False
+    result_values = (
+        compliance.get("usb_if_msc_result"),
+        compliance.get("disk_tester_reliability_result"),
+    )
+    return any(str(value or "").casefold() != "pass" for value in result_values)
 
 
 def _normalize_product(value: str) -> str:
