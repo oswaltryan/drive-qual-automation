@@ -56,7 +56,7 @@ COMPATIBILITY_ROWS = (
     ("recognized_by_os", "Recognized by OS"),
     ("hot_pluggable", "Hot Pluggable"),
     ("safely_remove", "Safely Remove"),
-    ("device_manager_disk_mgmt", "Appears in Device Manager & Disk Management"),
+    ("device_manager_disk_mgmt", "Native Disk Utility"),
     ("partition_drive", "Partition Drive"),
     ("format_drive", "Format Drive"),
     ("copy_to_drive", "Copy to Drive"),
@@ -124,19 +124,20 @@ def write_docx_report(
 
     document.add_heading("Drive Qualification Report.", level=1)
     _add_revision_table(document)
+    _add_executive_summary(document, evaluated)
     _add_drive_info(document, data.get("drive_info"), report_path)
     _add_qualification_equipment(document, data.get("equipment"))
     _add_test_procedure(document)
 
+    document.add_page_break()
     document.add_heading("Test Results", level=1)
     _add_power_data(document, data.get("power"), shade_cell)
     _add_compatibility_data(document, data.get("compatibility"), shade_cell)
-    _add_temperature_data(document, data.get("temperature"), shade_cell)
     _add_disk_performance(document, data.get("performance"))
     _add_compliance(document, data.get("compliance"), shade_cell)
-    document.add_heading("Datasheet", level=2)
-    _add_raw_screenshot_index(document)
-    _add_result_and_notes(document, evaluated)
+    document.add_page_break()
+    _add_temperature_data(document, data.get("temperature"), shade_cell)
+    document.add_page_break()
     _add_appendix(document, data, report_path.parent, Inches)
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -320,7 +321,7 @@ def _add_compliance(document: Any, compliance: object, shade_cell: Callable[[Any
     _compliance_row(
         table,
         shade_cell,
-        "USB-IF Mass Storage Compliance (MSC)",
+        "USB-IF Mass Storage Compliance",
         _field(compliance, "usb_if_msc_iterations"),
         _field(compliance, "usb_if_msc_result"),
     )
@@ -334,20 +335,12 @@ def _add_compliance(document: Any, compliance: object, shade_cell: Callable[[Any
     table.add_row()
 
 
-def _add_raw_screenshot_index(document: Any) -> None:
-    document.add_heading("Disk Performance Raw Data & Screenshots", level=2)
-    document.add_paragraph("")
-
-
-def _add_result_and_notes(document: Any, evaluated: EvaluatedReport) -> None:
-    document.add_heading("Drive Qualification Result", level=2)
+def _add_executive_summary(document: Any, evaluated: EvaluatedReport) -> None:
+    document.add_heading("Executive Summary", level=2)
     document.add_paragraph(_result_sentence(evaluated))
-    document.add_heading("Notes and Considerations", level=2)
-    document.add_paragraph("")
 
 
 def _add_appendix(document: Any, data: dict[str, Any], part_root: Path, inches: Any) -> None:
-    document.add_heading("Appendix", level=2)
     duts = _report_duts(data)
     for dut_name in duts:
         document.add_heading(f"Disk Performance Raw Data & Measurements ({dut_name})", level=2)

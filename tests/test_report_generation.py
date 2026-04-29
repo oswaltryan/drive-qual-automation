@@ -91,22 +91,30 @@ def test_generate_report_docx_matches_reference_section_shape() -> None:
 
     assert headings[:4] == [
         "Drive Qualification Report.",
+        "Executive Summary",
         "Drive Info",
         "Qualification Equipment",
-        "Test Procedure",
     ]
+    assert headings[4] == "Test Procedure"
     assert "Test Results" in headings
     assert "Power Data" in headings
     assert "Compatibility Data" in headings
     assert "Disk Performance" in headings
+    _assert_reordered_sections(document, headings, "Padlock DT")
+    _assert_removed_headings_are_absent(headings)
+    assert _heading_starts_after_page_break(document, "Test Results")
     assert table_headers[:6] == [
         "Revision | Name | Date | Description",
         "Test | Linux | MacOS | Windows",
         "Test | Linux | MacOS | Windows",
-        "Temperature | Read MB/s | Write MB/s",
         "DUT | CDM-R | CDM-W | BM(R) | BM(W) | ATTO-R | ATTO-W",
         "Program | Iterations/Loops | Result",
+        "Temperature | Read MB/s | Write MB/s",
     ]
+    assert _table_contains_text(document.tables[2], "Native Disk Utility")
+    assert not _table_contains_text(document.tables[2], "Appears in Device Manager & Disk Management")
+    assert _table_contains_text(document.tables[4], "USB-IF Mass Storage Compliance")
+    assert not _table_contains_text(document.tables[4], "USB-IF Mass Storage Compliance (MSC)")
     assert "Artifact | Path" not in table_headers
     assert _has_paragraph_between_tables(document, "Windows | ", "Linux | ")
     assert _has_paragraph_between_tables(document, "Linux | ", "MAC | ")
@@ -219,6 +227,40 @@ def _table_headers(document: Any) -> list[str]:
 def _document_text(document: Any) -> str:
     text = "\n".join(paragraph.text for paragraph in document.paragraphs)
     return text + "\n".join(cell.text for table in document.tables for row in table.rows for cell in row.cells)
+
+
+def _paragraph_has_page_break(paragraph: Any) -> bool:
+    return bool(paragraph._p.xpath(".//w:br[@w:type='page']"))
+
+
+def _heading_starts_after_page_break(document: Any, heading_text: str) -> bool:
+    heading_index = next(index for index, paragraph in enumerate(document.paragraphs) if paragraph.text == heading_text)
+    return heading_index > 0 and _paragraph_has_page_break(document.paragraphs[heading_index - 1])
+
+
+def _assert_removed_headings_are_absent(headings: list[str]) -> None:
+    for heading in (
+        "Drive Qualification Result",
+        "Datasheet",
+        "Appendix",
+        "Disk Performance Raw Data & Screenshots",
+        "Notes and Considerations",
+    ):
+        assert heading not in headings
+
+
+def _assert_reordered_sections(document: Any, headings: list[str], dut_name: str) -> None:
+    measurement_heading = f"Disk Performance Raw Data & Measurements ({dut_name})"
+    assert headings.index("Executive Summary") < headings.index("Drive Info")
+    assert headings.index("Compliance/Reliability Test") < headings.index("Temperature Data")
+    assert headings.index("Temperature Data") < headings.index(measurement_heading)
+    assert measurement_heading in headings
+    assert _heading_starts_after_page_break(document, "Temperature Data")
+    assert _heading_starts_after_page_break(document, measurement_heading)
+
+
+def _table_contains_text(table: Any, text: str) -> bool:
+    return any(text in cell.text for row in table.rows for cell in row.cells)
 
 
 def test_power_evaluation_applies_max_io_thresholds() -> None:
