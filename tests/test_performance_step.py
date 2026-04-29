@@ -427,6 +427,29 @@ def test_capture_window_saves_png_in_windows_artifact_dir(monkeypatch: MonkeyPat
     assert saved_paths == [str(expected_png)]
 
 
+def test_update_cdi_json_records_extracted_data_and_drive_info(tmp_path: Path) -> None:
+    report_path = tmp_path / "drive_qualification_report_atomic_tests.json"
+    data = _report_payload()
+    report_path.write_text(json.dumps(data), encoding="utf-8")
+
+    extracted_data = {
+        "model": "Apricorn Padlock DT",
+        "firmware": "1.2.3",
+        "serial_number": "CDI123",
+        "interface": "USB (Serial ATA)",
+    }
+
+    windows_performance._update_cdi_json(report_path, data, "Padlock DT", True, extracted_data)
+
+    saved = json.loads(report_path.read_text(encoding="utf-8"))
+    cdi_entry = saved["performance"]["Padlock DT"]["Windows"]["CrystalDiskInfo"]
+
+    assert cdi_entry == {"screenshot": True, **extracted_data}
+    assert saved["drive_info"]["firmware"] == "1.2.3"
+    assert saved["drive_info"]["serial_number"] == "CDI123"
+    assert saved["drive_info"]["interface"] == "USB (Serial ATA)"
+
+
 def test_windows_performance_syncs_report_without_running_automation(monkeypatch: MonkeyPatch, tmp_path: Path) -> None:
     report_path = tmp_path / "drive_qualification_report_atomic_tests.json"
     payload = _report_payload()

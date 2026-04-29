@@ -3,6 +3,7 @@ from __future__ import annotations
 import csv
 import ctypes
 import importlib
+import json
 import sys
 import time
 from ctypes import wintypes
@@ -32,6 +33,25 @@ ATTO_PATH = Path("C:/Program Files (x86)/ATTO Technology/Disk Benchmark/ATTODisk
 
 ATTO_TIMEOUT = 1800
 CDM_TIMEOUT = 1200
+
+CDI_FIELD_BY_AUTOMATION_ID = {
+    "1012": "model",
+    "1014": "firmware",
+    "1015": "serial_number",
+    "1017": "interface",
+    "1028": "transfer_mode",
+    "1033": "standard",
+    "1035": "features",
+    "1041": "rotation_rate",
+    "1043": "power_on_count",
+    "1045": "power_on_hours",
+}
+
+CDI_DRIVE_INFO_FIELDS = {
+    "firmware": "firmware",
+    "serial_number": "serial_number",
+    "interface": "interface",
+}
 
 
 def _pywinauto_module() -> Any:
@@ -103,21 +123,74 @@ def _launch_or_connect_app(app_path: Path, exe_name: str, app_name: str) -> Any:
         return app
 
 
-def _update_cdi_json(report_path: Path, data: dict[str, Any], dut_name: str, val: bool | None) -> None:
+def _update_cdi_json(
+    report_path: Path,
+    data: dict[str, Any],
+    dut_name: str,
+    val: bool | None,
+    extracted_data: dict[str, str] | None = None,
+) -> None:
     performance = data.setdefault("performance", {})
     report_dut_key = _resolve_report_dut_key(performance, dut_name)
     if report_dut_key:
         win_perf = performance[report_dut_key].setdefault("Windows", {})
         cdi_perf = win_perf.setdefault("CrystalDiskInfo", {"screenshot": None})
         cdi_perf["screenshot"] = val
+        if extracted_data:
+            cdi_perf.update(extracted_data)
+            _update_drive_info_from_cdi(data, extracted_data)
         save_report(report_path, data)
         print(f"Updated JSON report for '{report_dut_key}' CDI screenshot: {val}")
+
+
+def _update_drive_info_from_cdi(data: dict[str, Any], extracted_data: dict[str, str]) -> None:
+    drive_info = data.setdefault("drive_info", {})
+    if not isinstance(drive_info, dict):
+        return
+    for source_key, drive_info_key in CDI_DRIVE_INFO_FIELDS.items():
+        value = extracted_data.get(source_key)
+        if value:
+            drive_info[drive_info_key] = value
+
+
+def _cdi_artifact_dir(part_number: str) -> Path:
+    ss_dir = localize_windows_path(Path(artifact_dir(part_number, "Windows", "CrystalDiskInfo")))
+    mk_dir(ss_dir)
+    return ss_dir
+
+
+def _write_cdi_extracted_data_artifact(part_number: str, dut_name: str, extracted_data: dict[str, str]) -> None:
+    json_path = _cdi_artifact_dir(part_number) / f"{dut_name}_{time.strftime('%Y%m%d_%H%M%S')}.json"
+    with open(json_path, "w", encoding="utf-8") as f:
+        json.dump(extracted_data, f, indent=4)
+    print(f"Extracted CDI info saved to: {json_path}")
+
+
+def _extract_cdi_text_data(main_window: Any) -> dict[str, str]:
+    """Extract information directly from the CrystalDiskInfo Edit controls."""
+    extracted_data: dict[str, str] = {}
+    try:
+        for edit in main_window.descendants(control_type="Edit"):
+            auto_id = str(edit.element_info.automation_id)
+            if auto_id in CDI_FIELD_BY_AUTOMATION_ID:
+                try:
+                    text = edit.get_value()
+                except Exception:
+                    try:
+                        text = edit.window_text()
+                    except Exception:
+                        text = ""
+                if text and text.strip() and text.strip() != "----":
+                    extracted_data[CDI_FIELD_BY_AUTOMATION_ID[auto_id]] = text.strip()
+    except Exception as ex:
+        print(f"Warning: Failed to extract text from CDI Edit controls: {ex}")
+    return extracted_data
 
 
 def automate_crystal_disk_info(
     drive_letter: str, part_number: str, dut_name: str, report_path: Path, data: dict[str, Any]
 ) -> bool:
-    """Launch CrystalDiskInfo, select the specific drive, and save a screenshot."""
+    """Launch CrystalDiskInfo, select the specific drive, extract info, and save a screenshot."""
     is_ask3 = "ASK3" in dut_name.upper()
 
     if is_ask3:
@@ -144,8 +217,12 @@ def automate_crystal_disk_info(
 
         btn.click_input()
         time.sleep(1)
+
+        extracted_data = _extract_cdi_text_data(main_window)
+
         _capture_window(main_window, part_number, dut_name, "CrystalDiskInfo")
-        _update_cdi_json(report_path, data, dut_name, True)
+        _write_cdi_extracted_data_artifact(part_number, dut_name, extracted_data)
+        _update_cdi_json(report_path, data, dut_name, True, extracted_data)
         app.kill()
         return True
     except Exception as e:
