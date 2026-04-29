@@ -17,7 +17,7 @@ from drive_qual.core.storage_paths import localize_windows_path
 from drive_qual.reports.evaluation import EvaluatedReport, Status, evaluate_report
 
 DEFAULT_OUTPUT_NAME = "drive_qualification_report.docx"
-OS_COLUMNS = (("linux", "Linux"), ("macos", "MacOS"), ("windows", "Windows"))
+OS_COLUMNS = (("linux", "Linux"), ("macos", "macOS"), ("windows", "Windows"))
 MA_PER_A = 1000.0
 MAX_IO_RMS_FAIL_MA = 1000.0
 MAX_IO_RMS_WARN_MA = 900.0
@@ -126,19 +126,31 @@ def write_docx_report(
     _set_margins(document, Inches)
     _add_header_logo(document, Inches)
 
-    document.add_heading("Drive Qualification Report", level=1)
+    from docx.enum.text import WD_ALIGN_PARAGRAPH
+    from docx.shared import Pt
+
+    # Set default font for the entire document
+    style = document.styles["Normal"]
+    style.font.name = "Times New Roman"
+    style.font.size = Pt(11)
+
+    heading = _add_heading(document, "Drive Qualification Report", level=1)
+    heading.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    run = heading.runs[0]
+    run.font.name = "Times New Roman"
+    run.font.size = Pt(24)
+    run.underline = True
+    document.add_paragraph()
     _add_revision_table(document)
     _add_executive_summary(document, evaluated)
     _add_drive_info(document, data.get("drive_info"), report_path)
     _add_qualification_equipment(document, data.get("equipment"))
 
     document.add_page_break()
-    document.add_heading("Test Results", level=1)
     _add_power_data(document, data.get("power"), shade_cell)
     _add_compatibility_data(document, data.get("compatibility"), shade_cell)
     _add_disk_performance(document, data.get("performance"))
     _add_compliance(document, data.get("compliance"), shade_cell)
-    document.add_page_break()
     _add_temperature_data(document, data.get("temperature"), report_path.parent, shade_cell, Inches)
     document.add_page_break()
     _add_appendix(document, data, report_path.parent, Inches)
@@ -181,7 +193,7 @@ def _add_header_logo(document: Any, inches: Any) -> None:
         return
     section = document.sections[0]
     section.different_first_page_header_footer = True
-    section.header_distance = inches(0.2)
+    section.header_distance = inches(0.5)
     header = section.first_page_header
     paragraph = header.paragraphs[0]
     run = paragraph.add_run()
@@ -190,13 +202,20 @@ def _add_header_logo(document: Any, inches: Any) -> None:
 
 def _add_revision_table(document: Any) -> None:
     table = _table(document, ["Revision", "Name", "Date", "Description"])
-    row = table.add_row().cells
-    row[3].text = "Initial Draft"
-    table.add_row()
+    row_0 = table.add_row().cells
+    row_0[0].text = "1"
+    row_0[1].text = "Alex Klein"
+    row_0[2].text = "3/20/2025"
+    row_0[3].text = "Initial Draft"
+    row_1 = table.add_row().cells
+    row_1[0].text = "2"
+    row_1[1].text = "Ryan Oswalt"
+    row_1[2].text = "4/29/2026"
+    row_1[3].text = "Automation"
 
 
 def _add_drive_info(document: Any, drive_info: object, report_path: Path) -> None:
-    document.add_heading("Drive Info", level=2)
+    _add_heading(document, "Drive Info", level=2)
     fields = (
         ("apricorn_part_number", "Apricorn Part Number", report_path.parent.name),
         ("manufacturer", "Manufacturer", ""),
@@ -213,7 +232,7 @@ def _add_drive_info(document: Any, drive_info: object, report_path: Path) -> Non
 
 
 def _add_qualification_equipment(document: Any, equipment: object) -> None:
-    document.add_heading("Qualification Equipment", level=2)
+    _add_heading(document, "Qualification Equipment", level=2)
     if not isinstance(equipment, dict):
         _list_line(document, "No equipment data recorded.")
         return
@@ -227,14 +246,12 @@ def _host_lines(document: Any, equipment: dict[str, Any]) -> None:
         ("windows_host", "Windows Host"),
         ("usb_if_host", "Windows Host"),
         ("linux_host", "Linux Host"),
-        ("macos_host", "MacOS Host"),
+        ("macos_host", "macOS Host"),
     ):
         host = equipment.get(key)
         if not isinstance(host, dict):
             continue
         _list_line(document, f"{label}: {_join_present(host.get('hardware'), host.get('os_version'))}")
-        if _software_entries is not None:
-            _list_line(document, "Software:", level=1)
         for software in _software_entries(host.get("software")):
             _list_line(document, f"{software}", level=2)
 
@@ -271,8 +288,8 @@ def _dut_lines(document: Any, dut_data: object) -> None:
 
 
 def _add_power_data(document: Any, power: object, shade_cell: Callable[[Any, Status], None]) -> None:
-    document.add_heading("Power Data", level=2)
-    table = _table(document, ["Test", "Linux", "MacOS", "Windows"])
+    _add_heading(document, "Power Data", level=2)
+    table = _table(document, ["Test", "Linux", "macOS", "Windows"])
     for label, fields in POWER_ROWS:
         row = table.add_row().cells
         row[0].text = label
@@ -284,8 +301,8 @@ def _add_power_data(document: Any, power: object, shade_cell: Callable[[Any, Sta
 
 
 def _add_compatibility_data(document: Any, compatibility: object, shade_cell: Callable[[Any, Status], None]) -> None:
-    document.add_heading("Compatibility Data", level=2)
-    table = _table(document, ["Test", "Linux", "MacOS", "Windows"])
+    _add_heading(document, "Compatibility Data", level=2)
+    table = _table(document, ["Test", "Linux", "macOS", "Windows"])
     for key, label in COMPATIBILITY_ROWS:
         row = table.add_row().cells
         row[0].text = label
@@ -303,7 +320,7 @@ def _add_temperature_data(
     shade_cell: Callable[[Any, Status], None],
     inches: Any,
 ) -> None:
-    document.add_heading("Temperature Data", level=2)
+    _add_heading(document, "Temperature Data", level=2)
     if not isinstance(temperature, dict) or not temperature:
         _add_temperature_table(document, part_root, "", {}, shade_cell, inches)
         return
@@ -366,7 +383,7 @@ def _normalized_match_text(value: str) -> str:
 
 
 def _add_disk_performance(document: Any, performance: object) -> None:
-    document.add_heading("Disk Performance", level=2)
+    _add_heading(document, "Disk Performance", level=2)
     table = _table(document, ["DUT", "CDM-R", "CDM-W", "BM(R)", "BM(W)", "ATTO-R", "ATTO-W"])
     if not isinstance(performance, dict):
         return
@@ -383,7 +400,7 @@ def _add_disk_performance(document: Any, performance: object) -> None:
 
 
 def _add_compliance(document: Any, compliance: object, shade_cell: Callable[[Any, Status], None]) -> None:
-    document.add_heading("Compliance/Reliability Test", level=2)
+    _add_heading(document, "Compliance/Reliability Test", level=2)
     table = _table(document, ["Program", "Iterations/Loops", "Result"])
     _compliance_row(
         table,
@@ -403,15 +420,15 @@ def _add_compliance(document: Any, compliance: object, shade_cell: Callable[[Any
 
 
 def _add_executive_summary(document: Any, evaluated: EvaluatedReport) -> None:
-    document.add_heading("Executive Summary", level=2)
+    _add_heading(document, "Executive Summary", level=2)
     document.add_paragraph(_result_sentence(evaluated))
 
 
 def _add_appendix(document: Any, data: dict[str, Any], part_root: Path, inches: Any) -> None:
     duts = _report_duts(data)
     for dut_name in duts:
-        document.add_heading(f"Disk Performance Raw Data & Measurements ({dut_name})", level=2)
-        for os_name in ("Windows", "Linux", "MAC"):
+        _add_heading(document, f"Disk Performance Raw Data & Measurements ({dut_name})", level=2)
+        for os_name in ("Windows", "Linux", "macOS"):
             _add_platform_artifact_table(document, part_root, dut_name, os_name, inches)
             document.add_paragraph("")
 
@@ -1175,6 +1192,13 @@ def _add_picture_to_paragraph(paragraph: Any, artifact: Path, *, width: Any) -> 
         paragraph.add_run(str(artifact.name))
 
 
+def _add_heading(document: Any, text: str, level: int) -> Any:
+    heading = document.add_heading(text, level=level)
+    for run in heading.runs:
+        run.font.name = "Times New Roman"
+    return heading
+
+
 def _list_line(document: Any, text: str, level: int = 0) -> None:
     from docx.shared import Inches
 
@@ -1389,7 +1413,7 @@ def _matching_artifact_text(part_root: Path, dut_name: str, os_name: str, label:
 
 
 def _matching_artifacts(part_root: Path, dut_name: str, os_name: str, label: str) -> list[Path]:
-    os_token = "macOS" if os_name == "MAC" else os_name
+    os_token = "macOS" if os_name == "macOS" else os_name
     category_tokens = {
         "Inrush Summary": ("in rush", "inrush"),
         "Max IO Summary": ("max io", "max i/o"),

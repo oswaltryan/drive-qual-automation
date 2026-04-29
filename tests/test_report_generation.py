@@ -91,23 +91,29 @@ def test_generate_report_docx_matches_reference_section_shape() -> None:
     ]
     table_headers = [" | ".join(cell.text for cell in table.rows[0].cells) for table in document.tables]
 
-    assert headings[:4] == [
+    expected_base_headings = [
         "Drive Qualification Report",
         "Executive Summary",
         "Drive Info",
         "Qualification Equipment",
+        "Power Data",
+        "Compatibility Data",
+        "Disk Performance",
+        "Compliance/Reliability Test",
+        "Temperature Data",
     ]
-    assert headings[4] == "Test Results"
+    assert headings[: len(expected_base_headings)] == expected_base_headings
+    assert _appendix_headings(headings) == ["Disk Performance Raw Data & Measurements (Padlock DT)"]
     assert "Power Data" in headings
     assert "Compatibility Data" in headings
     assert "Disk Performance" in headings
     _assert_reordered_sections(document, headings, "Padlock DT")
     _assert_removed_headings_are_absent(headings)
-    assert _heading_starts_after_page_break(document, "Test Results")
+    assert _heading_starts_after_page_break(document, "Power Data")
     assert table_headers[:6] == [
         "Revision | Name | Date | Description",
-        "Test | Linux | MacOS | Windows",
-        "Test | Linux | MacOS | Windows",
+        "Test | Linux | macOS | Windows",
+        "Test | Linux | macOS | Windows",
         "DUT | CDM-R | CDM-W | BM(R) | BM(W) | ATTO-R | ATTO-W",
         "Program | Iterations/Loops | Result",
         "Chart | Temperature | Read MB/s | Write MB/s",
@@ -119,7 +125,7 @@ def test_generate_report_docx_matches_reference_section_shape() -> None:
     _assert_result_table_alignment(document)
     assert "Artifact | Path" not in table_headers
     assert _has_paragraph_between_tables(document, "Windows | ", "Linux | ")
-    assert _has_paragraph_between_tables(document, "Linux | ", "MAC | ")
+    assert _has_paragraph_between_tables(document, "Linux | ", "macOS | ")
     assert _first_column_is_narrower_than_artifact_column(document.tables[6])
 
 
@@ -311,13 +317,16 @@ def _assert_removed_headings_are_absent(headings: list[str]) -> None:
         assert heading not in headings
 
 
+def _appendix_headings(headings: list[str]) -> list[str]:
+    return [heading for heading in headings if heading.startswith("Disk Performance Raw Data & Measurements (")]
+
+
 def _assert_reordered_sections(document: Any, headings: list[str], dut_name: str) -> None:
     measurement_heading = f"Disk Performance Raw Data & Measurements ({dut_name})"
     assert headings.index("Executive Summary") < headings.index("Drive Info")
     assert headings.index("Compliance/Reliability Test") < headings.index("Temperature Data")
     assert headings.index("Temperature Data") < headings.index(measurement_heading)
     assert measurement_heading in headings
-    assert _heading_starts_after_page_break(document, "Temperature Data")
     assert _heading_starts_after_page_break(document, measurement_heading)
 
 
