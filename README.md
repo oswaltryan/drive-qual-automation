@@ -148,26 +148,26 @@ source report JSON. Use `--output` to choose a different `.docx` path.
 
 The generated report includes these major sections:
 
-- `Drive Qualification Report.`
+- `Drive Qualification Report`
+- `Executive Summary`
 - revision table
 - `Drive Info`
 - `Qualification Equipment`
-- `Test Procedure`
-- `Test Results`
 - `Power Data`
 - `Compatibility Data`
-- `Temperature Data`
 - `Disk Performance`
 - `Compliance/Reliability Test`
-- `Datasheet`
-- `Disk Performance Raw Data & Screenshots`
-- `Drive Qualification Result`
-- `Notes and Considerations`
-- `Appendix`
+- `Temperature Data`
+- `Disk Performance Raw Data & Measurements (<DUT>)` appendix sections
 
 Report generation is read-only with respect to the source report folder. It
 evaluates current thresholds while rendering, but it does not rewrite the source
 JSON.
+
+The `Executive Summary` is intentionally concise. When review is required, it
+lists only the affected report section headings, such as `Power Data`,
+`Compliance/Reliability Test`, and `Temperature Data`; the detailed tables and
+appendix artifacts remain the source of supporting detail.
 
 Current rendered status rules:
 
@@ -177,6 +177,7 @@ Current rendered status rules:
 - Max I/O minimum voltage fields, when present: fail at or below `4.7 V`.
 - Temperature speed of `0` or an explicit temperature-test error is rendered as
   a failure.
+- Empty or missing result cells are rendered red.
 
 ### 3. Legacy CLI
 
@@ -331,9 +332,19 @@ Important files and modules:
 - `src/drive_qual/platforms/windows/performance.py`
   Windows-only GUI automation for CrystalDiskInfo, CrystalDiskMark, and ATTO
 - `src/drive_qual/reports/evaluation.py`
-  report status evaluation for power and temperature thresholds
+  report status evaluation, warning/review-section detection, and threshold rules
 - `src/drive_qual/reports/generate.py`
-  Word `.docx` report generation and the `drive-qual-report-generate` CLI
+  Word `.docx` report generation CLI and top-level orchestration
+- `src/drive_qual/reports/sections.py`
+  front matter and main report section rendering
+- `src/drive_qual/reports/appendix.py`
+  appendix artifact discovery, CSV summarization, and raw data rendering
+- `src/drive_qual/reports/docx_shared.py`
+  shared Word document, table, header, footer, and formatting helpers
+- `src/drive_qual/reports/embedded.py`
+  embedded object packaging for appendix artifacts
+- `src/drive_qual/reports/constants.py`
+  report-generation constants, table rows, thresholds, and status colors
 - `src/drive_qual/benchmarks/`
   split benchmark helpers for shared path handling plus `fio` and Windows-only `diskspd` execution
 - `src/drive_qual/workflows/setup_directories.py`
