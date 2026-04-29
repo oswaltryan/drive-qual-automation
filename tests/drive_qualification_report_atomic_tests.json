@@ -74,6 +74,8 @@
       "windows": null
     },
     "device_manager_disk_mgmt": {
+      "linux": null,
+      "macos": null,
       "windows": null
     },
     "partition_drive": {

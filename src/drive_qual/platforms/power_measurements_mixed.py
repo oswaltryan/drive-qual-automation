@@ -66,9 +66,7 @@ def _current_artifact_os_name() -> str:
     return ARTIFACT_OS_NAME_BY_SLOT[_current_report_os_key()]
 
 
-def _compatibility_field_template(field_name: str) -> dict[str, bool | None]:
-    if field_name == "device_manager_disk_mgmt":
-        return {"windows": None}
+def _compatibility_field_template(_field_name: str) -> dict[str, bool | None]:
     return {slot: None for slot in COMPATIBILITY_SLOTS}
 
 
@@ -208,6 +206,29 @@ def _confirm_selected_device(dut: ApricornDevice) -> bool:
             return False
 
 
+def _prompt_true_false(prompt: str) -> bool:
+    while True:
+        response = input(prompt).strip().casefold()
+        if response in {"true", "t", "yes", "y"}:
+            return True
+        if response in {"false", "f", "no", "n"}:
+            return False
+
+
+def _native_disk_utility_name() -> str:
+    if sys.platform.startswith("linux"):
+        return "Disks"
+    if sys.platform == "darwin":
+        return "Disk Utility"
+    return "Disk Management"
+
+
+def _prompt_current_host_native_disk_utility_visible(dut: ApricornDevice) -> bool:
+    utility = _native_disk_utility_name()
+    prompt = f"Can the drive be seen in {utility} for {device_identity(dut)}? [true/false]: "
+    return _prompt_true_false(prompt)
+
+
 def _wait_for_confirmed_device_present(prompt: str) -> ApricornDevice:
     while True:
         dut = _wait_for_device_present(prompt)
@@ -338,6 +359,8 @@ def _prepare_benchmark_target(
 
     _mark_current_host_compatibility(report_path, "partition_drive")
     _mark_current_host_compatibility(report_path, "format_drive")
+    native_disk_utility_visible = _prompt_current_host_native_disk_utility_visible(dut)
+    _set_current_host_compatibility(report_path, "device_manager_disk_mgmt", native_disk_utility_visible)
     return dut, prepared.mount_point
 
 

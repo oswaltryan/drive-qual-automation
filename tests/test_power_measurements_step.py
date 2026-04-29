@@ -38,7 +38,7 @@ def _write_report(report_path: Path) -> None:
                     "delete_data": {"linux": None, "macos": None, "windows": None},
                     "partition_drive": {"linux": None, "macos": None, "windows": None},
                     "format_drive": {"linux": None, "macos": None, "windows": None},
-                    "device_manager_disk_mgmt": {"windows": None},
+                    "device_manager_disk_mgmt": {"linux": None, "macos": None, "windows": None},
                 },
             }
         ),
@@ -158,6 +158,10 @@ def _setup_non_windows_max_io_benchmark_case(
         fake_prepare_device,
     )
     monkeypatch.setattr(
+        "drive_qual.platforms.power_measurements_mixed._prompt_current_host_native_disk_utility_visible",
+        lambda dut: True,
+    )
+    monkeypatch.setattr(
         "drive_qual.platforms.power_measurements_mixed.benchmark.benchmark_file_path",
         lambda *args: str(benchmark_file),
     )
@@ -206,6 +210,7 @@ def test_run_max_io_benchmark_non_windows_uses_native_disk_ops_and_not_windows_d
     assert compatibility["copy_to_drive"][slot] is True
     assert compatibility["copy_from_drive"][slot] is True
     assert compatibility["delete_data"][slot] is True
+    assert compatibility["device_manager_disk_mgmt"][slot] is True
     assert compatibility["device_manager_disk_mgmt"]["windows"] is None
 
 
@@ -329,6 +334,10 @@ def test_run_max_io_marks_linux_compatibility_fields(  # noqa: PLR0915
         lambda dut: type("Prepared", (), {"mount_point": str(tmp_path)})(),
     )
     monkeypatch.setattr(
+        "drive_qual.platforms.power_measurements_mixed._prompt_current_host_native_disk_utility_visible",
+        lambda dut: True,
+    )
+    monkeypatch.setattr(
         "drive_qual.platforms.power_measurements_mixed.native_disk_ops.safe_remove_device", lambda dut: True
     )
     monkeypatch.setattr(
@@ -352,6 +361,7 @@ def test_run_max_io_marks_linux_compatibility_fields(  # noqa: PLR0915
     assert compatibility["copy_from_drive"]["linux"] is True
     assert compatibility["delete_data"]["linux"] is True
     assert compatibility["safely_remove"]["linux"] is True
+    assert compatibility["device_manager_disk_mgmt"]["linux"] is True
     assert compatibility["device_manager_disk_mgmt"]["windows"] is None
     assert compatibility["recognized_by_os"]["windows"] is None
 
@@ -369,6 +379,10 @@ def test_run_max_io_marks_linux_copy_actions_false_when_benchmark_fails(
     monkeypatch.setattr(
         "drive_qual.platforms.power_measurements_mixed.native_disk_ops.prepare_device_for_benchmark",
         lambda dut: type("Prepared", (), {"mount_point": str(tmp_path)})(),
+    )
+    monkeypatch.setattr(
+        "drive_qual.platforms.power_measurements_mixed._prompt_current_host_native_disk_utility_visible",
+        lambda dut: False,
     )
     monkeypatch.setattr(
         "drive_qual.platforms.power_measurements_mixed.native_disk_ops.safe_remove_device", lambda dut: True
@@ -393,6 +407,7 @@ def test_run_max_io_marks_linux_copy_actions_false_when_benchmark_fails(
     assert compatibility["copy_to_drive"]["linux"] is False
     assert compatibility["copy_from_drive"]["linux"] is False
     assert compatibility["delete_data"]["linux"] is False
+    assert compatibility["device_manager_disk_mgmt"]["linux"] is False
     assert compatibility["safely_remove"]["linux"] is True
 
 
@@ -408,6 +423,10 @@ def test_run_max_io_marks_macos_compatibility_fields(monkeypatch: MonkeyPatch, t
     monkeypatch.setattr(
         "drive_qual.platforms.power_measurements_mixed.native_disk_ops.prepare_device_for_benchmark",
         lambda dut: type("Prepared", (), {"mount_point": str(tmp_path)})(),
+    )
+    monkeypatch.setattr(
+        "drive_qual.platforms.power_measurements_mixed._prompt_current_host_native_disk_utility_visible",
+        lambda dut: True,
     )
     monkeypatch.setattr(
         "drive_qual.platforms.power_measurements_mixed.native_disk_ops.safe_remove_device", lambda dut: True
@@ -433,6 +452,7 @@ def test_run_max_io_marks_macos_compatibility_fields(monkeypatch: MonkeyPatch, t
     assert compatibility["copy_from_drive"]["macos"] is True
     assert compatibility["delete_data"]["macos"] is True
     assert compatibility["safely_remove"]["macos"] is True
+    assert compatibility["device_manager_disk_mgmt"]["macos"] is True
 
 
 @pytest.mark.parametrize(
