@@ -20,9 +20,7 @@ FIELDS: tuple[tuple[str, str], ...] = (
     ("manufacturer", "Manufacturer"),
     ("manufacturer_part_number", "Manufacturer Part Number"),
     ("capacity", "Capacity"),
-    ("firmware", "Firmware"),
     ("form_factor", "Form Factor"),
-    ("interface", "Interface"),
     ("technology", "Technology"),
 )
 

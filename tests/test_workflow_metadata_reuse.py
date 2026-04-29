@@ -176,6 +176,29 @@ def test_drive_info_only_prompts_for_missing_fields(monkeypatch: MonkeyPatch, tm
     assert prompts == ["Manufacturer Part Number: "]
 
 
+def test_drive_info_does_not_prompt_for_cdi_fields(monkeypatch: MonkeyPatch, tmp_path: Path) -> None:
+    template_path = tmp_path / "template.json"
+    report_path = tmp_path / "report.json"
+    _write_json(template_path, _drive_info_template())
+    _write_json(report_path, _report_with_drive_info(firmware=None, interface=None))
+
+    monkeypatch.setattr(drive_info, "DEFAULT_TEMPLATE", template_path)
+    monkeypatch.setattr(drive_info, "current_session_folder_name", lambda: "69-420")
+    monkeypatch.setattr(drive_info, "report_path_for", lambda folder_name: report_path)
+    monkeypatch.setattr(drive_info, "set_current_session", lambda folder_name, product_name=None: None)
+
+    def unexpected_input(prompt: str) -> str:
+        raise AssertionError(f"drive_info prompted unexpectedly: {prompt}")
+
+    monkeypatch.setattr("builtins.input", unexpected_input)
+
+    drive_info.run_drive_info_prompt()
+
+    updated = json.loads(report_path.read_text(encoding="utf-8"))
+    assert updated["drive_info"]["firmware"] is None
+    assert updated["drive_info"]["interface"] is None
+
+
 def test_equipment_skips_scope_prompt_when_profile_data_exists(monkeypatch: MonkeyPatch, tmp_path: Path) -> None:
     report_path = tmp_path / "report.json"
     report = _report_with_drive_info()
