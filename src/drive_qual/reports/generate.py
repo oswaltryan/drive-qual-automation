@@ -32,6 +32,8 @@ PERFORMANCE_LABEL = "Performance"
 EXCLUDED_ACCUM_FIELDS = {"Accum-Pk-Pk", "Accum-Std Dev", "Accum-Population"}
 EXCLUDED_MEASUREMENT_ROWS = {"Meas9"}
 CSV_ENCODING_CANDIDATES = ("utf-8", "utf-8-sig", "cp1252", "latin-1")
+KEY_VALUE_CSV_ROW_WIDTH = 2
+LINUX_DISKS_SUMMARY_COLUMN_COUNT = 3
 EMU_PER_TWIP = 635
 OBJECT_ICON_WIDTH_INCHES = 0.72
 WINDOWS_PERFORMANCE_BLANK_LINES_BEFORE_FIRST_OBJECT = 10
@@ -648,13 +650,16 @@ def _add_csv_tables_to_cell(
         csv_path = _matching_measurement_csv(artifact, csv_paths)
         if csv_path is None:
             continue
-        rows = _generic_csv_rows(csv_path)
+        rows = _performance_csv_rows(artifact, csv_path)
         if rows:
             matching_tables.append((artifact, rows))
     for index, (artifact, rows) in enumerate(matching_tables):
         if index:
             _add_minimized_empty_paragraph(cell)
-        _add_nested_table(cell, [[_performance_utility_label(artifact)], *rows], table_width)
+        utility_label = _performance_utility_label(artifact)
+        nested_table = _add_nested_table(cell, [[utility_label], *rows], table_width)
+        if utility_label == "Disks":
+            _merge_linux_disks_access_time_row(nested_table)
     _minimize_trailing_empty_cell_paragraph(cell)
 
 
@@ -691,7 +696,7 @@ def _add_minimized_empty_paragraph(cell: Any) -> None:
     _minimize_empty_paragraph(paragraph)
 
 
-def _add_nested_table(cell: Any, rows: list[list[str]], table_width: Any) -> None:
+def _add_nested_table(cell: Any, rows: list[list[str]], table_width: Any) -> Any:
     normalized_rows = _normalize_table_rows(rows)
     table = cell.add_table(rows=1, cols=len(normalized_rows[0]))
     table.style = "Table Grid"
@@ -703,6 +708,25 @@ def _add_nested_table(cell: Any, rows: list[list[str]], table_width: Any) -> Non
             row[index].text = value
     column_width = int((table_width // len(normalized_rows[0])) * APPENDIX_MEASUREMENT_COLUMN_WIDTH_FRACTION)
     _set_table_column_widths(table, [column_width] * len(normalized_rows[0]))
+    return table
+
+
+def _merge_linux_disks_access_time_row(table: Any) -> None:
+    for row in table.rows:
+        if row.cells[0].text == "Average Access Time" and len(row.cells) >= LINUX_DISKS_SUMMARY_COLUMN_COUNT:
+            merged_cell = row.cells[1].merge(row.cells[2])
+            _remove_extra_empty_paragraphs(merged_cell)
+            return
+
+
+def _remove_extra_empty_paragraphs(cell: Any) -> None:
+    non_empty_paragraphs = [paragraph for paragraph in cell.paragraphs if paragraph.text]
+    if not non_empty_paragraphs:
+        return
+    for paragraph in list(cell.paragraphs):
+        if paragraph.text:
+            continue
+        paragraph._element.getparent().remove(paragraph._element)
 
 
 def _normalize_table_rows(rows: list[list[str]]) -> list[list[str]]:
@@ -1338,6 +1362,34 @@ def _generic_csv_rows(csv_path: Path) -> list[list[str]]:
     if not rows:
         return []
     return _normalize_table_rows(rows)
+
+
+def _performance_csv_rows(artifact: Path, csv_path: Path) -> list[list[str]]:
+    rows = _generic_csv_rows(csv_path)
+    utility_label = _performance_utility_label(artifact)
+    if utility_label == "Disks":
+        return _linux_disks_summary_rows(rows)
+    if utility_label == "Blackmagic":
+        return _read_write_summary_rows(rows)
+    return rows
+
+
+def _read_write_summary_rows(rows: list[list[str]]) -> list[list[str]]:
+    values = {row[0].strip().casefold(): row[1].strip() for row in rows[1:] if len(row) >= KEY_VALUE_CSV_ROW_WIDTH}
+    return [["Metric", "Read", "Write"], ["Speed", values.get("read mb/s", ""), values.get("write mb/s", "")]]
+
+
+def _linux_disks_summary_rows(rows: list[list[str]]) -> list[list[str]]:
+    values = {row[0].strip().casefold(): row[1].strip() for row in rows[1:] if len(row) >= KEY_VALUE_CSV_ROW_WIDTH}
+    summary_rows = [
+        ("Minimum Rate", values.get("minimum read rate", ""), values.get("minimum write rate", "")),
+        ("Average Rate", values.get("average read rate", ""), values.get("average write rate", "")),
+        ("Maximum Rate", values.get("maximum read rate", ""), values.get("maximum write rate", "")),
+    ]
+    extra_rows = [
+        ("Average Access Time", values.get("average access time", ""), ""),
+    ]
+    return [["Metric", "Read", "Write"], *[list(row) for row in summary_rows + extra_rows if any(row[1:])]]
 
 
 def _performance_utility_label(artifact: Path) -> str:

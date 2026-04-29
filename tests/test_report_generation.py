@@ -13,8 +13,8 @@ from _pytest.monkeypatch import MonkeyPatch
 from drive_qual.reports.evaluation import Status, case_material_for_product, evaluate_power, evaluate_temperature
 
 EXPECTED_INLINE_IMAGE_COUNT = 0
-EXPECTED_POWER_OBJECT_COUNT = 5
-EXPECTED_MEDIA_FILE_COUNT = 5
+EXPECTED_POWER_OBJECT_COUNT = 7
+EXPECTED_MEDIA_FILE_COUNT = 7
 EXPECTED_WINDOWS_PERFORMANCE_OBJECT_COUNT = 2
 WINDOWS_PERFORMANCE_BLANK_LINES_BEFORE_FIRST_OBJECT = 10
 WINDOWS_PERFORMANCE_BLANK_LINES_BETWEEN_OBJECTS = 13
@@ -128,21 +128,13 @@ def test_generate_report_docx_embeds_appendix_images_instead_of_paths() -> None:
     part_dir = source_root / "69-420"
     windows_dir = part_dir / "Windows"
     linux_dir = part_dir / "Linux"
+    macos_dir = part_dir / "macOS"
     windows_dir.mkdir(parents=True, exist_ok=True)
     linux_dir.mkdir(parents=True, exist_ok=True)
+    macos_dir.mkdir(parents=True, exist_ok=True)
     report_path = part_dir / "drive_qualification_report_atomic_tests.json"
     report_path.write_text(json.dumps(_report_payload()), encoding="utf-8")
-    _write_png(windows_dir / "Padlock DT Inrush Summary.png")
-    _write_measurement_csv(windows_dir / "Padlock DT Inrush Summary.csv")
-    _write_png(windows_dir / "Padlock DT Max IO Summary.png")
-    _write_measurement_csv(windows_dir / "Padlock DT Max IO Summary.csv")
-    _write_png(windows_dir / "Padlock DT ATTO Performance.png")
-    _write_performance_csv(windows_dir / "Padlock DT ATTO Performance.csv")
-    _write_png(windows_dir / "Padlock DT CrystalDiskMark Performance.png")
-    (windows_dir / "._Padlock DT CrystalDiskMark Performance.png").write_text("not a png", encoding="utf-8")
-    _write_performance_csv(windows_dir / "Padlock DT CrystalDiskMark Performance.csv")
-    _write_png(windows_dir / "Padlock DT CrystalDiskInfo Drive Information.png")
-    (linux_dir / "Padlock DT Max IO Summary.csv").write_text("time,current\n", encoding="utf-8")
+    _write_appendix_test_artifacts(windows_dir, linux_dir, macos_dir)
 
     module = importlib.import_module("drive_qual.reports.generate")
     output_path = module.generate_report_docx(part_number="69-420", source_root=source_root)
@@ -168,20 +160,37 @@ def test_generate_report_docx_embeds_appendix_images_instead_of_paths() -> None:
         ["Write MB/s", "345.04"],
     ]
     assert document.tables[7].rows[2].cells[1].text == "Linux\\Padlock DT Max IO Summary.csv"
+    _assert_linux_disks_summary_table(document.tables[7])
+    assert _nested_tables_rows(document.tables[8].rows[3].cells[1]) == [
+        ["Blackmagic", "", ""],
+        ["Metric", "Read", "Write"],
+        ["Speed", "350.93", "345.04"],
+    ]
 
 
 def _assert_appendix_object_layout(document: Any, output_path: Path) -> None:
     assert len(document.inline_shapes) == EXPECTED_INLINE_IMAGE_COUNT
     assert _embedded_object_count(output_path) == EXPECTED_POWER_OBJECT_COUNT
     assert _media_file_count(output_path) == EXPECTED_MEDIA_FILE_COUNT
+    _assert_appendix_object_cells(document)
+    _assert_appendix_spacing(document)
+    _assert_embedded_object_payloads(output_path)
+
+
+def _assert_appendix_object_cells(document: Any) -> None:
     assert _table_cell_object_count(document.tables[6], 1, 0) == 1
     assert _table_cell_object_count(document.tables[6], 2, 0) == 1
     assert _table_cell_object_count(document.tables[6], 3, 0) == EXPECTED_WINDOWS_PERFORMANCE_OBJECT_COUNT
     assert _table_cell_object_count(document.tables[6], 4, 0) == 1
+    assert _table_cell_object_count(document.tables[7], 3, 0) == 1
+    assert _table_cell_object_count(document.tables[8], 3, 0) == 1
     assert _table_cell_object_count(document.tables[6], 1, 1) == 0
     assert _table_cell_object_count(document.tables[6], 2, 1) == 0
     assert _table_cell_object_count(document.tables[6], 3, 1) == 0
     assert _table_cell_object_count(document.tables[6], 4, 1) == 0
+
+
+def _assert_appendix_spacing(document: Any) -> None:
     assert _cell_paragraph_texts(document.tables[6], 1, 0)[:2] == ["Inrush", ""]
     assert _cell_paragraph_texts(document.tables[6], 2, 0)[:2] == ["Max IO", ""]
     assert _table_column_paragraphs_are_centered(document.tables[6], 0)
@@ -203,12 +212,17 @@ def _assert_appendix_object_layout(document: Any, output_path: Path) -> None:
     )
     assert _table_cell_drawing_count(document.tables[6], 2, 1) == 0
     assert _table_cell_drawing_count(document.tables[6], 3, 1) == 0
+
+
+def _assert_embedded_object_payloads(output_path: Path) -> None:
     assert _embedded_object_payload_names(output_path) == [
         "Padlock DT Inrush Summary.png",
         "Padlock DT Max IO Summary.png",
         "Padlock DT ATTO Performance.png",
         "Padlock DT CrystalDiskMark Performance.png",
         "Padlock DT CrystalDiskInfo Drive Information.png",
+        "Padlock DT Disks Performance.png",
+        "Padlock DT Blackmagic Performance.png",
     ]
     assert _embedded_object_shape_ids(output_path) == [
         "_x0000_i1009",
@@ -216,12 +230,30 @@ def _assert_appendix_object_layout(document: Any, output_path: Path) -> None:
         "_x0000_i1013",
         "_x0000_i1015",
         "_x0000_i1017",
+        "_x0000_i1019",
+        "_x0000_i1021",
     ]
     assert all(object_id < MAX_WORD_OBJECT_ID for object_id in _embedded_object_ids(output_path))
 
 
 def _table_headers(document: Any) -> list[str]:
     return [" | ".join(cell.text for cell in table.rows[0].cells) for table in document.tables]
+
+
+def _assert_linux_disks_summary_table(table: Any) -> None:
+    assert _nested_table_physical_rows(table.rows[3].cells[1]) == [
+        ["Disks", "", ""],
+        ["Metric", "Read", "Write"],
+        ["Minimum Rate", "111.1 MB/s", "210.0 MB/s"],
+        ["Average Rate", "123.4 MB/s", "234.5 MB/s"],
+        ["Maximum Rate", "130.0 MB/s", "240.0 MB/s"],
+        ["Average Access Time", "0.12 ms"],
+    ]
+    assert _nested_table_physical_row_grid_spans(table.rows[3].cells[1], 5) == [1, 2]
+    assert _nested_table_physical_row_paragraph_texts(table.rows[3].cells[1], 5) == [
+        ["Average Access Time"],
+        ["0.12 ms"],
+    ]
 
 
 def _document_text(document: Any) -> str:
@@ -354,6 +386,24 @@ def _write_png(path: Path) -> None:
     image.save(path)
 
 
+def _write_appendix_test_artifacts(windows_dir: Path, linux_dir: Path, macos_dir: Path) -> None:
+    _write_png(windows_dir / "Padlock DT Inrush Summary.png")
+    _write_measurement_csv(windows_dir / "Padlock DT Inrush Summary.csv")
+    _write_png(windows_dir / "Padlock DT Max IO Summary.png")
+    _write_measurement_csv(windows_dir / "Padlock DT Max IO Summary.csv")
+    _write_png(windows_dir / "Padlock DT ATTO Performance.png")
+    _write_performance_csv(windows_dir / "Padlock DT ATTO Performance.csv")
+    _write_png(windows_dir / "Padlock DT CrystalDiskMark Performance.png")
+    (windows_dir / "._Padlock DT CrystalDiskMark Performance.png").write_text("not a png", encoding="utf-8")
+    _write_performance_csv(windows_dir / "Padlock DT CrystalDiskMark Performance.csv")
+    _write_png(windows_dir / "Padlock DT CrystalDiskInfo Drive Information.png")
+    (linux_dir / "Padlock DT Max IO Summary.csv").write_text("time,current\n", encoding="utf-8")
+    _write_png(linux_dir / "Padlock DT Disks Performance.png")
+    _write_linux_disks_performance_csv(linux_dir / "Padlock DT Disks Performance.csv")
+    _write_png(macos_dir / "Padlock DT Blackmagic Performance.png")
+    _write_performance_csv(macos_dir / "Padlock DT Blackmagic Performance.csv")
+
+
 def _write_measurement_csv(path: Path) -> None:
     path.write_text(
         "\n".join(
@@ -374,6 +424,25 @@ def _write_measurement_csv(path: Path) -> None:
 
 def _write_performance_csv(path: Path) -> None:
     path.write_text("Metric,Value\nRead MB/s,350.93\nWrite MB/s,345.04\n", encoding="utf-8")
+
+
+def _write_linux_disks_performance_csv(path: Path) -> None:
+    path.write_text(
+        "\n".join(
+            [
+                "Metric,Value",
+                "Minimum Read Rate,111.1 MB/s",
+                "Average Read Rate,123.4 MB/s",
+                "Maximum Read Rate,130.0 MB/s",
+                "Minimum Write Rate,210.0 MB/s",
+                "Average Write Rate,234.5 MB/s",
+                "Maximum Write Rate,240.0 MB/s",
+                "Average Access Time,0.12 ms",
+                "Last Benchmark,2026-04-29",
+            ]
+        ),
+        encoding="utf-8",
+    )
 
 
 def _table_cell_drawing_count(document_table: Any, row_index: int, cell_index: int) -> int:
@@ -476,6 +545,36 @@ def _nested_table_rows(cell: Any) -> list[list[str]]:
 
 def _nested_tables_rows(cell: Any) -> list[list[str]]:
     return [[nested_cell.text for nested_cell in row.cells] for table in cell.tables for row in table.rows]
+
+
+def _nested_table_physical_rows(cell: Any) -> list[list[str]]:
+    table = cell.tables[0]
+    return [[_tc_text(tc) for tc in row._tr.tc_lst] for row in table.rows]
+
+
+def _nested_table_physical_row_grid_spans(cell: Any, row_index: int) -> list[int]:
+    table = cell.tables[0]
+    return [_tc_grid_span(tc) for tc in table.rows[row_index]._tr.tc_lst]
+
+
+def _nested_table_physical_row_paragraph_texts(cell: Any, row_index: int) -> list[list[str]]:
+    table = cell.tables[0]
+    return [[_paragraph_text(paragraph) for paragraph in tc.xpath("./w:p")] for tc in table.rows[row_index]._tr.tc_lst]
+
+
+def _paragraph_text(paragraph: Any) -> str:
+    return "".join(paragraph.xpath(".//w:t/text()"))
+
+
+def _tc_text(tc: Any) -> str:
+    return "".join(tc.xpath(".//w:t/text()"))
+
+
+def _tc_grid_span(tc: Any) -> int:
+    spans = tc.xpath("./w:tcPr/w:gridSpan")
+    if not spans:
+        return 1
+    return int(spans[0].get("{http://schemas.openxmlformats.org/wordprocessingml/2006/main}val"))
 
 
 def _nested_table_columns_evenly_fill_parent(cell: Any) -> bool:
