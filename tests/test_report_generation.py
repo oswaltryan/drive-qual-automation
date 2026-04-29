@@ -5,17 +5,22 @@ import importlib
 import json
 import sys
 import zipfile
+from collections.abc import Callable, Iterable
 from pathlib import Path
+from shutil import copyfile
 from typing import Any, cast
 
 from _pytest.monkeypatch import MonkeyPatch
 
 from drive_qual.reports.evaluation import Status, case_material_for_product, evaluate_power, evaluate_temperature
 
-EXPECTED_INLINE_IMAGE_COUNT = 0
+EXPECTED_INLINE_IMAGE_COUNT = 1
 EXPECTED_POWER_OBJECT_COUNT = 7
-EXPECTED_MEDIA_FILE_COUNT = 7
+EXPECTED_MEDIA_FILE_COUNT = 8
 EXPECTED_WINDOWS_PERFORMANCE_OBJECT_COUNT = 2
+EXPECTED_COMPLIANCE_TABLE_ROW_COUNT = 3
+EXPECTED_TEMPERATURE_TABLE_COLUMN_COUNT = 4
+EXPECTED_TEMPERATURE_TABLE_ROW_COUNT = 12
 WINDOWS_PERFORMANCE_BLANK_LINES_BEFORE_FIRST_OBJECT = 10
 WINDOWS_PERFORMANCE_BLANK_LINES_BETWEEN_OBJECTS = 13
 MAX_WORD_OBJECT_ID = 2_000_000_000
@@ -74,10 +79,7 @@ def test_generate_report_docx_matches_reference_section_shape() -> None:
     from docx import Document
 
     source_root = Path("tests/.tmp/test_report_generation_shape")
-    part_dir = source_root / "69-420"
-    part_dir.mkdir(parents=True, exist_ok=True)
-    report_path = part_dir / "drive_qualification_report_atomic_tests.json"
-    report_path.write_text(json.dumps(_report_payload()), encoding="utf-8")
+    _prepare_report_generation_shape_fixture(source_root)
 
     module = importlib.import_module("drive_qual.reports.generate")
     output_path = module.generate_report_docx(part_number="69-420", source_root=source_root)
@@ -109,12 +111,13 @@ def test_generate_report_docx_matches_reference_section_shape() -> None:
         "Test | Linux | MacOS | Windows",
         "DUT | CDM-R | CDM-W | BM(R) | BM(W) | ATTO-R | ATTO-W",
         "Program | Iterations/Loops | Result",
-        "Temperature | Read MB/s | Write MB/s",
+        "Chart | Temperature | Read MB/s | Write MB/s",
     ]
     assert _table_contains_text(document.tables[2], "Native Disk Utility")
     assert not _table_contains_text(document.tables[2], "Appears in Device Manager & Disk Management")
     assert _table_contains_text(document.tables[4], "USB-IF Mass Storage Compliance")
     assert not _table_contains_text(document.tables[4], "USB-IF Mass Storage Compliance (MSC)")
+    _assert_result_table_alignment(document)
     assert "Artifact | Path" not in table_headers
     assert _has_paragraph_between_tables(document, "Windows | ", "Linux | ")
     assert _has_paragraph_between_tables(document, "Linux | ", "MAC | ")
@@ -125,16 +128,7 @@ def test_generate_report_docx_embeds_appendix_images_instead_of_paths() -> None:
     from docx import Document
 
     source_root = Path("tests/.tmp/test_report_generation_images")
-    part_dir = source_root / "69-420"
-    windows_dir = part_dir / "Windows"
-    linux_dir = part_dir / "Linux"
-    macos_dir = part_dir / "macOS"
-    windows_dir.mkdir(parents=True, exist_ok=True)
-    linux_dir.mkdir(parents=True, exist_ok=True)
-    macos_dir.mkdir(parents=True, exist_ok=True)
-    report_path = part_dir / "drive_qualification_report_atomic_tests.json"
-    report_path.write_text(json.dumps(_report_payload()), encoding="utf-8")
-    _write_appendix_test_artifacts(windows_dir, linux_dir, macos_dir)
+    windows_dir = _prepare_report_generation_images_fixture(source_root)
 
     module = importlib.import_module("drive_qual.reports.generate")
     output_path = module.generate_report_docx(part_number="69-420", source_root=source_root)
@@ -149,6 +143,7 @@ def test_generate_report_docx_embeds_appendix_images_instead_of_paths() -> None:
         ["Meas3", "RMS", "258.60 mA", "258.04 mA", "259.17 mA"],
     ]
     assert _nested_table_columns_evenly_fill_parent(document.tables[6].rows[2].cells[1])
+    assert _table_columns_are_centered(document.tables[6].rows[2].cells[1].tables[0], range(2, 5))
     assert _nested_tables_rows(document.tables[6].rows[3].cells[1]) == [
         ["ATTO", ""],
         ["Metric", "Value"],
@@ -159,6 +154,8 @@ def test_generate_report_docx_embeds_appendix_images_instead_of_paths() -> None:
         ["Read MB/s", "350.93"],
         ["Write MB/s", "345.04"],
     ]
+    assert _table_columns_are_centered(document.tables[6].rows[3].cells[1].tables[0], _value_column_indexes)
+    assert _table_columns_are_centered(document.tables[6].rows[3].cells[1].tables[1], _value_column_indexes)
     assert document.tables[7].rows[2].cells[1].text == "Linux\\Padlock DT Max IO Summary.csv"
     _assert_linux_disks_summary_table(document.tables[7])
     assert _nested_tables_rows(document.tables[8].rows[3].cells[1]) == [
@@ -166,6 +163,7 @@ def test_generate_report_docx_embeds_appendix_images_instead_of_paths() -> None:
         ["Metric", "Read", "Write"],
         ["Speed", "350.93", "345.04"],
     ]
+    assert _table_columns_are_centered(document.tables[8].rows[3].cells[1].tables[0], _value_column_indexes)
 
 
 def _assert_appendix_object_layout(document: Any, output_path: Path) -> None:
@@ -225,19 +223,51 @@ def _assert_embedded_object_payloads(output_path: Path) -> None:
         "Padlock DT Blackmagic Performance.png",
     ]
     assert _embedded_object_shape_ids(output_path) == [
-        "_x0000_i1009",
-        "_x0000_i1011",
-        "_x0000_i1013",
-        "_x0000_i1015",
-        "_x0000_i1017",
-        "_x0000_i1019",
-        "_x0000_i1021",
+        "_x0000_i1010",
+        "_x0000_i1012",
+        "_x0000_i1014",
+        "_x0000_i1016",
+        "_x0000_i1018",
+        "_x0000_i1020",
+        "_x0000_i1022",
     ]
     assert all(object_id < MAX_WORD_OBJECT_ID for object_id in _embedded_object_ids(output_path))
 
 
 def _table_headers(document: Any) -> list[str]:
     return [" | ".join(cell.text for cell in table.rows[0].cells) for table in document.tables]
+
+
+def _assert_temperature_table_shape(table: Any) -> None:
+    assert len(table.columns) == EXPECTED_TEMPERATURE_TABLE_COLUMN_COUNT
+    assert len(table.rows) == EXPECTED_TEMPERATURE_TABLE_ROW_COUNT
+    assert [cell.text for cell in table.rows[0].cells] == ["Chart", "Temperature", "Read MB/s", "Write MB/s"]
+    assert _table_columns_are_centered(table, range(EXPECTED_TEMPERATURE_TABLE_COLUMN_COUNT))
+    assert _table_cell_drawing_count(table, 1, 0) == 1
+    assert [row.cells[1].text for row in table.rows[1:]] == [
+        "-40°C",
+        "-30°C",
+        "-20°C",
+        "-10°C",
+        "0°C",
+        "10°C",
+        "20°C",
+        "30°C",
+        "40°C",
+        "50°C",
+        "60°C",
+    ]
+    assert table.rows[1].cells[2].text == "107.59"
+    assert table.rows[1].cells[3].text == "109.31"
+
+
+def _assert_result_table_alignment(document: Any) -> None:
+    assert _table_columns_are_centered(document.tables[1], range(1, 4))
+    assert _table_columns_are_centered(document.tables[2], range(1, 4))
+    assert _table_columns_are_centered(document.tables[3], range(1, 7))
+    assert len(document.tables[4].rows) == EXPECTED_COMPLIANCE_TABLE_ROW_COUNT
+    assert _table_columns_are_centered(document.tables[4], range(1, 3))
+    _assert_temperature_table_shape(document.tables[5])
 
 
 def _assert_linux_disks_summary_table(table: Any) -> None:
@@ -254,6 +284,7 @@ def _assert_linux_disks_summary_table(table: Any) -> None:
         ["Average Access Time"],
         ["0.12 ms"],
     ]
+    assert _table_columns_are_centered(table.rows[3].cells[1].tables[0], _value_column_indexes)
 
 
 def _document_text(document: Any) -> str:
@@ -386,6 +417,33 @@ def _write_png(path: Path) -> None:
     image.save(path)
 
 
+def _prepare_report_generation_shape_fixture(source_root: Path) -> None:
+    part_dir = source_root / "69-420"
+    temperature_dir = part_dir / "Temperature"
+    part_dir.mkdir(parents=True, exist_ok=True)
+    temperature_dir.mkdir(parents=True, exist_ok=True)
+    report_path = part_dir / "drive_qualification_report_atomic_tests.json"
+    report_path.write_text(json.dumps(_report_payload()), encoding="utf-8")
+    _write_temperature_test_artifact(temperature_dir)
+
+
+def _prepare_report_generation_images_fixture(source_root: Path) -> Path:
+    part_dir = source_root / "69-420"
+    temperature_dir = part_dir / "Temperature"
+    windows_dir = part_dir / "Windows"
+    linux_dir = part_dir / "Linux"
+    macos_dir = part_dir / "macOS"
+    windows_dir.mkdir(parents=True, exist_ok=True)
+    linux_dir.mkdir(parents=True, exist_ok=True)
+    macos_dir.mkdir(parents=True, exist_ok=True)
+    temperature_dir.mkdir(parents=True, exist_ok=True)
+    report_path = part_dir / "drive_qualification_report_atomic_tests.json"
+    report_path.write_text(json.dumps(_report_payload()), encoding="utf-8")
+    _write_appendix_test_artifacts(windows_dir, linux_dir, macos_dir)
+    _write_temperature_test_artifact(temperature_dir)
+    return windows_dir
+
+
 def _write_appendix_test_artifacts(windows_dir: Path, linux_dir: Path, macos_dir: Path) -> None:
     _write_png(windows_dir / "Padlock DT Inrush Summary.png")
     _write_measurement_csv(windows_dir / "Padlock DT Inrush Summary.csv")
@@ -402,6 +460,13 @@ def _write_appendix_test_artifacts(windows_dir: Path, linux_dir: Path, macos_dir
     _write_linux_disks_performance_csv(linux_dir / "Padlock DT Disks Performance.csv")
     _write_png(macos_dir / "Padlock DT Blackmagic Performance.png")
     _write_performance_csv(macos_dir / "Padlock DT Blackmagic Performance.csv")
+
+
+def _write_temperature_test_artifact(temperature_dir: Path) -> None:
+    source_image = Path(
+        "tests/.tmp/test_report_generation_images/69-420/Windows/Padlock DT CrystalDiskInfo Drive Information.png"
+    )
+    copyfile(source_image, temperature_dir / "Padlock DT Temperature Data.png")
 
 
 def _write_measurement_csv(path: Path) -> None:
@@ -482,6 +547,17 @@ def _table_column_paragraphs_are_centered(document_table: Any, column_index: int
     return all(
         paragraph.alignment == 1 for row in document_table.rows for paragraph in row.cells[column_index].paragraphs
     )
+
+
+def _table_columns_are_centered(
+    document_table: Any, column_indexes: Iterable[int] | Callable[[Any], Iterable[int]]
+) -> bool:
+    indexes = column_indexes(document_table) if callable(column_indexes) else column_indexes
+    return all(_table_column_paragraphs_are_centered(document_table, column_index) for column_index in indexes)
+
+
+def _value_column_indexes(document_table: Any) -> range:
+    return range(1, min(3, len(document_table.columns)))
 
 
 def _performance_object_gap(document_table: Any, *, first_object_index: int) -> int:
@@ -656,7 +732,7 @@ def _report_payload() -> dict[str, Any]:
                 "macOS": {"Blackmagic Disk Speed Test": {"read": 293.2, "write": 844.2}},
             }
         },
-        "temperature": {"Padlock DT": {"performance": {"-35c": {"read_mb_s": 107.59, "write_mb_s": 109.31}}}},
+        "temperature": {"Padlock DT": {"performance": {"-40c": {"read_mb_s": 107.59, "write_mb_s": 109.31}}}},
         "compliance": {
             "usb_if_msc_iterations": 3,
             "usb_if_msc_result": "Pass",

@@ -34,6 +34,7 @@ EXCLUDED_MEASUREMENT_ROWS = {"Meas9"}
 CSV_ENCODING_CANDIDATES = ("utf-8", "utf-8-sig", "cp1252", "latin-1")
 KEY_VALUE_CSV_ROW_WIDTH = 2
 LINUX_DISKS_SUMMARY_COLUMN_COUNT = 3
+TEMPERATURE_TABLE_POINTS_C = tuple(range(-40, 61, 10))
 EMU_PER_TWIP = 635
 OBJECT_ICON_WIDTH_INCHES = 0.72
 WINDOWS_PERFORMANCE_BLANK_LINES_BEFORE_FIRST_OBJECT = 10
@@ -138,7 +139,7 @@ def write_docx_report(
     _add_disk_performance(document, data.get("performance"))
     _add_compliance(document, data.get("compliance"), shade_cell)
     document.add_page_break()
-    _add_temperature_data(document, data.get("temperature"), shade_cell)
+    _add_temperature_data(document, data.get("temperature"), report_path.parent, shade_cell, Inches)
     document.add_page_break()
     _add_appendix(document, data, report_path.parent, Inches)
 
@@ -267,13 +268,11 @@ def _add_power_data(document: Any, power: object, shade_cell: Callable[[Any, Sta
             value, dut_name = _max_power_value(power, fields, os_key)
             row[index].text = _format_power_value(value, dut_name)
             shade_cell(row[index], _power_status(label, value))
+    _center_table_columns(table, range(1, 4))
 
 
 def _add_compatibility_data(document: Any, compatibility: object, shade_cell: Callable[[Any, Status], None]) -> None:
     document.add_heading("Compatibility Data", level=2)
-    document.add_paragraph(
-        "Include any failures for a specific product in the corresponding row/column using the product name in red."
-    )
     table = _table(document, ["Test", "Linux", "MacOS", "Windows"])
     for key, label in COMPATIBILITY_ROWS:
         row = table.add_row().cells
@@ -282,23 +281,76 @@ def _add_compatibility_data(document: Any, compatibility: object, shade_cell: Ca
             status = _compatibility_status(compatibility, key, os_key)
             row[index].text = _status_text(status)
             shade_cell(row[index], status)
+    _center_table_columns(table, range(1, 4))
 
 
-def _add_temperature_data(document: Any, temperature: object, shade_cell: Callable[[Any, Status], None]) -> None:
+def _add_temperature_data(
+    document: Any,
+    temperature: object,
+    part_root: Path,
+    shade_cell: Callable[[Any, Status], None],
+    inches: Any,
+) -> None:
     document.add_heading("Temperature Data", level=2)
     if not isinstance(temperature, dict) or not temperature:
-        document.add_paragraph("No temperature data recorded.")
+        _add_temperature_table(document, part_root, "", {}, shade_cell, inches)
         return
     sections = _temperature_sections(temperature)
+    if not sections:
+        _add_temperature_table(document, part_root, "", {}, shade_cell, inches)
+        return
     for dut_name, dut_data in sections:
         if len(sections) > 1:
             document.add_paragraph(str(dut_name))
-        table = _table(document, ["Temperature", "Read MB/s", "Write MB/s"])
-        for temp_label, values in _temperature_rows(dut_data):
-            row = table.add_row().cells
-            row[0].text = _format_temperature_label(temp_label)
-            _set_temperature_cell(row[1], values.get("read_mb_s"), values.get("error"), shade_cell)
-            _set_temperature_cell(row[2], values.get("write_mb_s"), values.get("error"), shade_cell)
+        _add_temperature_table(
+            document, part_root, str(dut_name), _temperature_row_lookup(dut_data), shade_cell, inches
+        )
+
+
+def _add_temperature_table(
+    document: Any,
+    part_root: Path,
+    dut_name: str,
+    values_by_temp: dict[int, dict[str, Any]],
+    shade_cell: Callable[[Any, Status], None],
+    inches: Any,
+) -> None:
+    table = _table(document, ["Chart", "Temperature", "Read MB/s", "Write MB/s"])
+    temperature_artifact = _matching_temperature_artifact(part_root, dut_name)
+    for temp_c in TEMPERATURE_TABLE_POINTS_C:
+        values = values_by_temp.get(temp_c, {})
+        row = table.add_row().cells
+        row[1].text = f"{temp_c}\u00b0C"
+        _set_temperature_cell(row[2], values.get("read_mb_s"), values.get("error"), shade_cell)
+        _set_temperature_cell(row[3], values.get("write_mb_s"), values.get("error"), shade_cell)
+    merged_cell = table.rows[1].cells[0].merge(table.rows[-1].cells[0])
+    merged_cell.text = ""
+    if temperature_artifact is not None:
+        _add_picture_to_paragraph(merged_cell.paragraphs[0], temperature_artifact, width=inches(1.7))
+    _center_cell_paragraphs(merged_cell)
+    _center_table_columns(table, range(0, 4))
+
+
+def _matching_temperature_artifact(part_root: Path, dut_name: str) -> Path | None:
+    if not part_root.exists():
+        return None
+    normalized_dut = _normalized_match_text(dut_name)
+    candidates = [
+        artifact
+        for artifact in part_root.rglob("*.png")
+        if not artifact.name.startswith("._") and "temperature" in _normalized_match_text(artifact.stem)
+    ]
+    if normalized_dut:
+        matching = [artifact for artifact in candidates if normalized_dut in _normalized_match_text(artifact.stem)]
+        if matching:
+            return sorted(matching)[0]
+    if len(candidates) == 1:
+        return candidates[0]
+    return None
+
+
+def _normalized_match_text(value: str) -> str:
+    return re.sub(r"[^a-z0-9]+", "", value.lower())
 
 
 def _add_disk_performance(document: Any, performance: object) -> None:
@@ -315,6 +367,7 @@ def _add_disk_performance(document: Any, performance: object) -> None:
         row[4].text = _performance_field(platforms, "macOS", "Blackmagic Disk Speed Test", "write")
         row[5].text = _performance_field(platforms, "Windows", "ATTO", "read")
         row[6].text = _performance_field(platforms, "Windows", "ATTO", "write")
+    _center_table_columns(table, range(1, 7))
 
 
 def _add_compliance(document: Any, compliance: object, shade_cell: Callable[[Any, Status], None]) -> None:
@@ -334,7 +387,7 @@ def _add_compliance(document: Any, compliance: object, shade_cell: Callable[[Any
         _field(compliance, "disk_tester_reliability_iterations"),
         _field(compliance, "disk_tester_reliability_result"),
     )
-    table.add_row()
+    _center_table_columns(table, range(1, 3))
 
 
 def _add_executive_summary(document: Any, evaluated: EvaluatedReport) -> None:
@@ -576,6 +629,7 @@ def _add_measurement_summary_for_image(
             row[index].text = value
     column_width = int((measurement_table_width // len(rows[0])) * APPENDIX_MEASUREMENT_COLUMN_WIDTH_FRACTION)
     _set_table_column_widths(table, [column_width] * len(rows[0]))
+    _center_table_columns(table, range(2, len(rows[0])))
     if add_trailing_paragraph:
         cell.add_paragraph("")
     return True
@@ -601,6 +655,16 @@ def _center_cell_paragraphs(cell: Any) -> None:
 def _center_table_column(table: Any, column_index: int) -> None:
     for row in table.rows:
         _center_cell_paragraphs(row.cells[column_index])
+
+
+def _center_table_columns(table: Any, column_indexes: Iterable[int]) -> None:
+    for column_index in column_indexes:
+        _center_table_column(table, column_index)
+
+
+def _center_performance_summary_columns(table: Any, utility_label: str) -> None:
+    if utility_label in {"ATTO", "Crystal Disk Mark", "Disks", "Blackmagic"}:
+        _center_table_columns(table, range(1, min(3, len(table.columns))))
 
 
 def _add_windows_performance_objects_to_cell(cell: Any, image_artifacts: Iterable[Path], inches: Any) -> None:
@@ -658,6 +722,7 @@ def _add_csv_tables_to_cell(
             _add_minimized_empty_paragraph(cell)
         utility_label = _performance_utility_label(artifact)
         nested_table = _add_nested_table(cell, [[utility_label], *rows], table_width)
+        _center_performance_summary_columns(nested_table, utility_label)
         if utility_label == "Disks":
             _merge_linux_disks_access_time_row(nested_table)
     _minimize_trailing_empty_cell_paragraph(cell)
@@ -1202,6 +1267,15 @@ def _temperature_rows(dut_data: object) -> list[tuple[str, dict[str, Any]]]:
     return sorted(rows, key=lambda item: _temperature_sort_key(item[0]))
 
 
+def _temperature_row_lookup(dut_data: object) -> dict[int, dict[str, Any]]:
+    lookup: dict[int, dict[str, Any]] = {}
+    for temp_label, values in _temperature_rows(dut_data):
+        temp_c = _temperature_int(temp_label)
+        if temp_c is not None:
+            lookup[temp_c] = values
+    return lookup
+
+
 def _has_temperature_value(values: dict[str, Any]) -> bool:
     return any(values.get(key) is not None for key in ("read_mb_s", "write_mb_s")) or bool(values.get("error"))
 
@@ -1226,13 +1300,20 @@ def _temperature_sort_key(value: str) -> float:
     return float(match.group("value"))
 
 
+def _temperature_int(value: str) -> int | None:
+    numeric = _temperature_sort_key(value)
+    if numeric == float("inf") or not numeric.is_integer():
+        return None
+    return int(numeric)
+
+
 def _format_temperature_label(value: str) -> str:
     match = TEMP_RE.search(value)
     if match is None:
         return value
     numeric = float(match.group("value"))
     label = str(int(numeric)) if numeric.is_integer() else str(numeric)
-    return f"{label}°C"
+    return f"{label}Ãƒâ€šÃ‚Â°C"
 
 
 def _performance_field(platforms: object, os_name: str, tool_name: str, field: str) -> str:
