@@ -125,12 +125,11 @@ def write_docx_report(
     document = Document()
     _set_margins(document, Inches)
 
-    document.add_heading("Drive Qualification Report.", level=1)
+    document.add_heading("Drive Qualification Report", level=1)
     _add_revision_table(document)
     _add_executive_summary(document, evaluated)
     _add_drive_info(document, data.get("drive_info"), report_path)
     _add_qualification_equipment(document, data.get("equipment"))
-    _add_test_procedure(document)
 
     document.add_page_break()
     document.add_heading("Test Results", level=1)
@@ -220,16 +219,18 @@ def _host_lines(document: Any, equipment: dict[str, Any]) -> None:
         if not isinstance(host, dict):
             continue
         _list_line(document, f"{label}: {_join_present(host.get('hardware'), host.get('os_version'))}")
+        if _software_entries is not None:
+            _list_line(document, "Software:", level=1)
         for software in _software_entries(host.get("software")):
-            _list_line(document, f"Software: {software}")
+            _list_line(document, f"{software}", level=2)
 
 
 def _scope_lines(document: Any, equipment: dict[str, Any]) -> None:
     scope = equipment.get("scope")
     if isinstance(scope, dict):
         _list_line(document, f"Measuring Device: {_field(scope, 'model')}")
-        _list_line(document, f"Scope Serial Number: {_field(scope, 'serial_number')}")
-        _list_line(document, f"Version: {_field(scope, 'version')}")
+        _list_line(document, f"Serial Number: {_field(scope, 'serial_number')}", level=1)
+        _list_line(document, f"Version: {_field(scope, 'version')}", level=1)
     _probe_line(document, equipment.get("probe_current"), "Current")
     _probe_line(document, equipment.get("probe_voltage"), "Voltage")
 
@@ -239,8 +240,8 @@ def _probe_line(document: Any, probe: object, role: str) -> None:
         return
     channel = _field(probe, "channel")
     channel_text = f" - Channel {channel}" if channel else ""
-    _list_line(document, f"Probe Type: {_field(probe, 'model')}{channel_text} ({role})")
-    _list_line(document, f"Serial Number: {_field(probe, 'serial_number')}")
+    _list_line(document, f"Probe Type: {_field(probe, 'model')}{channel_text} ({role})", level=1)
+    _list_line(document, f"Serial Number: {_field(probe, 'serial_number')}", level=2)
 
 
 def _dut_lines(document: Any, dut_data: object) -> None:
@@ -249,13 +250,10 @@ def _dut_lines(document: Any, dut_data: object) -> None:
         _list_line(document, "No DUT data recorded.")
         return
     for dut_name, binding in dut_data.items():
+        _list_line(document, str(dut_name), level=1)
         serial = _field(binding, "serial_number") if isinstance(binding, dict) else ""
-        _list_line(document, f"{dut_name}: {serial}")
-
-
-def _add_test_procedure(document: Any) -> None:
-    document.add_heading("Test Procedure", level=2)
-    _list_line(document, "1006 HDD Qualification Work Instruction")
+        if serial:
+            _list_line(document, f"Serial Number: {serial}", level=2)
 
 
 def _add_power_data(document: Any, power: object, shade_cell: Callable[[Any, Status], None]) -> None:
@@ -1163,8 +1161,12 @@ def _add_picture_to_paragraph(paragraph: Any, artifact: Path, *, width: Any) -> 
         paragraph.add_run(str(artifact.name))
 
 
-def _list_line(document: Any, text: str) -> None:
-    document.add_paragraph(text, style="List Paragraph")
+def _list_line(document: Any, text: str, level: int = 0) -> None:
+    from docx.shared import Inches
+
+    p = document.add_paragraph(text, style="List Bullet")
+    if level > 0:
+        p.paragraph_format.left_indent = Inches(0.25 * (level + 1))
 
 
 def _software_entries(software: object) -> list[str]:

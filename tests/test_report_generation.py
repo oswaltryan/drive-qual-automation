@@ -92,13 +92,12 @@ def test_generate_report_docx_matches_reference_section_shape() -> None:
     table_headers = [" | ".join(cell.text for cell in table.rows[0].cells) for table in document.tables]
 
     assert headings[:4] == [
-        "Drive Qualification Report.",
+        "Drive Qualification Report",
         "Executive Summary",
         "Drive Info",
         "Qualification Equipment",
     ]
-    assert headings[4] == "Test Procedure"
-    assert "Test Results" in headings
+    assert headings[4] == "Test Results"
     assert "Power Data" in headings
     assert "Compatibility Data" in headings
     assert "Disk Performance" in headings
