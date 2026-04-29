@@ -124,6 +124,7 @@ def write_docx_report(
     Document, Inches, shade_cell = _load_docx_tools()
     document = Document()
     _set_margins(document, Inches)
+    _add_header_logo(document, Inches)
 
     document.add_heading("Drive Qualification Report", level=1)
     _add_revision_table(document)
@@ -172,6 +173,19 @@ def _set_margins(document: Any, inches: Any) -> None:
         section.right_margin = inches(0.6)
         section.top_margin = inches(0.5)
         section.bottom_margin = inches(0.5)
+
+
+def _add_header_logo(document: Any, inches: Any) -> None:
+    logo_path = Path(__file__).parent / "logo.png"
+    if not logo_path.exists():
+        return
+    section = document.sections[0]
+    section.different_first_page_header_footer = True
+    section.header_distance = inches(0.2)
+    header = section.first_page_header
+    paragraph = header.paragraphs[0]
+    run = paragraph.add_run()
+    run.add_picture(str(logo_path), height=inches(0.5))
 
 
 def _add_revision_table(document: Any) -> None:

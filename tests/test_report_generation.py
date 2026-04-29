@@ -16,7 +16,7 @@ from drive_qual.reports.evaluation import Status, case_material_for_product, eva
 
 EXPECTED_INLINE_IMAGE_COUNT = 1
 EXPECTED_POWER_OBJECT_COUNT = 7
-EXPECTED_MEDIA_FILE_COUNT = 8
+EXPECTED_MEDIA_FILE_COUNT = 9
 EXPECTED_WINDOWS_PERFORMANCE_OBJECT_COUNT = 2
 EXPECTED_COMPLIANCE_TABLE_ROW_COUNT = 3
 EXPECTED_TEMPERATURE_TABLE_COLUMN_COUNT = 4
@@ -222,13 +222,13 @@ def _assert_embedded_object_payloads(output_path: Path) -> None:
         "Padlock DT Blackmagic Performance.png",
     ]
     assert _embedded_object_shape_ids(output_path) == [
-        "_x0000_i1010",
-        "_x0000_i1012",
-        "_x0000_i1014",
-        "_x0000_i1016",
-        "_x0000_i1018",
-        "_x0000_i1020",
-        "_x0000_i1022",
+        "_x0000_i1011",
+        "_x0000_i1013",
+        "_x0000_i1015",
+        "_x0000_i1017",
+        "_x0000_i1019",
+        "_x0000_i1021",
+        "_x0000_i1023",
     ]
     assert all(object_id < MAX_WORD_OBJECT_ID for object_id in _embedded_object_ids(output_path))
 
