@@ -125,6 +125,7 @@ def write_docx_report(
     document = Document()
     _set_margins(document, Inches)
     _add_header_logo(document, Inches)
+    _add_footer(document)
 
     from docx.enum.text import WD_ALIGN_PARAGRAPH
     from docx.shared import Pt
@@ -134,13 +135,7 @@ def write_docx_report(
     style.font.name = "Times New Roman"
     style.font.size = Pt(11)
 
-    heading = _add_heading(document, "Drive Qualification Report", level=1)
-    heading.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    run = heading.runs[0]
-    run.font.name = "Times New Roman"
-    run.font.size = Pt(24)
-    run.underline = True
-    document.add_paragraph()
+    _add_title(document, WD_ALIGN_PARAGRAPH, Pt)
     _add_revision_table(document)
     _add_executive_summary(document, evaluated)
     _add_drive_info(document, data.get("drive_info"), report_path)
@@ -200,6 +195,72 @@ def _add_header_logo(document: Any, inches: Any) -> None:
     run.add_picture(str(logo_path), height=inches(0.5))
 
 
+def _add_title(document: Any, wd_align_paragraph: Any, pt: Any) -> None:
+    heading = _add_heading(document, "Drive Qualification Report", level=1)
+    heading.alignment = wd_align_paragraph.CENTER
+    run = heading.runs[0]
+    run.font.name = "Times New Roman"
+    run.font.size = pt(24)
+    run.underline = True
+    document.add_paragraph()
+
+
+def _add_footer(document: Any) -> None:
+    for section in document.sections:
+        section.different_first_page_header_footer = True
+        _populate_footer(section.first_page_footer, section)
+        _populate_footer(section.footer, section)
+
+
+def _populate_footer(footer: Any, section: Any) -> None:
+    from docx.enum.text import WD_TAB_ALIGNMENT
+    from docx.shared import Pt, RGBColor
+
+    paragraph = footer.paragraphs[0]
+    paragraph.clear()
+    available_width = section.page_width - section.left_margin - section.right_margin
+    paragraph.paragraph_format.tab_stops.add_tab_stop(int(available_width / 2), WD_TAB_ALIGNMENT.CENTER)
+    paragraph.paragraph_format.tab_stops.add_tab_stop(int(available_width), WD_TAB_ALIGNMENT.RIGHT)
+
+    left_run = paragraph.add_run("Drive Qualification Report.docx")
+    confidential_run = paragraph.add_run("\tApricorn Confidential")
+    confidential_run.font.bold = True
+    confidential_run.font.color.rgb = RGBColor(255, 0, 0)
+    runs = [
+        left_run,
+        confidential_run,
+        paragraph.add_run("\tPage "),
+    ]
+    _add_field(paragraph, "PAGE")
+    runs.append(paragraph.add_run(" of "))
+    _add_field(paragraph, "NUMPAGES")
+    for run in runs:
+        run.font.name = "Times New Roman"
+        run.font.size = Pt(9)
+
+
+def _add_field(paragraph: Any, instruction: str) -> None:
+    OxmlElement, qn = _load_docx_xml_tools()
+    run = paragraph.add_run()
+    run.font.name = "Times New Roman"
+    for tag, attrs in (
+        ("w:fldChar", {"w:fldCharType": "begin"}),
+        ("w:instrText", {"xml:space": "preserve", "text": f" {instruction} "}),
+        ("w:fldChar", {"w:fldCharType": "separate"}),
+        ("w:t", {"text": "1"}),
+        ("w:fldChar", {"w:fldCharType": "end"}),
+    ):
+        element = OxmlElement(tag)
+        for key, value in attrs.items():
+            if key == "text":
+                element.text = value
+            elif key == "xml:space":
+                element.set("{http://www.w3.org/XML/1998/namespace}space", value)
+            else:
+                element.set(qn(key), value)
+        run._r.append(element)
+
+
 def _add_revision_table(document: Any) -> None:
     table = _table(document, ["Revision", "Name", "Date", "Description"])
     row_0 = table.add_row().cells
@@ -238,7 +299,6 @@ def _add_qualification_equipment(document: Any, equipment: object) -> None:
         return
     _host_lines(document, equipment)
     _scope_lines(document, equipment)
-    _dut_lines(document, equipment.get("dut"))
 
 
 def _host_lines(document: Any, equipment: dict[str, Any]) -> None:
@@ -273,18 +333,6 @@ def _probe_line(document: Any, probe: object, role: str) -> None:
     channel_text = f" - Channel {channel}" if channel else ""
     _list_line(document, f"Probe Type: {_field(probe, 'model')}{channel_text} ({role})", level=1)
     _list_line(document, f"Serial Number: {_field(probe, 'serial_number')}", level=2)
-
-
-def _dut_lines(document: Any, dut_data: object) -> None:
-    _list_line(document, "Device Under Test (DUT):")
-    if not isinstance(dut_data, dict) or not dut_data:
-        _list_line(document, "No DUT data recorded.")
-        return
-    for dut_name, binding in dut_data.items():
-        _list_line(document, str(dut_name), level=1)
-        serial = _field(binding, "serial_number") if isinstance(binding, dict) else ""
-        if serial:
-            _list_line(document, f"Serial Number: {serial}", level=2)
 
 
 def _add_power_data(document: Any, power: object, shade_cell: Callable[[Any, Status], None]) -> None:

@@ -227,16 +227,11 @@ def _assert_embedded_object_payloads(output_path: Path) -> None:
         "Padlock DT Disks Performance.png",
         "Padlock DT Blackmagic Performance.png",
     ]
-    assert _embedded_object_shape_ids(output_path) == [
-        "_x0000_i1011",
-        "_x0000_i1013",
-        "_x0000_i1015",
-        "_x0000_i1017",
-        "_x0000_i1019",
-        "_x0000_i1021",
-        "_x0000_i1023",
-    ]
+    shape_numbers = _embedded_object_shape_numbers(output_path)
+    assert len(shape_numbers) == EXPECTED_POWER_OBJECT_COUNT
+    assert shape_numbers == list(range(shape_numbers[0], shape_numbers[0] + (2 * EXPECTED_POWER_OBJECT_COUNT), 2))
     assert all(object_id < MAX_WORD_OBJECT_ID for object_id in _embedded_object_ids(output_path))
+    _assert_footer_text(output_path)
 
 
 def _table_headers(document: Any) -> list[str]:
@@ -600,6 +595,10 @@ def _embedded_object_shape_ids(path: Path) -> list[str]:
     return [match.split('"')[1] for match in _embedded_object_xml_matches(path, 'ShapeID="')]
 
 
+def _embedded_object_shape_numbers(path: Path) -> list[int]:
+    return [int(shape_id.removeprefix("_x0000_i")) for shape_id in _embedded_object_shape_ids(path)]
+
+
 def _embedded_object_ids(path: Path) -> list[int]:
     return [int(match.split('"')[1].removeprefix("_")) for match in _embedded_object_xml_matches(path, 'ObjectID="')]
 
@@ -608,6 +607,18 @@ def _embedded_object_xml_matches(path: Path, marker: str) -> list[str]:
     with zipfile.ZipFile(path) as docx_zip:
         xml = docx_zip.read("word/document.xml").decode("utf-8")
     return [token for token in xml.split() if token.startswith(marker)]
+
+
+def _assert_footer_text(path: Path) -> None:
+    with zipfile.ZipFile(path) as docx_zip:
+        footer_xml = "\n".join(
+            docx_zip.read(name).decode("utf-8") for name in docx_zip.namelist() if name.startswith("word/footer")
+        )
+    assert "Drive Qualification Report.docx" in footer_xml
+    assert "Apricorn Confidential" in footer_xml
+    assert '<w:b/><w:color w:val="FF0000"/>' in footer_xml
+    assert " PAGE " in footer_xml
+    assert " NUMPAGES " in footer_xml
 
 
 def _ole10_native_label(blob: bytes) -> str:
