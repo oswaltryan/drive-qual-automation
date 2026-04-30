@@ -12,8 +12,6 @@ from drive_qual.reports.evaluation import Status
 def _load_docx_tools() -> tuple[Any, Any, Callable[[Any, Status], None]]:
     try:
         from docx import Document
-        from docx.oxml import OxmlElement
-        from docx.oxml.ns import qn
         from docx.shared import Inches
     except ImportError as exc:
         raise RuntimeError(
@@ -21,12 +19,17 @@ def _load_docx_tools() -> tuple[Any, Any, Callable[[Any, Status], None]]:
         ) from exc
 
     def shade_cell(cell: Any, status: Status) -> None:
-        tc_pr = cell._tc.get_or_add_tcPr()
-        shading = OxmlElement("w:shd")
-        shading.set(qn("w:fill"), STATUS_COLORS[status])
-        tc_pr.append(shading)
+        _shade_cell(cell, status)
 
     return Document, Inches, shade_cell
+
+
+def _shade_cell(cell: Any, status: Status) -> None:
+    OxmlElement, qn = _load_docx_xml_tools()
+    tc_pr = cell._tc.get_or_add_tcPr()
+    shading = OxmlElement("w:shd")
+    shading.set(qn("w:fill"), STATUS_COLORS[status])
+    tc_pr.append(shading)
 
 
 def _set_margins(document: Any, inches: Any) -> None:

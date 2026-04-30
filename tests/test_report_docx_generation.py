@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import importlib
+import json
 from pathlib import Path
+from typing import Any
 
 import report_generation_helpers as h
 
@@ -104,3 +106,79 @@ def test_generate_report_docx_embeds_appendix_images_instead_of_paths() -> None:
         ["Speed", "350.93", "345.04"],
     ]
     assert h._table_columns_are_centered(document.tables[8].rows[3].cells[1].tables[0], h._value_column_indexes)
+    assert h._nested_table_rows(document.tables[6].rows[4].cells[1]) == [
+        ["Field", "Value"],
+        ["Model", "Apricorn Padlock DT"],
+        ["Transfer Mode", "SATA/600 | SATA/600"],
+        ["Standard", "ACS-4"],
+        ["Features", "S.M.A.R.T., NCQ, TRIM"],
+        ["Rotation Rate", "---- (SSD)"],
+    ]
+    cdi_table = document.tables[6].rows[4].cells[1].tables[0]
+    assert not h._table_column_paragraphs_are_centered(cdi_table, 0)
+    assert h._table_column_paragraphs_are_centered(cdi_table, 1)
+
+
+def test_generate_report_docx_formats_boolean_compliance_results_as_pass_fail() -> None:
+    from docx import Document
+
+    source_root = Path("tests/.tmp/test_report_generation_boolean_compliance")
+    h._prepare_report_generation_shape_fixture(source_root)
+    report_path = source_root / "69-420" / "drive_qualification_report_atomic_tests.json"
+    data = json.loads(report_path.read_text(encoding="utf-8"))
+    data["compliance"] = {
+        "usb_if_msc_iterations": 4,
+        "usb_if_msc_result": True,
+        "disk_tester_reliability_iterations": 8,
+        "disk_tester_reliability_result": False,
+    }
+    report_path.write_text(json.dumps(data), encoding="utf-8")
+
+    module = importlib.import_module("drive_qual.reports.generate")
+    output_path = module.generate_report_docx(part_number="69-420", source_root=source_root)
+    document = Document(output_path)
+    compliance_table = document.tables[4]
+
+    assert [cell.text for cell in compliance_table.rows[1].cells] == [
+        "USB-IF Mass Storage Compliance",
+        "4",
+        "Pass",
+    ]
+    assert [cell.text for cell in compliance_table.rows[2].cells] == ["Reliability Test", "8", "Fail"]
+    assert _cell_shading_fill(compliance_table.rows[1].cells[2]) == "C6EFCE"
+    assert _cell_shading_fill(compliance_table.rows[2].cells[2]) == "FFC7CE"
+
+
+def test_generate_report_docx_marks_missing_cdi_details_red() -> None:
+    from docx import Document
+
+    source_root = Path("tests/.tmp/test_report_generation_missing_cdi")
+    h._prepare_report_generation_shape_fixture(source_root)
+    report_path = source_root / "69-420" / "drive_qualification_report_atomic_tests.json"
+    data = json.loads(report_path.read_text(encoding="utf-8"))
+    data["performance"]["Padlock DT"]["Windows"]["CrystalDiskInfo"] = {
+        "screenshot": True,
+        "model": "Apricorn Padlock DT",
+    }
+    report_path.write_text(json.dumps(data), encoding="utf-8")
+
+    module = importlib.import_module("drive_qual.reports.generate")
+    output_path = module.generate_report_docx(part_number="69-420", source_root=source_root)
+    document = Document(output_path)
+    summary = next(
+        paragraph for paragraph in document.paragraphs if paragraph.text.startswith("Results require review")
+    )
+    cdi_table = document.tables[6].rows[4].cells[1].tables[0]
+
+    assert "Disk Performance Raw Data & Measurements (Padlock DT)" in summary.text
+    assert cdi_table.rows[1].cells[1].text == "Apricorn Padlock DT"
+    assert _cell_shading_fill(cdi_table.rows[1].cells[1]) is None
+    assert cdi_table.rows[2].cells[1].text == ""
+    assert _cell_shading_fill(cdi_table.rows[2].cells[1]) == "FFC7CE"
+
+
+def _cell_shading_fill(cell: Any) -> str | None:
+    from docx.oxml.ns import qn
+
+    shading = cell._tc.get_or_add_tcPr().find(qn("w:shd"))
+    return None if shading is None else shading.get(qn("w:fill"))

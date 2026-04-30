@@ -87,6 +87,65 @@ def test_report_evaluation_records_review_sections_by_document_heading() -> None
     assert result.review_sections == ["Power Data", "Compliance/Reliability Test", "Temperature Data"]
 
 
+def test_report_evaluation_treats_true_compliance_results_as_pass() -> None:
+    result = evaluate_report(
+        {
+            "compliance": {
+                "usb_if_msc_iterations": 4,
+                "usb_if_msc_result": True,
+                "disk_tester_reliability_iterations": 8,
+                "disk_tester_reliability_result": True,
+            },
+        }
+    )
+
+    assert "Compliance/Reliability Test" not in result.review_sections
+
+
+def test_report_evaluation_reports_raw_data_section_for_missing_cdi_details() -> None:
+    result = evaluate_report(
+        {
+            "performance": {
+                "Padlock SSD": {
+                    "Windows": {
+                        "CrystalDiskInfo": {"model": "Padlock SSD"},
+                        "CrystalDiskMark": {"read": 100, "write": 100},
+                        "ATTO": {"read": 100, "write": 100},
+                    },
+                    "macOS": {"Blackmagic Disk Speed Test": {"read": 100, "write": 100}},
+                }
+            },
+        }
+    )
+
+    assert result.review_sections == ["Disk Performance Raw Data & Measurements (Padlock SSD)"]
+
+
+def test_report_evaluation_keeps_main_disk_performance_section_for_missing_benchmark_metrics() -> None:
+    result = evaluate_report(
+        {
+            "performance": {
+                "Padlock SSD": {
+                    "Windows": {
+                        "CrystalDiskInfo": {
+                            "model": "Padlock SSD",
+                            "transfer_mode": "SATA/600 | SATA/600",
+                            "standard": "ACS-4",
+                            "features": "S.M.A.R.T., NCQ, TRIM",
+                            "rotation_rate": "---- (SSD)",
+                        },
+                        "CrystalDiskMark": {"read": 100, "write": None},
+                        "ATTO": {"read": 100, "write": 100},
+                    },
+                    "macOS": {"Blackmagic Disk Speed Test": {"read": 100, "write": 100}},
+                }
+            },
+        }
+    )
+
+    assert result.review_sections == ["Disk Performance"]
+
+
 def test_power_evaluation_uses_visible_grouped_power_rows_for_missing_counts() -> None:
     expected_warning_count = 3
     result = evaluate_report(

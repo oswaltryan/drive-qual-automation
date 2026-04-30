@@ -106,6 +106,7 @@
   },
   "performance": {},
   "compliance": {
+    "usb_if_msc_iterations": null,
     "usb_if_msc_result": null,
     "disk_tester_reliability_iterations": null,
     "disk_tester_reliability_result": null

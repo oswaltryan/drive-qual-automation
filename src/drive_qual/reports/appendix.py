@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any
 
 from drive_qual.core.report_session import TEMPLATE_NAME
+from drive_qual.reports.cdi import CDI_APPENDIX_FIELDS
 from drive_qual.reports.constants import (
     APPENDIX_IMAGE_WIDTH_INCHES,
     APPENDIX_MEASUREMENT_COLUMN_WIDTH_FRACTION,
@@ -38,9 +39,11 @@ from drive_qual.reports.docx_shared import (
     _normalize_text,
     _remove_extra_empty_paragraphs,
     _set_table_column_widths,
+    _shade_cell,
     _table,
 )
 from drive_qual.reports.embedded import _add_embedded_package_to_paragraph
+from drive_qual.reports.evaluation import Status
 
 
 def _add_appendix(document: Any, data: dict[str, Any], part_root: Path, inches: Any) -> None:
@@ -48,11 +51,13 @@ def _add_appendix(document: Any, data: dict[str, Any], part_root: Path, inches: 
     for dut_name in duts:
         _add_heading(document, f"Disk Performance Raw Data & Measurements ({dut_name})", level=2)
         for os_name in ("Windows", "Linux", "macOS"):
-            _add_platform_artifact_table(document, part_root, dut_name, os_name, inches)
+            _add_platform_artifact_table(document, data, part_root, dut_name, os_name, inches)
             document.add_paragraph("")
 
 
-def _add_platform_artifact_table(document: Any, part_root: Path, dut_name: str, os_name: str, inches: Any) -> None:
+def _add_platform_artifact_table(
+    document: Any, data: dict[str, Any], part_root: Path, dut_name: str, os_name: str, inches: Any
+) -> None:
     table = _table(document, [os_name, ""])
     for label in ("Inrush Summary", "Max IO Summary", "Performance"):
         row = table.add_row().cells
@@ -66,7 +71,7 @@ def _add_platform_artifact_table(document: Any, part_root: Path, dut_name: str, 
     if os_name == "Windows":
         row = table.add_row().cells
         row[0].text = "Drive Information"
-        _add_drive_information_artifacts_to_row(row, part_root, dut_name, os_name, "Drive Information", inches)
+        _add_drive_information_artifacts_to_row(row, data, part_root, dut_name, os_name, inches)
     _center_table_column(table, 0)
     _set_table_column_widths(table, [inches(APPENDIX_OS_LABEL_WIDTH_INCHES), inches(APPENDIX_OS_ARTIFACT_WIDTH_INCHES)])
 
@@ -155,21 +160,58 @@ def _add_performance_artifacts_to_row(
 
 def _add_drive_information_artifacts_to_row(
     row_cells: Any,
+    data: dict[str, Any],
     part_root: Path,
     dut_name: str,
     os_name: str,
-    label: str,
     inches: Any,
 ) -> None:
     label_cell = row_cells[0]
     artifact_cell = row_cells[1]
-    artifacts = _matching_artifacts(part_root, dut_name, os_name, label)
+    artifacts = _matching_artifacts(part_root, dut_name, os_name, "Drive Information")
     image_artifacts = _image_artifacts(artifacts)
-    if not image_artifacts:
-        artifact_cell.text = _artifact_names(part_root, artifacts)
-        return
-    _add_artifact_objects_to_cell(label_cell, image_artifacts, inches)
-    artifact_cell.text = _artifact_names(part_root, _non_image_artifacts(artifacts))
+    if image_artifacts:
+        _add_artifact_objects_to_cell(label_cell, image_artifacts, inches)
+    non_image_names = _artifact_names(part_root, _non_image_artifacts(artifacts))
+    if non_image_names:
+        artifact_cell.text = non_image_names
+    else:
+        artifact_cell.text = ""
+    _add_cdi_details_table_to_cell(artifact_cell, _cdi_details(data, dut_name), inches)
+
+
+def _add_cdi_details_table_to_cell(cell: Any, cdi_details: dict[str, Any], inches: Any) -> None:
+    if any(paragraph.text for paragraph in cell.paragraphs):
+        cell.add_paragraph()
+    table = _add_nested_table(
+        cell,
+        [["Field", "Value"], *[[label, _format_cdi_value(cdi_details.get(key))] for key, label in CDI_APPENDIX_FIELDS]],
+        inches(APPENDIX_OS_ARTIFACT_WIDTH_INCHES),
+    )
+    for row in table.rows[1:]:
+        if not row.cells[1].text.strip():
+            _shade_cell(row.cells[1], Status.MISSING)
+    _center_table_column(table, 1)
+
+
+def _cdi_details(data: dict[str, Any], dut_name: str) -> dict[str, Any]:
+    performance = data.get("performance")
+    if not isinstance(performance, dict):
+        return {}
+    dut_performance = performance.get(dut_name)
+    if not isinstance(dut_performance, dict):
+        return {}
+    windows_performance = dut_performance.get("Windows")
+    if not isinstance(windows_performance, dict):
+        return {}
+    cdi_details = windows_performance.get("CrystalDiskInfo")
+    return cdi_details if isinstance(cdi_details, dict) else {}
+
+
+def _format_cdi_value(value: Any) -> str:
+    if value is None or isinstance(value, bool):
+        return ""
+    return str(value)
 
 
 def _add_artifact_images_to_cell(

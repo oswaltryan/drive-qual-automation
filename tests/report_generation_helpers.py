@@ -14,6 +14,7 @@ EXPECTED_WINDOWS_PERFORMANCE_OBJECT_COUNT = 2
 EXPECTED_COMPLIANCE_TABLE_ROW_COUNT = 3
 EXPECTED_TEMPERATURE_TABLE_COLUMN_COUNT = 4
 EXPECTED_TEMPERATURE_TABLE_ROW_COUNT = 12
+EXPECTED_TEMPERATURE_CHART_LEADING_BREAKS = 3
 WINDOWS_PERFORMANCE_BLANK_LINES_BEFORE_FIRST_OBJECT = 10
 WINDOWS_PERFORMANCE_BLANK_LINES_BETWEEN_OBJECTS = 13
 MAX_WORD_OBJECT_ID = 2_000_000_000
@@ -92,6 +93,7 @@ def _assert_temperature_table_shape(table: Any) -> None:
     assert [cell.text for cell in table.rows[0].cells] == ["Chart", "Temperature", "Read MB/s", "Write MB/s"]
     assert _table_columns_are_centered(table, range(EXPECTED_TEMPERATURE_TABLE_COLUMN_COUNT))
     assert _table_cell_drawing_count(table, 1, 0) == 1
+    assert _table_cell_line_break_count(table, 1, 0) == EXPECTED_TEMPERATURE_CHART_LEADING_BREAKS
     assert [row.cells[1].text for row in table.rows[1:]] == [
         "-40°C",
         "-30°C",
@@ -286,6 +288,10 @@ def _write_linux_disks_performance_csv(path: Path) -> None:
 
 def _table_cell_drawing_count(document_table: Any, row_index: int, cell_index: int) -> int:
     return len(_cell_xml(document_table, row_index, cell_index).xpath(".//w:drawing"))
+
+
+def _table_cell_line_break_count(document_table: Any, row_index: int, cell_index: int) -> int:
+    return len(_cell_xml(document_table, row_index, cell_index).xpath(".//w:br[not(@w:type='page')]"))
 
 
 def _table_cell_object_count(document_table: Any, row_index: int, cell_index: int) -> int:
@@ -516,6 +522,16 @@ def _report_payload() -> dict[str, Any]:
         "performance": {
             "Padlock DT": {
                 "Windows": {
+                    "CrystalDiskInfo": {
+                        "screenshot": True,
+                        "model": "Apricorn Padlock DT",
+                        "transfer_mode": "SATA/600 | SATA/600",
+                        "standard": "ACS-4",
+                        "features": "S.M.A.R.T., NCQ, TRIM",
+                        "rotation_rate": "---- (SSD)",
+                        "power_on_count": "12 count",
+                        "power_on_hours": "34 hours",
+                    },
                     "CrystalDiskMark": {"read": 350.93, "write": 345.04},
                     "ATTO": {"read": 334.95, "write": 318.74},
                 },

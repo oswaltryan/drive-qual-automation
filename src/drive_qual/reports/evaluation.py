@@ -4,6 +4,8 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import Any
 
+from drive_qual.reports.cdi import CDI_APPENDIX_FIELDS
+
 
 class Status(StrEnum):
     PASS = "pass"
@@ -291,8 +293,7 @@ def _build_review_sections(
         sections.append("Power Data")
     if _compatibility_requires_review(data.get("compatibility")):
         sections.append("Compatibility Data")
-    if _performance_requires_review(data.get("performance")):
-        sections.append("Disk Performance")
+    sections.extend(_performance_review_sections(data.get("performance")))
     if _compliance_requires_review(data.get("compliance")):
         sections.append("Compliance/Reliability Test")
     if _has_review_status(temperature):
@@ -314,22 +315,49 @@ def _compatibility_requires_review(compatibility: object) -> bool:
     )
 
 
-def _performance_requires_review(performance: object) -> bool:
+def _performance_review_sections(performance: object) -> list[str]:
     if not isinstance(performance, dict):
-        return False
+        return []
     required_tools = (
         ("Windows", "CrystalDiskMark", ("read", "write")),
         ("Windows", "ATTO", ("read", "write")),
         ("macOS", "Blackmagic Disk Speed Test", ("read", "write")),
     )
-    for platforms in performance.values():
+    sections: list[str] = []
+    for dut_name, platforms in performance.items():
+        dut_name_text = str(dut_name)
         if not isinstance(platforms, dict):
-            return True
+            _append_unique(sections, "Disk Performance")
+            continue
+        if _cdi_details_require_review(str(dut_name), platforms):
+            _append_unique(sections, _raw_data_section(dut_name_text))
         for platform, tool, metrics in required_tools:
             tool_data = platforms.get(platform, {}).get(tool) if isinstance(platforms.get(platform), dict) else None
             if not isinstance(tool_data, dict) or any(_to_float(tool_data.get(metric)) is None for metric in metrics):
-                return True
-    return False
+                _append_unique(sections, "Disk Performance")
+                break
+    return sections
+
+
+def _append_unique(values: list[str], value: str) -> None:
+    if value not in values:
+        values.append(value)
+
+
+def _raw_data_section(dut_name: str) -> str:
+    return f"Disk Performance Raw Data & Measurements ({dut_name})"
+
+
+def _cdi_details_require_review(dut_name: str, platforms: dict[str, Any]) -> bool:
+    if "ask3" in dut_name.casefold():
+        return False
+    windows_performance = platforms.get("Windows")
+    if not isinstance(windows_performance, dict):
+        return True
+    cdi_details = windows_performance.get("CrystalDiskInfo")
+    if not isinstance(cdi_details, dict):
+        return True
+    return any(not str(cdi_details.get(key) or "").strip() for key, _label in CDI_APPENDIX_FIELDS)
 
 
 def _compliance_requires_review(compliance: object) -> bool:
@@ -339,7 +367,15 @@ def _compliance_requires_review(compliance: object) -> bool:
         compliance.get("usb_if_msc_result"),
         compliance.get("disk_tester_reliability_result"),
     )
-    return any(str(value or "").casefold() != "pass" for value in result_values)
+    return any(_result_text(value).casefold() != "pass" for value in result_values)
+
+
+def _result_text(value: object) -> str:
+    if value is True:
+        return "Pass"
+    if value is False:
+        return "Fail"
+    return str(value or "")
 
 
 def _normalize_product(value: str) -> str:

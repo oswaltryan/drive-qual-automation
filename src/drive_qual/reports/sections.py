@@ -174,7 +174,10 @@ def _add_temperature_table(
     merged_cell = table.rows[1].cells[0].merge(table.rows[-1].cells[0])
     merged_cell.text = ""
     if temperature_artifact is not None:
-        _add_picture_to_paragraph(merged_cell.paragraphs[0], temperature_artifact, width=inches(1.7))
+        chart_paragraph = merged_cell.paragraphs[0]
+        for _ in range(3):
+            chart_paragraph.add_run().add_break()
+        _add_picture_to_paragraph(chart_paragraph, temperature_artifact, width=inches(1.7))
     _center_cell_paragraphs(merged_cell)
     _center_table_columns(table, range(0, 4))
 
@@ -226,14 +229,14 @@ def _add_compliance(document: Any, compliance: object, shade_cell: Callable[[Any
         shade_cell,
         "USB-IF Mass Storage Compliance",
         _field(compliance, "usb_if_msc_iterations"),
-        _field(compliance, "usb_if_msc_result"),
+        _raw_field(compliance, "usb_if_msc_result"),
     )
     _compliance_row(
         table,
         shade_cell,
         "Reliability Test",
         _field(compliance, "disk_tester_reliability_iterations"),
-        _field(compliance, "disk_tester_reliability_result"),
+        _raw_field(compliance, "disk_tester_reliability_result"),
     )
     _center_table_columns(table, range(1, 3))
 
@@ -404,18 +407,32 @@ def _performance_field(platforms: object, os_name: str, tool_name: str, field: s
     return _format_value(tool_data.get(field))
 
 
+def _raw_field(data: object, key: str) -> object:
+    if not isinstance(data, dict):
+        return None
+    return data.get(key)
+
+
 def _compliance_row(
-    table: Any, shade_cell: Callable[[Any, Status], None], program: str, iterations: str, result: str
+    table: Any, shade_cell: Callable[[Any, Status], None], program: str, iterations: str, result: object
 ) -> None:
     row = table.add_row().cells
     row[0].text = program
     row[1].text = iterations
-    row[2].text = result
+    row[2].text = _format_result(result)
     shade_cell(row[2], _result_status(result))
 
 
-def _result_status(result: str) -> Status:
-    lowered = result.casefold()
+def _format_result(result: object) -> str:
+    if result is True:
+        return "Pass"
+    if result is False:
+        return "Fail"
+    return str(result or "")
+
+
+def _result_status(result: object) -> Status:
+    lowered = _format_result(result).casefold()
     if lowered == "pass":
         return Status.PASS
     if lowered == "fail":
