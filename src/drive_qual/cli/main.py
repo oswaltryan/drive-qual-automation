@@ -47,12 +47,19 @@ Commands:
   list-profiles     Show orchestrated workflow profiles.
   legacy            Run the old Windows-focused legacy entrypoint.
 
-Step names:
+Step names and options:
   info              drive_info
+                    --part-number PN
   equipment         equipment
+                    --part-number PN, --scope-profile NAME
   power             power_measurements
+                    --part-number PN
   performance       performance
+                    --part-number PN
   temperature       temperature
+                    --part-number PN
+                    For non-interactive temperature inputs, use:
+                    drive-qual temperature --part-number PN --dut NAME --csv PATH [--chart PATH] [--title TEXT]
 
 Common options:
   --part-number PN  Select the report/artifact folder.

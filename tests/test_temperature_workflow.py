@@ -41,6 +41,40 @@ def test_temperature_csv_rows_update_report_contract(tmp_path: Path) -> None:
     assert data["temperature"]["Padlock DT"]["performance"]["20c"]["read_mb_s"] == 0.0
 
 
+def test_sectioned_temperature_csv_rows_update_report_contract(tmp_path: Path) -> None:
+    csv_path = tmp_path / "temperature_rows.csv"
+    csv_path.write_text(
+        "\n".join(
+            [
+                "READ - Constant drive activity of the full range",
+                "Temp C,Seagate 8TB HDD",
+                "-10 C,185.4",
+                "0 C,186.4",
+                "",
+                "WRITE - Constant drive activity of the full range",
+                "Temp C,Seagate 8TB HDD",
+                "-10 C,187.2",
+                "0 C,187.5",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    data: dict[str, Any] = {"temperature": {"Padlock DT": {"performance": {}}}}
+
+    rows = load_temperature_performance_csv(csv_path)
+    update_temperature_performance(data, "Padlock DT", rows)
+
+    assert data["temperature"]["Padlock DT"]["performance"]["-10c"] == {
+        "read_mb_s": 185.4,
+        "write_mb_s": 187.2,
+    }
+    assert data["temperature"]["Padlock DT"]["performance"]["0c"] == {
+        "read_mb_s": 186.4,
+        "write_mb_s": 187.5,
+    }
+
+
 def test_post_process_temperature_data_saves_report_and_chart(monkeypatch: MonkeyPatch, tmp_path: Path) -> None:
     from drive_qual.workflows import temperature
 

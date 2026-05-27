@@ -136,13 +136,16 @@ def update_temperature_performance(
 
 def load_temperature_performance_csv(path: Path) -> list[TemperaturePerformanceRow]:
     with path.open("r", newline="", encoding="utf-8-sig") as handle:
-        reader = csv.DictReader(handle)
-        rows = [_row_from_csv(record) for record in reader]
-    return [row for row in rows if row is not None]
+        records = list(csv.DictReader(handle))
+    rows = [_row_from_csv(record) for record in records]
+    parsed_rows = [row for row in rows if row is not None]
+    if parsed_rows:
+        return parsed_rows
+    return _load_sectioned_temperature_csv(path)
 
 
-def _row_from_csv(record: dict[str, str]) -> TemperaturePerformanceRow | None:
-    normalized = {_normalize_header(key): value for key, value in record.items()}
+def _row_from_csv(record: dict[str | None, Any]) -> TemperaturePerformanceRow | None:
+    normalized = {_normalize_header(key): value for key, value in record.items() if key is not None}
     operation = _first_value(normalized, ("operation", "op"))
     if operation is None:
         return None
@@ -195,6 +198,37 @@ def _first_value(record: dict[str, str], names: tuple[str, ...]) -> str | None:
 
 def _normalize_header(value: str) -> str:
     return re.sub(r"[^a-z0-9]+", "", value.casefold())
+
+
+def _load_sectioned_temperature_csv(path: Path) -> list[TemperaturePerformanceRow]:
+    rows: list[TemperaturePerformanceRow] = []
+    operation: str | None = None
+    with path.open("r", newline="", encoding="utf-8-sig") as handle:
+        for fields in csv.reader(handle):
+            if not fields:
+                continue
+            first = fields[0].strip()
+            first_normalized = first.casefold()
+            if first_normalized.startswith("read"):
+                operation = "read"
+                continue
+            if first_normalized.startswith("write"):
+                operation = "write"
+                continue
+            if operation is None or first_normalized in {"temp c", "tempc", "temperaturec"}:
+                continue
+            temperature_c = _parse_temperature_c(first)
+            if temperature_c is None:
+                continue
+            speed = fields[1] if len(fields) > 1 else None
+            rows.append(
+                TemperaturePerformanceRow(
+                    temperature_c=temperature_c,
+                    operation=operation,
+                    speed_mb_s=_parse_float(speed),
+                )
+            )
+    return rows
 
 
 def _safe_filename_component(value: str) -> str:
