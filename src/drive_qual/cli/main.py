@@ -65,7 +65,7 @@ Examples:
   uv run drive-qual resume --profile core_perf_temp_v1 --part-number 69-420
   uv run drive-qual step power --part-number 69-420
   uv run drive-qual report --part-number 69-420
-  uv run drive-qual temperature --part-number 69-420 --dut "Padlock DT" --csv matched.csv --chart temp.png
+  uv run drive-qual temperature --part-number 69-420 --dut "Padlock DT" --csv matched.csv
 """
 
 
@@ -164,7 +164,8 @@ def _run_temperature(args: list[str]) -> None:
     parser.add_argument("--part-number", help="Apricorn part number for selecting the report folder.")
     parser.add_argument("--dut", help="Report DUT name to update.")
     parser.add_argument("--csv", type=Path, help="CSV containing matched temperature/performance rows.")
-    parser.add_argument("--chart", type=Path, help="Temperature chart PNG to copy into the artifact folder.")
+    parser.add_argument("--chart", type=Path, help="Custom temperature chart PNG to copy into the artifact folder.")
+    parser.add_argument("--title", default="Temperature vs Speed", help="Title for the generated temperature chart.")
     parsed = parser.parse_args(args)
     if parsed.csv is None and parsed.chart is None:
         parser.error("At least one of --csv or --chart is required.")
@@ -176,6 +177,7 @@ def _run_temperature(args: list[str]) -> None:
         dut_name=parsed.dut,
         performance_csv=parsed.csv,
         chart=parsed.chart,
+        chart_title=parsed.title,
     )
 
 

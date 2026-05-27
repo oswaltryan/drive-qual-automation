@@ -18,8 +18,9 @@ def run_temperature_post_process_cli() -> None:
     parser.add_argument(
         "--chart",
         type=Path,
-        help="Temperature chart PNG to copy into the report artifact folder.",
+        help="Custom temperature chart PNG to copy into the report artifact folder.",
     )
+    parser.add_argument("--title", default="Temperature vs Speed", help="Title for the generated temperature chart.")
     args = parser.parse_args()
 
     if args.csv is None and args.chart is None:
@@ -30,6 +31,7 @@ def run_temperature_post_process_cli() -> None:
         dut_name=args.dut,
         performance_csv=args.csv,
         chart=args.chart,
+        chart_title=args.title,
     )
 
 

@@ -8,6 +8,8 @@ from drive_qual.core.report_session import load_report, report_path_for, resolve
 from drive_qual.core.temperature import (
     copy_temperature_chart,
     load_temperature_performance_csv,
+    plot_temperature_chart,
+    temperature_chart_path,
     update_temperature_performance,
 )
 
@@ -36,6 +38,7 @@ def post_process_temperature_data(
     dut_name: str | None = None,
     performance_csv: Path | None = None,
     chart: Path | None = None,
+    chart_title: str = "Temperature vs Speed",
 ) -> Path:
     folder_name = resolve_folder_name(part_number)
     report_path = report_path_for(folder_name)
@@ -46,6 +49,10 @@ def post_process_temperature_data(
     if performance_csv is not None:
         rows = load_temperature_performance_csv(performance_csv)
         update_temperature_performance(data, resolved_dut_name, rows)
+        if chart is None:
+            generated_chart = temperature_chart_path(actual_part_number, resolved_dut_name)
+            plot_temperature_chart(rows, generated_chart, title=chart_title)
+            print(f"Saved temperature chart to: {generated_chart}")
 
     if chart is not None:
         copied_chart = copy_temperature_chart(chart, part_number=actual_part_number, dut_name=resolved_dut_name)
@@ -62,9 +69,9 @@ def run_temperature_step(part_number: str | None = None) -> None:
     dut_name = select_report_dut_name(report_path)
 
     print("Temperature post-processing uses a CSV of matched temperature/performance rows.")
-    print("Leave paths blank to skip until temperature artifacts are ready.")
+    print("A report chart is generated from the CSV. Provide a chart path only to use a custom PNG.")
     performance_csv = _prompt_path("Temperature performance CSV path", required=False)
-    chart = _prompt_path("Temperature chart PNG path", required=False)
+    chart = _prompt_path("Custom temperature chart PNG path", required=False)
     if performance_csv is None and chart is None:
         print("No temperature inputs provided; leaving report unchanged.")
         return
