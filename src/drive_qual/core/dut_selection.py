@@ -80,9 +80,14 @@ def _poll_limit_exceeded(poll_count: int, max_polls: int | None) -> bool:
     return poll_count >= max_polls
 
 
-def _current_apricorn_devices() -> list[ApricornDevice]:
+def _current_apricorn_devices(*, require_payload: bool = False) -> list[ApricornDevice]:
     payload = get_usb_payload()
     if not isinstance(payload, dict):
+        if require_payload:
+            raise RuntimeError(
+                "Unable to read Apricorn USB inventory from `usb --json`. "
+                "Confirm the Apricorn USB CLI is installed and on PATH, then verify `usb --json` works."
+            )
         return []
     return list_apricorn_devices(payload)
 
@@ -153,7 +158,7 @@ def _wait_for_serial_as_usb_3x(
     state = "initial"
 
     while True:
-        device = find_apricorn_device_by_serial(_current_apricorn_devices(), serial_number)
+        device = find_apricorn_device_by_serial(_current_apricorn_devices(require_payload=True), serial_number)
         if device is None:
             if state != "missing":
                 print(prompt)
@@ -192,7 +197,7 @@ def _select_usb_3x_device_for_binding(
     state = "initial"
 
     while True:
-        devices = _current_apricorn_devices()
+        devices = _current_apricorn_devices(require_payload=True)
         usb_3x_devices = [device for device in devices if is_usb_3x(device)]
         if usb_3x_devices:
             selected = select_apricorn_device(usb_3x_devices)

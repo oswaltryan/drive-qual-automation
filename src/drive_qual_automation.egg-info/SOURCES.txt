@@ -67,6 +67,7 @@ src/drive_qual_automation.egg-info/top_level.txt
 tests/test_apricorn_usb_cli.py
 tests/test_benchmark_paths.py
 tests/test_config.py
+tests/test_dut_selection.py
 tests/test_fio.py
 tests/test_linux_disks_chart.py
 tests/test_macos_blackmagic.py

@@ -112,7 +112,7 @@ Examples:
 uv run drive-qual run --part-number 69-420
 uv run drive-qual resume --profile core_perf_temp_v1 --part-number 69-420
 uv run drive-qual step power --part-number 69-420
-uv run drive-qual temperature --part-number 69-420 --dut "Padlock DT" --csv matched.csv --chart temp.png
+uv run drive-qual temperature --part-number 69-420 --dut "Padlock DT" --csv matched.csv
 uv run drive-qual report --part-number 69-420 --output C:\Reports\69-420.docx
 ```
 
@@ -146,8 +146,8 @@ session scaffolding already exist.
    Linux uses the native Disks benchmark wrapper;
    macOS uses Blackmagic Disk Speed Test with automation and manual fallback.
 5. `temperature`
-   Post-processes matched temperature/performance rows and a temperature chart
-   into the report JSON and artifact folder.
+   Post-processes matched temperature/performance rows, generates the
+   temperature chart, and writes both into the report folder.
 6. `report`
    Generates `drive_qualification_report.docx` from the completed report folder.
 
