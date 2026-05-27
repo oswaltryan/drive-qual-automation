@@ -45,6 +45,9 @@ from drive_qual.reports.docx_shared import (
 from drive_qual.reports.embedded import _add_embedded_package_to_paragraph
 from drive_qual.reports.evaluation import Status
 
+ATTO_EXCLUDED_IO_SIZE_BYTES = {32 * 1024, 128 * 1024, 512 * 1024, 2 * 1024 * 1024}
+ATTO_MAX_IO_SIZE_BYTES = 4 * 1024 * 1024
+
 
 def _add_appendix(document: Any, data: dict[str, Any], part_root: Path, inches: Any) -> None:
     duts = _report_duts(data)
@@ -443,11 +446,42 @@ def _generic_csv_rows(csv_path: Path) -> list[list[str]]:
 def _performance_csv_rows(artifact: Path, csv_path: Path) -> list[list[str]]:
     rows = _generic_csv_rows(csv_path)
     utility_label = _performance_utility_label(artifact)
+    if utility_label == "ATTO":
+        return _atto_summary_rows(rows)
     if utility_label == "Disks":
         return _linux_disks_summary_rows(rows)
     if utility_label == "Blackmagic":
         return _read_write_summary_rows(rows)
     return rows
+
+
+def _atto_summary_rows(rows: list[list[str]]) -> list[list[str]]:
+    if not rows:
+        return []
+    return [rows[0], *[row for row in rows[1:] if _include_atto_io_size_row(row)]]
+
+
+def _include_atto_io_size_row(row: list[str]) -> bool:
+    if not row:
+        return True
+    size_bytes = _atto_io_size_bytes(row[0])
+    if size_bytes is None:
+        return True
+    return size_bytes <= ATTO_MAX_IO_SIZE_BYTES and size_bytes not in ATTO_EXCLUDED_IO_SIZE_BYTES
+
+
+def _atto_io_size_bytes(value: str) -> int | None:
+    text = value.strip().replace(" ", "").casefold()
+    units = {"kb": 1024, "mb": 1024 * 1024}
+    for suffix, multiplier in units.items():
+        if not text.endswith(suffix):
+            continue
+        number_text = text[: -len(suffix)]
+        try:
+            return int(float(number_text) * multiplier)
+        except ValueError:
+            return None
+    return None
 
 
 def _read_write_summary_rows(rows: list[list[str]]) -> list[list[str]]:

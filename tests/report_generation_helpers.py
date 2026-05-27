@@ -226,7 +226,7 @@ def _write_appendix_test_artifacts(windows_dir: Path, linux_dir: Path, macos_dir
     _write_png(windows_dir / "Padlock DT Max IO Summary.png")
     _write_measurement_csv(windows_dir / "Padlock DT Max IO Summary.csv")
     _write_png(windows_dir / "Padlock DT ATTO Performance.png")
-    _write_performance_csv(windows_dir / "Padlock DT ATTO Performance.csv")
+    _write_atto_performance_csv(windows_dir / "Padlock DT ATTO Performance.csv")
     _write_png(windows_dir / "Padlock DT CrystalDiskMark Performance.png")
     (windows_dir / "._Padlock DT CrystalDiskMark Performance.png").write_text("not a png", encoding="utf-8")
     _write_performance_csv(windows_dir / "Padlock DT CrystalDiskMark Performance.csv")
@@ -265,6 +265,26 @@ def _write_measurement_csv(path: Path) -> None:
 
 def _write_performance_csv(path: Path) -> None:
     path.write_text("Metric,Value\nRead MB/s,350.93\nWrite MB/s,345.04\n", encoding="utf-8")
+
+
+def _write_atto_performance_csv(path: Path) -> None:
+    path.write_text(
+        "\n".join(
+            [
+                "I/O Size,Write,Read",
+                "4KB,120.00,130.00",
+                "32KB,220.00,230.00",
+                "64KB,240.00,250.00",
+                "128KB,260.00,270.00",
+                "512KB,300.00,310.00",
+                "1MB,320.00,330.00",
+                "2MB,340.00,350.00",
+                "4MB,360.00,370.00",
+                "8MB,380.00,390.00",
+            ]
+        ),
+        encoding="utf-8",
+    )
 
 
 def _write_linux_disks_performance_csv(path: Path) -> None:

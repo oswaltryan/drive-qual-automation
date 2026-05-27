@@ -87,10 +87,12 @@ def test_generate_report_docx_embeds_appendix_images_instead_of_paths() -> None:
     assert h._nested_table_columns_evenly_fill_parent(document.tables[6].rows[2].cells[1])
     assert h._table_columns_are_centered(document.tables[6].rows[2].cells[1].tables[0], range(2, 5))
     assert h._nested_tables_rows(document.tables[6].rows[3].cells[1]) == [
-        ["ATTO", ""],
-        ["Metric", "Value"],
-        ["Read MB/s", "350.93"],
-        ["Write MB/s", "345.04"],
+        ["ATTO", "", ""],
+        ["I/O Size", "Write", "Read"],
+        ["4KB", "120.00", "130.00"],
+        ["64KB", "240.00", "250.00"],
+        ["1MB", "320.00", "330.00"],
+        ["4MB", "360.00", "370.00"],
         ["Crystal Disk Mark", ""],
         ["Metric", "Value"],
         ["Read MB/s", "350.93"],
