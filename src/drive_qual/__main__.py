@@ -1,7 +1,7 @@
 def main() -> None:
-    from drive_qual.cli.legacy import main as legacy_main
+    from drive_qual.cli.main import main as cli_main
 
-    legacy_main()
+    cli_main()
 
 
 if __name__ == "__main__":

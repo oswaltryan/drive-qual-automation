@@ -9,6 +9,7 @@ src/drive_qual/benchmarks/diskspd.py
 src/drive_qual/benchmarks/fio.py
 src/drive_qual/cli/__init__.py
 src/drive_qual/cli/legacy.py
+src/drive_qual/cli/main.py
 src/drive_qual/cli/post_process_measurements.py
 src/drive_qual/cli/post_process_temperature.py
 src/drive_qual/cli/report.py
@@ -69,6 +70,7 @@ tests/test_config.py
 tests/test_fio.py
 tests/test_linux_disks_chart.py
 tests/test_macos_blackmagic.py
+tests/test_main_cli.py
 tests/test_native_disk_ops.py
 tests/test_performance_step.py
 tests/test_power_measurements_paths.py
