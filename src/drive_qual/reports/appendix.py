@@ -323,7 +323,11 @@ def _add_csv_tables_to_cell(
     cell.text = ""
     matching_tables: list[tuple[Path, list[list[str]]]] = []
     for artifact in image_artifacts:
-        csv_path = _matching_measurement_csv(artifact, csv_paths)
+        utility_label = _performance_utility_label(artifact)
+        utility_csv_paths = [
+            csv_path for csv_path in csv_paths if _performance_utility_label(csv_path) == utility_label
+        ]
+        csv_path = _matching_measurement_csv(artifact, utility_csv_paths)
         if csv_path is None:
             continue
         rows = _performance_csv_rows(artifact, csv_path)
@@ -388,7 +392,42 @@ def _matching_artifacts(part_root: Path, dut_name: str, os_name: str, label: str
             continue
         if any(_normalize_text(token) in text for token in category_tokens):
             matches.append(artifact)
+    if label == PERFORMANCE_LABEL:
+        return _matching_performance_artifacts(matches, os_name)
     return matches if label in MEASUREMENT_LABELS else matches[:4]
+
+
+def _matching_performance_artifacts(artifacts: Iterable[Path], os_name: str) -> list[Path]:
+    if os_name != "Windows":
+        return list(artifacts)[:4]
+    selected: list[Path] = []
+    for utility_label in ("ATTO", "Crystal Disk Mark"):
+        utility_artifacts = [
+            artifact for artifact in artifacts if _performance_utility_label(artifact) == utility_label
+        ]
+        selected.extend(_latest_artifacts_by_stem_pair(utility_artifacts))
+    return selected
+
+
+def _latest_artifacts_by_stem_pair(artifacts: list[Path]) -> list[Path]:
+    image_artifacts = _image_artifacts(artifacts)
+    csv_artifacts = _measurement_csvs(artifacts)
+    if not image_artifacts:
+        return artifacts[:2]
+    latest_image = max(image_artifacts, key=_artifact_sort_key)
+    selected = [latest_image]
+    matching_csv = _matching_measurement_csv(latest_image, csv_artifacts)
+    if matching_csv is not None:
+        selected.append(matching_csv)
+    return sorted(selected)
+
+
+def _artifact_sort_key(artifact: Path) -> tuple[float, str]:
+    try:
+        mtime = artifact.stat().st_mtime
+    except OSError:
+        mtime = 0.0
+    return (mtime, str(artifact))
 
 
 def _image_artifacts(artifacts: Iterable[Path]) -> list[Path]:

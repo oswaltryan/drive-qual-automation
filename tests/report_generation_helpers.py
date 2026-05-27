@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import zipfile
 from collections.abc import Callable, Iterable
 from pathlib import Path
@@ -15,7 +16,7 @@ EXPECTED_COMPLIANCE_TABLE_ROW_COUNT = 3
 EXPECTED_TEMPERATURE_TABLE_COLUMN_COUNT = 4
 EXPECTED_TEMPERATURE_TABLE_ROW_COUNT = 12
 EXPECTED_TEMPERATURE_CHART_LEADING_BREAKS = 3
-WINDOWS_PERFORMANCE_BLANK_LINES_BEFORE_FIRST_OBJECT = 10
+WINDOWS_PERFORMANCE_BLANK_LINES_BEFORE_FIRST_OBJECT = 2
 WINDOWS_PERFORMANCE_BLANK_LINES_BETWEEN_OBJECTS = 13
 MAX_WORD_OBJECT_ID = 2_000_000_000
 
@@ -55,11 +56,11 @@ def _assert_appendix_spacing(document: Any) -> None:
     assert _cell_child_tags(document.tables[6], 3, 1) == ["tcPr", "p", "tbl", "p", "p", "tbl", "p"]
     assert _empty_cell_paragraph_line_sizes(document.tables[6], 3, 1) == ["20", "20"]
     assert (
-        _cell_paragraph_texts(document.tables[6], 3, 0)[1:11]
+        _cell_paragraph_texts(document.tables[6], 3, 0)[1:3]
         == [""] * WINDOWS_PERFORMANCE_BLANK_LINES_BEFORE_FIRST_OBJECT
     )
     assert (
-        _performance_object_gap(document.tables[6], first_object_index=11)
+        _performance_object_gap(document.tables[6], first_object_index=3)
         == WINDOWS_PERFORMANCE_BLANK_LINES_BETWEEN_OBJECTS
     )
     assert _table_cell_drawing_count(document.tables[6], 2, 1) == 0
@@ -225,11 +226,17 @@ def _write_appendix_test_artifacts(windows_dir: Path, linux_dir: Path, macos_dir
     _write_measurement_csv(windows_dir / "Padlock DT Inrush Summary.csv")
     _write_png(windows_dir / "Padlock DT Max IO Summary.png")
     _write_measurement_csv(windows_dir / "Padlock DT Max IO Summary.csv")
+    old_atto_png = windows_dir / "Padlock DT ATTO Performance 20260101.png"
+    old_atto_csv = windows_dir / "Padlock DT ATTO Performance 20260101.csv"
+    _write_png(old_atto_png)
+    _write_atto_performance_csv(old_atto_csv)
+    os.utime(old_atto_png, (1, 1))
+    os.utime(old_atto_csv, (1, 1))
     _write_png(windows_dir / "Padlock DT ATTO Performance.png")
     _write_atto_performance_csv(windows_dir / "Padlock DT ATTO Performance.csv")
     _write_png(windows_dir / "Padlock DT CrystalDiskMark Performance.png")
     (windows_dir / "._Padlock DT CrystalDiskMark Performance.png").write_text("not a png", encoding="utf-8")
-    _write_performance_csv(windows_dir / "Padlock DT CrystalDiskMark Performance.csv")
+    _write_performance_csv(windows_dir / "Padlock DT CrystalDiskMark Performance 20260101.csv")
     _write_png(windows_dir / "Padlock DT CrystalDiskInfo Drive Information.png")
     (linux_dir / "Padlock DT Max IO Summary.csv").write_text("time,current\n", encoding="utf-8")
     _write_png(linux_dir / "Padlock DT Disks Performance.png")
