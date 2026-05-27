@@ -10,11 +10,13 @@ from drive_qual.core.storage_paths import SCOPE_ARTIFACT_ROOT, localize_windows_
 
 WORKFLOW_PROFILES: dict[str, tuple[str, ...]] = {
     "core_perf_v1": ("drive_info", "equipment", "power_measurements", "performance"),
+    "core_perf_temp_v1": ("drive_info", "equipment", "power_measurements", "performance", "temperature"),
 }
 STEP_DEPENDENCIES: dict[str, tuple[str, ...]] = {
     "equipment": ("drive_info",),
     "power_measurements": ("equipment",),
     "performance": ("equipment", "power_measurements"),
+    "temperature": ("equipment", "performance"),
 }
 MANIFEST_FILENAME = "workflow_run_manifest.json"
 STATUS_PENDING = "pending"

@@ -17,7 +17,7 @@ from drive_qual.workflows.orchestrator import (
     resolve_selected_steps,
 )
 
-STEP_ORDER: tuple[str, ...] = ("drive_info", "equipment", "power_measurements", "performance")
+STEP_ORDER: tuple[str, ...] = ("drive_info", "equipment", "power_measurements", "performance", "temperature")
 StepRunner = Callable[[], None]
 POWER_OS_KEYS: tuple[str, ...] = ("windows", "linux", "macos")
 PERFORMANCE_HOSTS: tuple[tuple[str, str], ...] = (
@@ -54,6 +54,12 @@ def _run_performance_step(part_number: str | None = None) -> None:
     from drive_qual.platforms.performance import run_software_step
 
     run_software_step(part_number=part_number)
+
+
+def _run_temperature_step(part_number: str | None = None) -> None:
+    from drive_qual.workflows.temperature import run_temperature_step
+
+    run_temperature_step(part_number=part_number)
 
 
 def _has_value(value: Any) -> bool:
@@ -223,6 +229,7 @@ def run_report_workflow(
         "equipment": lambda: _run_equipment_step(part_number=part_number, scope_profile=scope_profile),
         "power_measurements": _run_power_measurements_step,
         "performance": lambda: _run_performance_step(part_number=part_number),
+        "temperature": lambda: _run_temperature_step(part_number=part_number),
     }
     for step in selected:
         if step not in step_runners:

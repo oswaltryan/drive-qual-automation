@@ -10,7 +10,8 @@ from typing import Any
 import pytest
 from _pytest.monkeypatch import MonkeyPatch
 
-EXPECTED_STEP_ORDER = ("drive_info", "equipment", "power_measurements", "performance")
+EXPECTED_STEP_ORDER = ("drive_info", "equipment", "power_measurements", "performance", "temperature")
+EXPECTED_CORE_PERF_PROFILE = ("drive_info", "equipment", "power_measurements", "performance")
 
 
 def _complete_report_payload() -> dict[str, Any]:
@@ -158,7 +159,7 @@ def test_run_report_workflow_delegates_profile_execution_to_orchestrator(monkeyp
         resume=True,
     )
 
-    assert captured["selected_steps"] == EXPECTED_STEP_ORDER
+    assert captured["selected_steps"] == EXPECTED_CORE_PERF_PROFILE
     assert captured["step_runner_keys"] == EXPECTED_STEP_ORDER
     assert captured["profile"] == "core_perf_v1"
     assert captured["part_number"] == "69-420"

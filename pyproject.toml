@@ -17,6 +17,7 @@ dependencies = [
 drive-qual = "drive_qual.cli.legacy:main"
 drive-qual-report = "drive_qual.cli.report:run_report_workflow_cli"
 drive-qual-report-generate = "drive_qual.reports.generate:run_report_generate_cli"
+drive-qual-temperature = "drive_qual.cli.post_process_temperature:run_temperature_post_process_cli"
 
 [tool.uv]
 package = true
