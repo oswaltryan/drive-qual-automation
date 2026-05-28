@@ -5,19 +5,19 @@ import os
 import zipfile
 from collections.abc import Callable, Iterable
 from pathlib import Path
-from shutil import copyfile
+from shutil import rmtree
 from typing import Any, cast
 
-EXPECTED_INLINE_IMAGE_COUNT = 1
-EXPECTED_POWER_OBJECT_COUNT = 7
+EXPECTED_INLINE_IMAGE_COUNT = 0
+EXPECTED_POWER_OBJECT_COUNT = 8
 EXPECTED_MEDIA_FILE_COUNT = 9
 EXPECTED_WINDOWS_PERFORMANCE_OBJECT_COUNT = 2
 EXPECTED_COMPLIANCE_TABLE_ROW_COUNT = 3
 EXPECTED_TEMPERATURE_TABLE_COLUMN_COUNT = 4
 EXPECTED_TEMPERATURE_TABLE_ROW_COUNT = 12
 EXPECTED_TEMPERATURE_CHART_LEADING_BREAKS = 3
-WINDOWS_PERFORMANCE_BLANK_LINES_BEFORE_FIRST_OBJECT = 2
-WINDOWS_PERFORMANCE_BLANK_LINES_BETWEEN_OBJECTS = 13
+WINDOWS_PERFORMANCE_BLANK_LINES_BEFORE_FIRST_OBJECT = 5
+WINDOWS_PERFORMANCE_BLANK_LINES_BETWEEN_OBJECTS = 6
 MAX_WORD_OBJECT_ID = 2_000_000_000
 
 
@@ -56,30 +56,31 @@ def _assert_appendix_spacing(document: Any) -> None:
     assert _cell_child_tags(document.tables[6], 3, 1) == ["tcPr", "p", "tbl", "p", "p", "tbl", "p"]
     assert _empty_cell_paragraph_line_sizes(document.tables[6], 3, 1) == ["20", "20"]
     assert (
-        _cell_paragraph_texts(document.tables[6], 3, 0)[1:3]
+        _cell_paragraph_texts(document.tables[6], 3, 0)[1 : 1 + WINDOWS_PERFORMANCE_BLANK_LINES_BEFORE_FIRST_OBJECT]
         == [""] * WINDOWS_PERFORMANCE_BLANK_LINES_BEFORE_FIRST_OBJECT
     )
-    assert (
-        _performance_object_gap(document.tables[6], first_object_index=3)
-        == WINDOWS_PERFORMANCE_BLANK_LINES_BETWEEN_OBJECTS
-    )
+    assert _performance_object_gap(document.tables[6]) == WINDOWS_PERFORMANCE_BLANK_LINES_BETWEEN_OBJECTS
     assert _table_cell_drawing_count(document.tables[6], 2, 1) == 0
     assert _table_cell_drawing_count(document.tables[6], 3, 1) == 0
 
 
 def _assert_embedded_object_payloads(output_path: Path) -> None:
-    assert _embedded_object_payload_names(output_path) == [
-        "Padlock DT Inrush Summary.png",
-        "Padlock DT Max IO Summary.png",
+    expected_payload_names = [
+        "Padlock DT Temperature Data.png",
+        "In Rush 5V - Padlock DT.png",
+        "Max IO 5V - Padlock DT Max IO 5V.png",
         "Padlock DT ATTO Performance.png",
         "Padlock DT CrystalDiskMark Performance.png",
         "Padlock DT CrystalDiskInfo Drive Information.png",
         "Padlock DT Disks Performance.png",
         "Padlock DT Blackmagic Performance.png",
     ]
+    assert _embedded_object_payload_names(output_path) == expected_payload_names
+    assert _embedded_object_payload_filenames(output_path) == expected_payload_names
+    assert _embedded_object_payload_commands(output_path) == expected_payload_names
     shape_numbers = _embedded_object_shape_numbers(output_path)
     assert len(shape_numbers) == EXPECTED_POWER_OBJECT_COUNT
-    assert shape_numbers == list(range(shape_numbers[0], shape_numbers[0] + (2 * EXPECTED_POWER_OBJECT_COUNT), 2))
+    assert shape_numbers == sorted(set(shape_numbers))
     assert all(object_id < MAX_WORD_OBJECT_ID for object_id in _embedded_object_ids(output_path))
     _assert_footer_text(output_path)
 
@@ -93,7 +94,8 @@ def _assert_temperature_table_shape(table: Any) -> None:
     assert len(table.rows) == EXPECTED_TEMPERATURE_TABLE_ROW_COUNT
     assert [cell.text for cell in table.rows[0].cells] == ["Chart", "Temperature", "Read MB/s", "Write MB/s"]
     assert _table_columns_are_centered(table, range(EXPECTED_TEMPERATURE_TABLE_COLUMN_COUNT))
-    assert _table_cell_drawing_count(table, 1, 0) == 1
+    assert _table_cell_drawing_count(table, 1, 0) == 0
+    assert _table_cell_object_count(table, 1, 0) == 1
     assert _table_cell_line_break_count(table, 1, 0) == EXPECTED_TEMPERATURE_CHART_LEADING_BREAKS
     assert [row.cells[1].text for row in table.rows[1:]] == [
         "-40°C",
@@ -195,6 +197,8 @@ def _write_png(path: Path) -> None:
 
 
 def _prepare_report_generation_shape_fixture(source_root: Path) -> None:
+    if source_root.exists():
+        rmtree(source_root)
     part_dir = source_root / "69-420"
     temperature_dir = part_dir / "Temperature"
     part_dir.mkdir(parents=True, exist_ok=True)
@@ -205,6 +209,8 @@ def _prepare_report_generation_shape_fixture(source_root: Path) -> None:
 
 
 def _prepare_report_generation_images_fixture(source_root: Path) -> Path:
+    if source_root.exists():
+        rmtree(source_root)
     part_dir = source_root / "69-420"
     temperature_dir = part_dir / "Temperature"
     windows_dir = part_dir / "Windows"
@@ -222,10 +228,14 @@ def _prepare_report_generation_images_fixture(source_root: Path) -> Path:
 
 
 def _write_appendix_test_artifacts(windows_dir: Path, linux_dir: Path, macos_dir: Path) -> None:
-    _write_png(windows_dir / "Padlock DT Inrush Summary.png")
-    _write_measurement_csv(windows_dir / "Padlock DT Inrush Summary.csv")
-    _write_png(windows_dir / "Padlock DT Max IO Summary.png")
-    _write_measurement_csv(windows_dir / "Padlock DT Max IO Summary.csv")
+    inrush_dir = windows_dir / "In Rush Current 5V"
+    max_io_dir = windows_dir / "Max IO" / "5V"
+    inrush_dir.mkdir(parents=True)
+    max_io_dir.mkdir(parents=True)
+    _write_png(inrush_dir / "Padlock DT.png")
+    _write_measurement_csv(inrush_dir / "Padlock DT.csv")
+    _write_png(max_io_dir / "Padlock DT Max IO 5V.png")
+    _write_measurement_csv(max_io_dir / "Padlock DT Max IO 5V.csv")
     old_atto_png = windows_dir / "Padlock DT ATTO Performance 20260101.png"
     old_atto_csv = windows_dir / "Padlock DT ATTO Performance 20260101.csv"
     _write_png(old_atto_png)
@@ -250,10 +260,7 @@ def _write_appendix_test_artifacts(windows_dir: Path, linux_dir: Path, macos_dir
 
 
 def _write_temperature_test_artifact(temperature_dir: Path) -> None:
-    source_image = Path(
-        "tests/.tmp/test_report_generation_images/69-420/Windows/Padlock DT CrystalDiskInfo Drive Information.png"
-    )
-    copyfile(source_image, temperature_dir / "Padlock DT Temperature Data.png")
+    _write_png(temperature_dir / "Padlock DT Temperature Data.png")
 
 
 def _write_measurement_csv(path: Path) -> None:
@@ -267,6 +274,10 @@ def _write_measurement_csv(path: Path) -> None:
                 "Accum-Std Dev,Accum-Population",
                 'Meas1,Maximum,Maximum," Ch 4 ",448.62 mA,448.48 mA,444.94 mA,453.56 mA,8.6250 mA,1.5484 mA,132',
                 'Meas3,RMS,RMS," Ch 4 ",258.70 mA,258.60 mA,258.04 mA,259.17 mA,1.1256 mA,212.51 uA,132',
+                'Meas6,Inrush Excluded,Inrush Excluded," Ch 4 ",111.00 mA,111.00 mA,110.00 mA,112.00 mA,'
+                "2.0000 mA,1.0000 mA,132",
+                'Meas8,Max IO Excluded,Max IO Excluded," Ch 4 ",222.00 mA,222.00 mA,221.00 mA,223.00 mA,'
+                "2.0000 mA,1.0000 mA,132",
                 'Meas9,Peak,Peak," Ch 4 ",999.00 mA,999.00 mA,998.00 mA,1000.00 mA,2.0000 mA,1.0000 mA,132',
             ]
         ),
@@ -371,11 +382,10 @@ def _value_column_indexes(document_table: Any) -> range:
     return range(1, min(3, len(document_table.columns)))
 
 
-def _performance_object_gap(document_table: Any, *, first_object_index: int) -> int:
+def _performance_object_gap(document_table: Any) -> int:
     paragraphs = document_table.rows[3].cells[0].paragraphs
-    second_object_index = next(
-        index for index in range(first_object_index + 1, len(paragraphs)) if _paragraph_object_count(paragraphs[index])
-    )
+    object_indexes = [index for index, paragraph in enumerate(paragraphs) if _paragraph_object_count(paragraph)]
+    first_object_index, second_object_index = object_indexes[:2]
     return second_object_index - first_object_index - 1
 
 
@@ -394,9 +404,21 @@ def _media_file_count(path: Path) -> int:
 
 
 def _embedded_object_payload_names(path: Path) -> list[str]:
+    return [metadata["label"] for metadata in _embedded_object_payload_metadata(path)]
+
+
+def _embedded_object_payload_filenames(path: Path) -> list[str]:
+    return [metadata["filename"] for metadata in _embedded_object_payload_metadata(path)]
+
+
+def _embedded_object_payload_commands(path: Path) -> list[str]:
+    return [metadata["command"].removesuffix("\x00") for metadata in _embedded_object_payload_metadata(path)]
+
+
+def _embedded_object_payload_metadata(path: Path) -> list[dict[str, str]]:
     with zipfile.ZipFile(path) as docx_zip:
         object_names = [name for name in docx_zip.namelist() if name.startswith("word/embeddings/oleObject")]
-        return [_ole10_native_label(docx_zip.read(name)) for name in object_names]
+        return [_ole10_native_metadata(docx_zip.read(name)) for name in object_names]
 
 
 def _embedded_object_shape_ids(path: Path) -> list[str]:
@@ -429,16 +451,26 @@ def _assert_footer_text(path: Path) -> None:
     assert " NUMPAGES " in footer_xml
 
 
-def _ole10_native_label(blob: bytes) -> str:
+def _ole10_native_metadata(blob: bytes) -> dict[str, str]:
     marker = "\x01Ole10Native".encode("utf-16le")
     directory_offset = blob.find(marker)
     assert directory_offset >= 0
     stream_start = int.from_bytes(blob[directory_offset + 116 : directory_offset + 120], "little", signed=True)
     sector_offset = (stream_start + 1) * 512
     stream = blob[sector_offset : sector_offset + 512]
-    label_start = 6
-    label_end = stream.index(b"\x00", label_start)
-    return stream[label_start:label_end].decode("utf-8")
+    label, offset = _ole10_native_string(stream, 6)
+    filename, offset = _ole10_native_string(stream, offset)
+    command_size_offset = offset + 4
+    command_size = int.from_bytes(stream[command_size_offset : command_size_offset + 4], "little")
+    command_start = command_size_offset + 4
+    command = stream[command_start : command_start + command_size].decode("utf-8")
+    assert command.endswith("\x00")
+    return {"label": label, "filename": filename, "command": command}
+
+
+def _ole10_native_string(stream: bytes, offset: int) -> tuple[str, int]:
+    end = stream.index(b"\x00", offset)
+    return stream[offset:end].decode("utf-8"), end + 1
 
 
 def _nested_table_rows(cell: Any) -> list[list[str]]:

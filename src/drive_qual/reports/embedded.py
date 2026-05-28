@@ -19,6 +19,8 @@ from drive_qual.reports.constants import (
     PACKAGE_CLSID,
 )
 
+ASCII_CONTROL_CHAR_LIMIT = 32
+
 
 def _add_embedded_package_to_paragraph(paragraph: Any, artifact: Path, *, width: Any) -> None:
     object_r_id = _relate_to_embedded_package(paragraph.part, artifact)
@@ -51,13 +53,86 @@ def _relate_to_embedded_package(part: Any, artifact: Path) -> str:
 
     package = part.package
     partname = package.next_partname("/word/embeddings/oleObject%d.bin")
+    embedded_filename = _embedded_package_filename(artifact)
     ole_part = Part(
         PackURI(str(partname)),
         CT.OFC_OLE_OBJECT,
-        _ole_package_blob(label=artifact.name, filename=artifact.name, payload=artifact.read_bytes()),
+        _ole_package_blob(
+            label=embedded_filename,
+            filename=embedded_filename,
+            payload=_embedded_package_payload(artifact),
+        ),
         package,
     )
     return cast(str, part.relate_to(ole_part, RT.OLE_OBJECT))
+
+
+def _embedded_package_filename(artifact: Path) -> str:
+    parent_label = _embedded_package_parent_label(artifact)
+    filename = _safe_package_filename(artifact.name)
+    if parent_label is None:
+        return filename
+    return _safe_package_filename(f"{parent_label} - {filename}")
+
+
+def _embedded_package_payload(artifact: Path) -> bytes:
+    if artifact.suffix.casefold() == ".png":
+        normalized = _normalized_png_payload(artifact)
+        if normalized is not None:
+            return normalized
+    return artifact.read_bytes()
+
+
+def _normalized_png_payload(artifact: Path) -> bytes | None:
+    from PIL import Image
+
+    try:
+        with Image.open(artifact) as image:
+            loaded = image.copy()
+    except Exception:
+        return None
+
+    stream = io.BytesIO()
+    loaded.save(stream, format="PNG")
+    return stream.getvalue()
+
+
+def _embedded_package_parent_label(artifact: Path) -> str | None:
+    parts = list(artifact.parts[:-1])
+    for index, part in enumerate(parts):
+        token = _normalized_token(part)
+        if "inrush" in token:
+            return _join_package_label_parts("In Rush", _rail_label_parts(parts[index:]))
+        if "maxio" in token:
+            return _join_package_label_parts("Max IO", _rail_label_parts(parts[index:]))
+    return None
+
+
+def _rail_label_parts(parts: list[str]) -> list[str]:
+    labels: list[str] = []
+    for part in parts:
+        token = _normalized_token(part)
+        if "5v" in token:
+            labels.append("5V")
+        elif "12v" in token:
+            labels.append("12V")
+    return labels[:1]
+
+
+def _join_package_label_parts(category: str, labels: list[str]) -> str:
+    return " ".join([category, *labels])
+
+
+def _safe_package_filename(value: str) -> str:
+    sanitized = "".join(
+        "_" if character in '<>:"/\\|?*' or ord(character) < ASCII_CONTROL_CHAR_LIMIT else character
+        for character in value
+    )
+    return sanitized.strip(" .") or "embedded-image.png"
+
+
+def _normalized_token(value: str) -> str:
+    return "".join(character for character in value.casefold() if character.isalnum())
 
 
 def _relate_to_object_icon(part: Any, artifact: Path) -> str:
@@ -139,7 +214,7 @@ def _ole_package_blob(*, label: str, filename: str, payload: bytes) -> bytes:
 def _ole10_native_stream(*, label: str, filename: str, payload: bytes) -> bytes:
     label_bytes = _asciiz(label)
     filename_bytes = _asciiz(filename)
-    command_bytes = filename.encode("utf-8")
+    command_bytes = _asciiz(filename)
     body = b"".join(
         [
             struct.pack("<H", 2),

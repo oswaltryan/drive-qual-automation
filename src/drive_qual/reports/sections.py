@@ -19,7 +19,6 @@ from drive_qual.reports.constants import (
 )
 from drive_qual.reports.docx_shared import (
     _add_heading,
-    _add_picture_to_paragraph,
     _center_cell_paragraphs,
     _center_table_columns,
     _field,
@@ -29,6 +28,7 @@ from drive_qual.reports.docx_shared import (
     _table,
     _to_float,
 )
+from drive_qual.reports.embedded import _add_embedded_package_to_paragraph
 from drive_qual.reports.evaluation import EvaluatedReport, Status
 
 
@@ -177,7 +177,7 @@ def _add_temperature_table(
         chart_paragraph = merged_cell.paragraphs[0]
         for _ in range(3):
             chart_paragraph.add_run().add_break()
-        _add_picture_to_paragraph(chart_paragraph, temperature_artifact, width=inches(1.7))
+        _add_embedded_package_to_paragraph(chart_paragraph, temperature_artifact, width=inches(1.7))
     _center_cell_paragraphs(merged_cell)
     _center_table_columns(table, range(0, 4))
 

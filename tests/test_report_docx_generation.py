@@ -80,10 +80,17 @@ def test_generate_report_docx_embeds_appendix_images_instead_of_paths() -> None:
     assert "Artifact | Path" not in h._table_headers(document)
     assert str(windows_dir) not in h._document_text(document)
     assert "Padlock DT CrystalDiskInfo Drive Information.json" not in h._document_text(document)
+    assert h._nested_table_rows(document.tables[6].rows[1].cells[1]) == [
+        ["Name", "Measurement", "Accum-Mean", "Accum-Min", "Accum-Max"],
+        ["Meas1", "Maximum", "448.48 mA", "444.94 mA", "453.56 mA"],
+        ["Meas3", "RMS", "258.60 mA", "258.04 mA", "259.17 mA"],
+        ["Meas8", "Max IO Excluded", "222.00 mA", "221.00 mA", "223.00 mA"],
+    ]
     assert h._nested_table_rows(document.tables[6].rows[2].cells[1]) == [
         ["Name", "Measurement", "Accum-Mean", "Accum-Min", "Accum-Max"],
         ["Meas1", "Maximum", "448.48 mA", "444.94 mA", "453.56 mA"],
         ["Meas3", "RMS", "258.60 mA", "258.04 mA", "259.17 mA"],
+        ["Meas6", "Inrush Excluded", "111.00 mA", "110.00 mA", "112.00 mA"],
     ]
     assert h._nested_table_columns_evenly_fill_parent(document.tables[6].rows[2].cells[1])
     assert h._table_columns_are_centered(document.tables[6].rows[2].cells[1].tables[0], range(2, 5))

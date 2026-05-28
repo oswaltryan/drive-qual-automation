@@ -93,7 +93,7 @@ def _add_matching_artifacts_to_cell(
     if image_artifacts:
         measurement_csvs = _measurement_csvs(artifacts) if label in MEASUREMENT_LABELS else []
         if label in MEASUREMENT_LABELS:
-            _add_artifact_objects_to_cell(cell, image_artifacts, inches)
+            _add_embedded_image_objects_to_cell(cell, image_artifacts, inches)
         else:
             _add_artifact_images_to_cell(
                 cell,
@@ -122,7 +122,7 @@ def _add_measurement_artifacts_to_row(
     if not image_artifacts:
         artifact_cell.text = _artifact_names(part_root, artifacts)
         return
-    _add_artifact_objects_to_cell(label_cell, image_artifacts, inches)
+    _add_embedded_image_objects_to_cell(label_cell, image_artifacts, inches, blank_before_first=1)
     _center_cell_paragraphs(label_cell)
     _add_measurement_summaries_to_cell(
         artifact_cell,
@@ -150,9 +150,15 @@ def _add_performance_artifacts_to_row(
         return
     sorted_images = _sorted_performance_images(image_artifacts) if os_name == "Windows" else image_artifacts
     if os_name == "Windows":
-        _add_windows_performance_objects_to_cell(label_cell, sorted_images, inches)
+        _add_embedded_image_objects_to_cell(
+            label_cell,
+            sorted_images,
+            inches,
+            blank_before_first=WINDOWS_PERFORMANCE_BLANK_LINES_BEFORE_FIRST_OBJECT,
+            blank_between=WINDOWS_PERFORMANCE_BLANK_LINES_BETWEEN_OBJECTS,
+        )
     else:
-        _add_artifact_objects_to_cell(label_cell, sorted_images, inches)
+        _add_embedded_image_objects_to_cell(label_cell, sorted_images, inches, blank_before_first=1)
     _add_csv_tables_to_cell(
         artifact_cell,
         sorted_images,
@@ -174,7 +180,7 @@ def _add_drive_information_artifacts_to_row(
     artifacts = _matching_artifacts(part_root, dut_name, os_name, "Drive Information")
     image_artifacts = _image_artifacts(artifacts)
     if image_artifacts:
-        _add_artifact_objects_to_cell(label_cell, image_artifacts, inches)
+        _add_embedded_image_objects_to_cell(label_cell, image_artifacts, inches, blank_before_first=1)
     artifact_cell.text = ""
     _add_cdi_details_table_to_cell(artifact_cell, _cdi_details(data, dut_name), inches)
 
@@ -241,7 +247,7 @@ def _add_measurement_summary_for_image(
     csv_path = _matching_measurement_csv(image_artifact, measurement_csvs)
     if csv_path is None:
         return False
-    rows = _accum_measurement_rows(csv_path)
+    rows = _accum_measurement_rows(csv_path, image_artifact)
     if not rows:
         return False
     table = cell.add_table(rows=1, cols=len(rows[0]))
@@ -260,34 +266,25 @@ def _add_measurement_summary_for_image(
     return True
 
 
-def _add_artifact_objects_to_cell(cell: Any, image_artifacts: Iterable[Path], inches: Any) -> None:
-    first = not any(paragraph.text for paragraph in cell.paragraphs)
-    for artifact in image_artifacts:
-        if not first:
+def _add_embedded_image_objects_to_cell(
+    cell: Any,
+    image_artifacts: Iterable[Path],
+    inches: Any,
+    *,
+    blank_before_first: int = 0,
+    blank_between: int = 1,
+) -> None:
+    for index, artifact in enumerate(image_artifacts):
+        blank_count = blank_before_first if index == 0 else blank_between
+        for _ in range(blank_count):
             cell.add_paragraph()
         object_paragraph = cell.add_paragraph()
         _add_embedded_package_to_paragraph(object_paragraph, artifact, width=inches(OBJECT_ICON_WIDTH_INCHES))
-        first = False
 
 
 def _center_performance_summary_columns(table: Any, utility_label: str) -> None:
     if utility_label in {"ATTO", "Crystal Disk Mark", "Disks", "Blackmagic"}:
         _center_table_columns(table, range(1, min(3, len(table.columns))))
-
-
-def _add_windows_performance_objects_to_cell(cell: Any, image_artifacts: Iterable[Path], inches: Any) -> None:
-    first = True
-    for artifact in image_artifacts:
-        blank_count = (
-            WINDOWS_PERFORMANCE_BLANK_LINES_BEFORE_FIRST_OBJECT
-            if first
-            else WINDOWS_PERFORMANCE_BLANK_LINES_BETWEEN_OBJECTS
-        )
-        for _ in range(blank_count):
-            cell.add_paragraph()
-        object_paragraph = cell.add_paragraph()
-        _add_embedded_package_to_paragraph(object_paragraph, artifact, width=inches(OBJECT_ICON_WIDTH_INCHES))
-        first = False
 
 
 def _add_measurement_summaries_to_cell(
@@ -438,19 +435,30 @@ def _measurement_csvs(artifacts: Iterable[Path]) -> list[Path]:
     return [artifact for artifact in artifacts if artifact.suffix.casefold() == ".csv"]
 
 
-def _accum_measurement_rows(csv_path: Path) -> list[list[str]]:
+def _accum_measurement_rows(csv_path: Path, image_artifact: Path) -> list[list[str]]:
     rows = _measurement_rows(csv_path)
     accum_fields = _accum_fields(rows)
     if not accum_fields:
         return []
     table_rows = [["Name", "Measurement", *accum_fields]]
+    excluded_rows = _excluded_measurement_rows(image_artifact)
     for row in rows:
-        if row.get("Name") in EXCLUDED_MEASUREMENT_ROWS:
+        if row.get("Name") in excluded_rows:
             continue
         values = [row.get("Name", ""), row.get("Measurement", "")]
         values.extend(row.get(field, "") for field in accum_fields)
         table_rows.append(values)
     return table_rows
+
+
+def _excluded_measurement_rows(image_artifact: Path) -> set[str]:
+    text = _normalize_text(str(image_artifact))
+    excluded = set(EXCLUDED_MEASUREMENT_ROWS)
+    if "in rush" in text or "inrush" in text:
+        excluded.add("Meas6")
+    if "max io" in text or "max i o" in text:
+        excluded.add("Meas8")
+    return excluded
 
 
 def _measurement_rows(csv_path: Path) -> list[dict[str, str]]:
