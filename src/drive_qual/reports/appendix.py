@@ -54,8 +54,14 @@ def _add_appendix(document: Any, data: dict[str, Any], part_root: Path, inches: 
     for dut_name in duts:
         _add_heading(document, f"Disk Performance Raw Data & Measurements ({dut_name})", level=2)
         for os_name in ("Windows", "Linux", "macOS"):
+            if os_name == "macOS" and _macos_appendix_starts_new_page(dut_name):
+                document.add_page_break()
             _add_platform_artifact_table(document, data, part_root, dut_name, os_name, inches)
             document.add_paragraph("")
+
+
+def _macos_appendix_starts_new_page(dut_name: str) -> bool:
+    return _normalize_text(dut_name) == "padlock dt"
 
 
 def _add_platform_artifact_table(

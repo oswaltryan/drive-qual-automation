@@ -196,7 +196,7 @@ def _write_png(path: Path) -> None:
     image.save(path)
 
 
-def _prepare_report_generation_shape_fixture(source_root: Path) -> None:
+def _prepare_report_generation_shape_fixture(source_root: Path, *, dut_name: str = "Padlock DT") -> None:
     if source_root.exists():
         rmtree(source_root)
     part_dir = source_root / "69-420"
@@ -204,11 +204,11 @@ def _prepare_report_generation_shape_fixture(source_root: Path) -> None:
     part_dir.mkdir(parents=True, exist_ok=True)
     temperature_dir.mkdir(parents=True, exist_ok=True)
     report_path = part_dir / "drive_qualification_report_atomic_tests.json"
-    report_path.write_text(json.dumps(_report_payload()), encoding="utf-8")
-    _write_temperature_test_artifact(temperature_dir)
+    report_path.write_text(json.dumps(_report_payload(dut_name=dut_name)), encoding="utf-8")
+    _write_temperature_test_artifact(temperature_dir, dut_name)
 
 
-def _prepare_report_generation_images_fixture(source_root: Path) -> Path:
+def _prepare_report_generation_images_fixture(source_root: Path, *, dut_name: str = "Padlock DT") -> Path:
     if source_root.exists():
         rmtree(source_root)
     part_dir = source_root / "69-420"
@@ -221,46 +221,48 @@ def _prepare_report_generation_images_fixture(source_root: Path) -> Path:
     macos_dir.mkdir(parents=True, exist_ok=True)
     temperature_dir.mkdir(parents=True, exist_ok=True)
     report_path = part_dir / "drive_qualification_report_atomic_tests.json"
-    report_path.write_text(json.dumps(_report_payload()), encoding="utf-8")
-    _write_appendix_test_artifacts(windows_dir, linux_dir, macos_dir)
-    _write_temperature_test_artifact(temperature_dir)
+    report_path.write_text(json.dumps(_report_payload(dut_name=dut_name)), encoding="utf-8")
+    _write_appendix_test_artifacts(windows_dir, linux_dir, macos_dir, dut_name=dut_name)
+    _write_temperature_test_artifact(temperature_dir, dut_name)
     return windows_dir
 
 
-def _write_appendix_test_artifacts(windows_dir: Path, linux_dir: Path, macos_dir: Path) -> None:
+def _write_appendix_test_artifacts(
+    windows_dir: Path, linux_dir: Path, macos_dir: Path, *, dut_name: str = "Padlock DT"
+) -> None:
     inrush_dir = windows_dir / "In Rush Current 5V"
     max_io_dir = windows_dir / "Max IO" / "5V"
     inrush_dir.mkdir(parents=True)
     max_io_dir.mkdir(parents=True)
-    _write_png(inrush_dir / "Padlock DT.png")
-    _write_measurement_csv(inrush_dir / "Padlock DT.csv")
-    _write_png(max_io_dir / "Padlock DT Max IO 5V.png")
-    _write_measurement_csv(max_io_dir / "Padlock DT Max IO 5V.csv")
-    old_atto_png = windows_dir / "Padlock DT ATTO Performance 20260101.png"
-    old_atto_csv = windows_dir / "Padlock DT ATTO Performance 20260101.csv"
+    _write_png(inrush_dir / f"{dut_name}.png")
+    _write_measurement_csv(inrush_dir / f"{dut_name}.csv")
+    _write_png(max_io_dir / f"{dut_name} Max IO 5V.png")
+    _write_measurement_csv(max_io_dir / f"{dut_name} Max IO 5V.csv")
+    old_atto_png = windows_dir / f"{dut_name} ATTO Performance 20260101.png"
+    old_atto_csv = windows_dir / f"{dut_name} ATTO Performance 20260101.csv"
     _write_png(old_atto_png)
     _write_atto_performance_csv(old_atto_csv)
     os.utime(old_atto_png, (1, 1))
     os.utime(old_atto_csv, (1, 1))
-    _write_png(windows_dir / "Padlock DT ATTO Performance.png")
-    _write_atto_performance_csv(windows_dir / "Padlock DT ATTO Performance.csv")
-    _write_png(windows_dir / "Padlock DT CrystalDiskMark Performance.png")
-    (windows_dir / "._Padlock DT CrystalDiskMark Performance.png").write_text("not a png", encoding="utf-8")
-    _write_performance_csv(windows_dir / "Padlock DT CrystalDiskMark Performance 20260101.csv")
-    _write_png(windows_dir / "Padlock DT CrystalDiskInfo Drive Information.png")
-    (windows_dir / "Padlock DT CrystalDiskInfo Drive Information.json").write_text(
-        json.dumps({"model": "Apricorn Padlock DT"}),
+    _write_png(windows_dir / f"{dut_name} ATTO Performance.png")
+    _write_atto_performance_csv(windows_dir / f"{dut_name} ATTO Performance.csv")
+    _write_png(windows_dir / f"{dut_name} CrystalDiskMark Performance.png")
+    (windows_dir / f"._{dut_name} CrystalDiskMark Performance.png").write_text("not a png", encoding="utf-8")
+    _write_performance_csv(windows_dir / f"{dut_name} CrystalDiskMark Performance 20260101.csv")
+    _write_png(windows_dir / f"{dut_name} CrystalDiskInfo Drive Information.png")
+    (windows_dir / f"{dut_name} CrystalDiskInfo Drive Information.json").write_text(
+        json.dumps({"model": f"Apricorn {dut_name}"}),
         encoding="utf-8",
     )
-    (linux_dir / "Padlock DT Max IO Summary.csv").write_text("time,current\n", encoding="utf-8")
-    _write_png(linux_dir / "Padlock DT Disks Performance.png")
-    _write_linux_disks_performance_csv(linux_dir / "Padlock DT Disks Performance.csv")
-    _write_png(macos_dir / "Padlock DT Blackmagic Performance.png")
-    _write_performance_csv(macos_dir / "Padlock DT Blackmagic Performance.csv")
+    (linux_dir / f"{dut_name} Max IO Summary.csv").write_text("time,current\n", encoding="utf-8")
+    _write_png(linux_dir / f"{dut_name} Disks Performance.png")
+    _write_linux_disks_performance_csv(linux_dir / f"{dut_name} Disks Performance.csv")
+    _write_png(macos_dir / f"{dut_name} Blackmagic Performance.png")
+    _write_performance_csv(macos_dir / f"{dut_name} Blackmagic Performance.csv")
 
 
-def _write_temperature_test_artifact(temperature_dir: Path) -> None:
-    _write_png(temperature_dir / "Padlock DT Temperature Data.png")
+def _write_temperature_test_artifact(temperature_dir: Path, dut_name: str = "Padlock DT") -> None:
+    _write_png(temperature_dir / f"{dut_name} Temperature Data.png")
 
 
 def _write_measurement_csv(path: Path) -> None:
@@ -530,6 +532,13 @@ def _has_paragraph_between_tables(document: Any, first_header: str, second_heade
     return "paragraph" in labels[first_index + 1 : second_index]
 
 
+def _has_page_break_between_tables(document: Any, first_header: str, second_header: str) -> bool:
+    labels = _body_block_labels(document)
+    first_index = labels.index(f"table:{first_header}")
+    second_index = labels.index(f"table:{second_header}")
+    return "page_break" in labels[first_index + 1 : second_index]
+
+
 def _body_block_labels(document: Any) -> list[str]:
     table_headers = iter(" | ".join(cell.text for cell in table.rows[0].cells) for table in document.tables)
     labels: list[str] = []
@@ -537,11 +546,11 @@ def _body_block_labels(document: Any) -> list[str]:
         if child.tag.endswith("}tbl"):
             labels.append(f"table:{next(table_headers)}")
         elif child.tag.endswith("}p"):
-            labels.append("paragraph")
+            labels.append("page_break" if child.xpath(".//w:br[@w:type='page']") else "paragraph")
     return labels
 
 
-def _report_payload() -> dict[str, Any]:
+def _report_payload(*, dut_name: str = "Padlock DT") -> dict[str, Any]:
     return {
         "drive_info": {
             "apricorn_part_number": "69-420",
@@ -569,25 +578,25 @@ def _report_payload() -> dict[str, Any]:
                 "os_version": "OS 15",
                 "software": [{"name": "Blackmagic Disk Speed Test", "version": "4.2"}],
             },
-            "dut": {"Padlock DT": {"serial_number": "DUT123"}},
+            "dut": {dut_name: {"serial_number": "DUT123"}},
         },
         "compatibility": {
             "recognized_by_os": {"linux": True, "macos": True, "windows": True},
             "hot_pluggable": {"linux": True, "macos": True, "windows": True},
         },
         "power": {
-            "Padlock DT": {
+            dut_name: {
                 "max_inrush_current_5v": {"linux": 700, "macos": 800, "windows": 750},
                 "max_read_write_current_5v": {"linux": 850, "macos": 860, "windows": 870},
                 "rms_read_write_current_5v": {"linux": 900, "macos": 510, "windows": 520},
             }
         },
         "performance": {
-            "Padlock DT": {
+            dut_name: {
                 "Windows": {
                     "CrystalDiskInfo": {
                         "screenshot": True,
-                        "model": "Apricorn Padlock DT",
+                        "model": f"Apricorn {dut_name}",
                         "transfer_mode": "SATA/600 | SATA/600",
                         "standard": "ACS-4",
                         "features": "S.M.A.R.T., NCQ, TRIM",
@@ -601,7 +610,7 @@ def _report_payload() -> dict[str, Any]:
                 "macOS": {"Blackmagic Disk Speed Test": {"read": 293.2, "write": 844.2}},
             }
         },
-        "temperature": {"Padlock DT": {"performance": {"-40c": {"read_mb_s": 107.59, "write_mb_s": 109.31}}}},
+        "temperature": {dut_name: {"performance": {"-40c": {"read_mb_s": 107.59, "write_mb_s": 109.31}}}},
         "compliance": {
             "usb_if_msc_iterations": 3,
             "usb_if_msc_result": "Pass",

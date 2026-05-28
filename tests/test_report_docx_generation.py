@@ -77,6 +77,7 @@ def test_generate_report_docx_embeds_appendix_images_instead_of_paths() -> None:
     document = Document(output_path)
 
     h._assert_appendix_object_layout(document, output_path)
+    assert h._has_page_break_between_tables(document, "Linux | ", "macOS | ")
     assert "Artifact | Path" not in h._table_headers(document)
     assert str(windows_dir) not in h._document_text(document)
     assert "Padlock DT CrystalDiskInfo Drive Information.json" not in h._document_text(document)
@@ -185,6 +186,20 @@ def test_generate_report_docx_marks_missing_cdi_details_red() -> None:
     assert _cell_shading_fill(cdi_table.rows[1].cells[1]) is None
     assert cdi_table.rows[2].cells[1].text == ""
     assert _cell_shading_fill(cdi_table.rows[2].cells[1]) == "FFC7CE"
+
+
+def test_generate_report_docx_keeps_non_dt_linux_and_macos_appendix_tables_together() -> None:
+    from docx import Document
+
+    source_root = Path("tests/.tmp/test_report_generation_non_dt_appendix")
+    h._prepare_report_generation_images_fixture(source_root, dut_name="Padlock SSD")
+
+    module = importlib.import_module("drive_qual.reports.generate")
+    output_path = module.generate_report_docx(part_number="69-420", source_root=source_root)
+    document = Document(output_path)
+
+    assert h._has_paragraph_between_tables(document, "Linux | ", "macOS | ")
+    assert not h._has_page_break_between_tables(document, "Linux | ", "macOS | ")
 
 
 def _cell_shading_fill(cell: Any) -> str | None:
