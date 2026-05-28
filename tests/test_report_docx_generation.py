@@ -79,6 +79,7 @@ def test_generate_report_docx_embeds_appendix_images_instead_of_paths() -> None:
     h._assert_appendix_object_layout(document, output_path)
     assert "Artifact | Path" not in h._table_headers(document)
     assert str(windows_dir) not in h._document_text(document)
+    assert "Padlock DT CrystalDiskInfo Drive Information.json" not in h._document_text(document)
     assert h._nested_table_rows(document.tables[6].rows[2].cells[1]) == [
         ["Name", "Measurement", "Accum-Mean", "Accum-Min", "Accum-Max"],
         ["Meas1", "Maximum", "448.48 mA", "444.94 mA", "453.56 mA"],

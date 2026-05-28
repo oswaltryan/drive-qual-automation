@@ -47,6 +47,18 @@ CDI_FIELD_BY_AUTOMATION_ID = {
     "1045": "power_on_hours",
 }
 
+CDI_FIELD_BY_LABEL = {
+    "firmware": "firmware",
+    "serialnumber": "serial_number",
+    "interface": "interface",
+    "transfermode": "transfer_mode",
+    "standard": "standard",
+    "features": "features",
+    "rotationrate": "rotation_rate",
+    "poweroncount": "power_on_count",
+    "poweronhours": "power_on_hours",
+}
+
 CDI_DRIVE_INFO_FIELDS = {
     "firmware": "firmware",
     "serial_number": "serial_number",
@@ -161,9 +173,13 @@ def _cdi_artifact_dir(part_number: str) -> Path:
 
 def _write_cdi_extracted_data_artifact(part_number: str, dut_name: str, extracted_data: dict[str, str]) -> None:
     json_path = _cdi_artifact_dir(part_number) / f"{dut_name}_{time.strftime('%Y%m%d_%H%M%S')}.json"
+    _write_cdi_extracted_data_json(json_path, extracted_data)
+    print(f"Extracted CDI info saved to: {json_path}")
+
+
+def _write_cdi_extracted_data_json(json_path: Path, extracted_data: dict[str, str]) -> None:
     with open(json_path, "w", encoding="utf-8") as f:
         json.dump(extracted_data, f, indent=4)
-    print(f"Extracted CDI info saved to: {json_path}")
 
 
 def _extract_cdi_text_data(main_window: Any) -> dict[str, str]:
@@ -173,18 +189,56 @@ def _extract_cdi_text_data(main_window: Any) -> dict[str, str]:
         for edit in main_window.descendants(control_type="Edit"):
             auto_id = str(edit.element_info.automation_id)
             if auto_id in CDI_FIELD_BY_AUTOMATION_ID:
-                try:
-                    text = edit.get_value()
-                except Exception:
-                    try:
-                        text = edit.window_text()
-                    except Exception:
-                        text = ""
+                text = _control_text(edit)
                 if text and text.strip() and text.strip() != "----":
                     extracted_data[CDI_FIELD_BY_AUTOMATION_ID[auto_id]] = text.strip()
     except Exception as ex:
         print(f"Warning: Failed to extract text from CDI Edit controls: {ex}")
+    extracted_data.update(
+        {key: value for key, value in _extract_cdi_labeled_text_data(main_window).items() if key not in extracted_data}
+    )
     return extracted_data
+
+
+def _extract_cdi_labeled_text_data(main_window: Any) -> dict[str, str]:
+    """Extract CDI fields from adjacent label/value controls."""
+    try:
+        texts = [_normalize_cdi_value(_control_text(control)) for control in main_window.descendants()]
+    except Exception as ex:
+        print(f"Warning: Failed to extract text from CDI label controls: {ex}")
+        return {}
+    texts = [text for text in texts if text]
+    label_indexes = {_normalize_cdi_label(label) for label in CDI_FIELD_BY_LABEL}
+    extracted_data: dict[str, str] = {}
+    for index, text in enumerate(texts):
+        field_key = CDI_FIELD_BY_LABEL.get(_normalize_cdi_label(text))
+        if field_key is None:
+            continue
+        for candidate in texts[index + 1 : index + 4]:
+            if _normalize_cdi_label(candidate) in label_indexes:
+                continue
+            extracted_data[field_key] = candidate
+            break
+    return extracted_data
+
+
+def _control_text(control: Any) -> str:
+    try:
+        return str(control.get_value())
+    except Exception:
+        try:
+            return str(control.window_text())
+        except Exception:
+            return ""
+
+
+def _normalize_cdi_label(value: str) -> str:
+    return "".join(character for character in value.casefold() if character.isalnum())
+
+
+def _normalize_cdi_value(value: str) -> str:
+    text = value.strip()
+    return "" if text == "----" else text
 
 
 def automate_crystal_disk_info(

@@ -175,11 +175,7 @@ def _add_drive_information_artifacts_to_row(
     image_artifacts = _image_artifacts(artifacts)
     if image_artifacts:
         _add_artifact_objects_to_cell(label_cell, image_artifacts, inches)
-    non_image_names = _artifact_names(part_root, _non_image_artifacts(artifacts))
-    if non_image_names:
-        artifact_cell.text = non_image_names
-    else:
-        artifact_cell.text = ""
+    artifact_cell.text = ""
     _add_cdi_details_table_to_cell(artifact_cell, _cdi_details(data, dut_name), inches)
 
 

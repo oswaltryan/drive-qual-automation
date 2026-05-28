@@ -437,6 +437,10 @@ def test_update_cdi_json_records_extracted_data_and_drive_info(tmp_path: Path) -
         "firmware": "1.2.3",
         "serial_number": "CDI123",
         "interface": "USB (Serial ATA)",
+        "transfer_mode": "SATA/600 | SATA/600",
+        "standard": "ACS-3 | ACS-3 Revision 5",
+        "features": "S.M.A.R.T., NCQ, GPL",
+        "rotation_rate": "5400 RPM",
     }
 
     windows_performance._update_cdi_json(report_path, data, "Padlock DT", True, extracted_data)
@@ -448,6 +452,58 @@ def test_update_cdi_json_records_extracted_data_and_drive_info(tmp_path: Path) -
     assert saved["drive_info"]["firmware"] == "1.2.3"
     assert saved["drive_info"]["serial_number"] == "CDI123"
     assert saved["drive_info"]["interface"] == "USB (Serial ATA)"
+
+
+def test_extract_cdi_text_data_falls_back_to_labeled_controls() -> None:
+    class FakeElementInfo:
+        def __init__(self, automation_id: str) -> None:
+            self.automation_id = automation_id
+
+    class FakeControl:
+        def __init__(self, text: str, *, automation_id: str = "") -> None:
+            self._text = text
+            self.element_info = FakeElementInfo(automation_id)
+
+        def get_value(self) -> str:
+            if self.element_info.automation_id:
+                return self._text
+            raise RuntimeError("not an edit control")
+
+        def window_text(self) -> str:
+            return self._text
+
+    class FakeWindow:
+        def descendants(self, control_type: str | None = None) -> list[FakeControl]:
+            edit_controls = [
+                FakeControl("ST8000DM004-2U9188 : 8001.5 GB", automation_id="1012"),
+                FakeControl("0001", automation_id="1014"),
+                FakeControl("ZR16JN0F", automation_id="1015"),
+                FakeControl("USB (Serial ATA)", automation_id="1017"),
+            ]
+            labeled_controls = [
+                FakeControl("Transfer Mode"),
+                FakeControl("SATA/600 | SATA/600"),
+                FakeControl("Standard"),
+                FakeControl("ACS-3 | ACS-3 Revision 5"),
+                FakeControl("Features"),
+                FakeControl("S.M.A.R.T., NCQ, GPL"),
+                FakeControl("Rotation Rate"),
+                FakeControl("5400 RPM"),
+            ]
+            return edit_controls if control_type == "Edit" else [*edit_controls, *labeled_controls]
+
+    extracted_data = windows_performance._extract_cdi_text_data(FakeWindow())
+
+    assert extracted_data == {
+        "model": "ST8000DM004-2U9188 : 8001.5 GB",
+        "firmware": "0001",
+        "serial_number": "ZR16JN0F",
+        "interface": "USB (Serial ATA)",
+        "transfer_mode": "SATA/600 | SATA/600",
+        "standard": "ACS-3 | ACS-3 Revision 5",
+        "features": "S.M.A.R.T., NCQ, GPL",
+        "rotation_rate": "5400 RPM",
+    }
 
 
 def test_windows_performance_syncs_report_without_running_automation(monkeypatch: MonkeyPatch, tmp_path: Path) -> None:

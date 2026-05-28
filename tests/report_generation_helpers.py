@@ -238,6 +238,10 @@ def _write_appendix_test_artifacts(windows_dir: Path, linux_dir: Path, macos_dir
     (windows_dir / "._Padlock DT CrystalDiskMark Performance.png").write_text("not a png", encoding="utf-8")
     _write_performance_csv(windows_dir / "Padlock DT CrystalDiskMark Performance 20260101.csv")
     _write_png(windows_dir / "Padlock DT CrystalDiskInfo Drive Information.png")
+    (windows_dir / "Padlock DT CrystalDiskInfo Drive Information.json").write_text(
+        json.dumps({"model": "Apricorn Padlock DT"}),
+        encoding="utf-8",
+    )
     (linux_dir / "Padlock DT Max IO Summary.csv").write_text("time,current\n", encoding="utf-8")
     _write_png(linux_dir / "Padlock DT Disks Performance.png")
     _write_linux_disks_performance_csv(linux_dir / "Padlock DT Disks Performance.csv")
