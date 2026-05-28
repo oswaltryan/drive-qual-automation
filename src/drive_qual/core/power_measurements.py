@@ -7,6 +7,7 @@ import time
 from pathlib import Path, PureWindowsPath
 from typing import Any, cast
 
+from drive_qual.core.product_profiles import report_dut_name_candidates
 from drive_qual.core.report_session import (
     load_report,
     report_path_for,
@@ -38,16 +39,6 @@ REPORT_OS_KEY_BY_ARTIFACT = {
 CSV_ENCODING_CANDIDATES = ("utf-8", "utf-8-sig", "cp1252", "latin-1")
 CSV_APPEAR_TIMEOUT_SECONDS = 45.0
 CSV_APPEAR_POLL_INTERVAL_SECONDS = 0.25
-DUT_ALIASES: dict[str, str] = {
-    "secure key 3 0": "Padlock DT FIPS",
-    "secure key 3": "Padlock DT FIPS",
-    "secure key dt": "Padlock DT FIPS",
-    "secure key dt fips": "Padlock DT FIPS",
-    "secure key 3 0 fips": "Padlock DT FIPS",
-    "secure key fips": "Padlock DT FIPS",
-    "aegis fips dt": "Padlock DT FIPS",
-    "padlock dt": "Padlock DT FIPS",
-}
 MAX_IO_RAIL_SUFFIX_PATTERN = re.compile(r"^(?P<dut>.+?)(?:[\s_-]+(?P<rail>5v|12v))?$", re.IGNORECASE)
 
 
@@ -180,8 +171,7 @@ def _resolve_dut_key(power: dict[str, Any], dut_name: str) -> str | None:
     if direct_match is not None:
         return direct_match
 
-    alias_target = DUT_ALIASES.get(_normalize_dut_name(dut_name))
-    if alias_target is not None:
+    for alias_target in report_dut_name_candidates(dut_name):
         alias_match = _find_matching_power_key(power, alias_target)
         if alias_match is not None:
             return alias_match

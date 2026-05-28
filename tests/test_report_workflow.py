@@ -17,7 +17,7 @@ EXPECTED_CORE_PERF_PROFILE = ("drive_info", "equipment", "power_measurements", "
 def _complete_report_payload() -> dict[str, Any]:
     return {
         "equipment": {
-            "dut": {"Padlock DT FIPS": {"serial_number": "ABC123"}},
+            "dut": {"Padlock DT": {"serial_number": "ABC123"}},
             "windows_host": {
                 "software": [
                     {"name": "CrystalDiskInfo", "version": "8.8.9"},
@@ -29,7 +29,7 @@ def _complete_report_payload() -> dict[str, Any]:
             "macos_host": {"software": [{"name": "Blackmagic Disk Speed Test", "version": "4.2"}]},
         },
         "power": {
-            "Padlock DT FIPS": {
+            "Padlock DT": {
                 "max_inrush_current_5v": {"windows": 1.0, "linux": 1.0, "macos": 1.0},
                 "max_inrush_current_12v": {"windows": 1.0, "linux": 1.0, "macos": 1.0},
                 "max_read_write_current_5v": {"windows": 1.0, "linux": 1.0, "macos": 1.0},
@@ -39,7 +39,7 @@ def _complete_report_payload() -> dict[str, Any]:
             }
         },
         "performance": {
-            "Padlock DT FIPS": {
+            "Padlock DT": {
                 "Windows": {
                     "CrystalDiskInfo": {"screenshot": "cdi.png"},
                     "CrystalDiskMark": {"read": 100.0, "write": 100.0},
@@ -186,7 +186,7 @@ def test_run_report_workflow_keeps_current_marker_when_report_is_incomplete(monk
     module = importlib.import_module("drive_qual.workflows.report")
     cleared: list[str] = []
     payload = _complete_report_payload()
-    payload["power"]["Padlock DT FIPS"]["max_read_write_current_12v"]["windows"] = None
+    payload["power"]["Padlock DT"]["max_read_write_current_12v"]["windows"] = None
 
     monkeypatch.setattr(module, "execute_orchestrated_workflow", lambda **kwargs: None)
     monkeypatch.setattr(module, "report_path_for", lambda folder_name: Path(f"Z:/{folder_name}/report.json"))

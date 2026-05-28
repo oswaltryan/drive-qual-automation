@@ -3,17 +3,9 @@ from __future__ import annotations
 from typing import Any
 
 from drive_qual.core.dut_selection import normalize_dut_bindings
+from drive_qual.core.product_profiles import report_dut_names_for_form_factor
 from drive_qual.core.report_session import load_report, report_path_for, resolve_folder_name, save_report
 from drive_qual.platforms.performance_common import BLACKMAGIC_DISK_SPEED_TEST_TOOL_NAME
-
-FORM_FACTOR_PRODUCTS: dict[str, list[str]] = {
-    "2.5": ["Fortress", "Fortress L3", "Padlock 3.0"],
-    "3.5": ["Padlock DT FIPS"],
-    "sata (custom)": ["ASK3"],
-    "msata": ["Padlock SSD"],
-    "emmc": ["ASK3-NX"],
-    "nvme": ["Padlock NVX"],
-}
 
 HOST_DEFAULTS: dict[str, dict[str, Any]] = {
     "windows_host": {
@@ -70,10 +62,11 @@ def _dut_from_form_factor(data: dict[str, Any]) -> dict[str, dict[str, str | Non
         if isinstance(value, str):
             form_factor = value.strip().lower()
 
-    if form_factor not in FORM_FACTOR_PRODUCTS:
+    dut_names = report_dut_names_for_form_factor(form_factor)
+    if not dut_names:
         raise ValueError(f"Unknown form factor: {form_factor or '<missing>'}")
 
-    return {dut_name: {"serial_number": None} for dut_name in FORM_FACTOR_PRODUCTS[form_factor]}
+    return {dut_name: {"serial_number": None} for dut_name in dut_names}
 
 
 def apply_scope_profile(equipment: dict[str, Any], scope: str) -> None:

@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import Any
 
+from drive_qual.core.product_profiles import case_material_for_product_name
 from drive_qual.reports.cdi import CDI_APPENDIX_FIELDS
 
 
@@ -41,14 +42,6 @@ class ReviewFinding:
     reason: str
 
 
-ALUMINUM_PRODUCTS = {
-    "ask3",
-    "ask3-nx",
-    "fortress l3",
-    "padlock dt",
-    "padlock dt fips",
-    "padlock ssd",
-}
 OS_KEYS = ("windows", "linux", "macos")
 MAX_IO_RMS_FAIL_MA = 1000.0
 MAX_IO_RMS_WARN_MA = 900.0
@@ -92,10 +85,7 @@ def evaluate_report(data: dict[str, Any]) -> EvaluatedReport:
 
 
 def case_material_for_product(product_name: str) -> str:
-    normalized = _normalize_product(product_name)
-    if normalized in ALUMINUM_PRODUCTS:
-        return "aluminum"
-    return "plastic"
+    return case_material_for_product_name(product_name)
 
 
 def evaluate_power(power: object) -> dict[str, list[EvaluatedValue]]:
@@ -376,10 +366,6 @@ def _result_text(value: object) -> str:
     if value is False:
         return "Fail"
     return str(value or "")
-
-
-def _normalize_product(value: str) -> str:
-    return " ".join(value.replace("_", " ").casefold().split())
 
 
 def _to_float(value: object) -> float | None:

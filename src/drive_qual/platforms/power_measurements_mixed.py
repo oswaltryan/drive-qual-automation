@@ -19,6 +19,7 @@ from drive_qual.core.dut_selection import (
 )
 from drive_qual.core.io_utils import mk_dir
 from drive_qual.core.power_measurements import extract_power_values_from_csv, update_power_measurements_from_saved_csvs
+from drive_qual.core.product_profiles import power_rails_for_dut
 from drive_qual.core.report_session import (
     load_report,
     report_path_for,
@@ -46,8 +47,6 @@ ARTIFACT_OS_NAME_BY_SLOT = {
     "macos": "macOS",
     "windows": "Windows",
 }
-DT_FIPS_DUT_NAME = "padlock dt fips"
-DT_FIPS_MAX_IO_RAILS: tuple[str, ...] = ("5V", "12V")
 
 
 def _display_path(path: str | Path) -> str:
@@ -284,14 +283,8 @@ def _dut_label(dut: ApricornDevice) -> str:
     return label or "unknown_device"
 
 
-def _normalized_dut_name(dut_name: str) -> str:
-    return " ".join(dut_name.strip().casefold().split())
-
-
 def _max_io_rails_for_dut(dut_name: str) -> tuple[str | None, ...]:
-    if _normalized_dut_name(dut_name) == DT_FIPS_DUT_NAME:
-        return DT_FIPS_MAX_IO_RAILS
-    return (None,)
+    return power_rails_for_dut(dut_name)
 
 
 def _rail_device_label(base_label: str, rail: str | None) -> str:

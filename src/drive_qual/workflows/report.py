@@ -4,6 +4,7 @@ import argparse
 from collections.abc import Callable
 from typing import Any
 
+from drive_qual.core.product_profiles import required_power_fields_for_dut
 from drive_qual.core.report_session import (
     clear_current_session,
     current_session_folder_name,
@@ -25,7 +26,6 @@ PERFORMANCE_HOSTS: tuple[tuple[str, str], ...] = (
     ("linux_host", "Linux"),
     ("macos_host", "macOS"),
 )
-DT_FIPS_DUT_NAME = "padlock dt fips"
 
 
 def _default_steps() -> tuple[str, ...]:
@@ -75,21 +75,7 @@ def _all_os_power_slots_filled(values: Any) -> bool:
 
 
 def _required_power_fields_for_dut(dut_name: str) -> tuple[str, ...]:
-    normalized = " ".join(dut_name.strip().casefold().split())
-    if normalized == DT_FIPS_DUT_NAME:
-        return (
-            "max_inrush_current_5v",
-            "max_inrush_current_12v",
-            "max_read_write_current_5v",
-            "rms_read_write_current_5v",
-            "max_read_write_current_12v",
-            "rms_read_write_current_12v",
-        )
-    return (
-        "max_inrush_current",
-        "max_read_write_current",
-        "rms_read_write_current",
-    )
+    return required_power_fields_for_dut(dut_name)
 
 
 def _find_matching_section_key(section: dict[str, Any], requested_name: str) -> str | None:

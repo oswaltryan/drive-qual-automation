@@ -246,7 +246,7 @@ def test_equipment_prompts_for_scope_profile_when_scope_data_missing(monkeypatch
     assert prompts == ["Scope profile (tektronix/rigol): "]
 
 
-def test_equipment_3_5_form_factor_uses_only_padlock_dt_fips_and_rail_power_fields(
+def test_equipment_3_5_form_factor_uses_only_padlock_dt_and_rail_power_fields(
     monkeypatch: MonkeyPatch, tmp_path: Path
 ) -> None:
     report_path = tmp_path / "report.json"
@@ -259,8 +259,8 @@ def test_equipment_3_5_form_factor_uses_only_padlock_dt_fips_and_rail_power_fiel
     equipment.run_equipment_prompt()
 
     updated = json.loads(report_path.read_text(encoding="utf-8"))
-    assert updated["equipment"]["dut"] == {"Padlock DT FIPS": {"serial_number": None}}
-    assert updated["power"]["Padlock DT FIPS"] == {
+    assert updated["equipment"]["dut"] == {"Padlock DT": {"serial_number": None}}
+    assert updated["power"]["Padlock DT"] == {
         "max_inrush_current": {"linux": None, "macos": None, "windows": None},
         "max_inrush_current_5v": {"linux": None, "macos": None, "windows": None},
         "max_inrush_current_12v": {"linux": None, "macos": None, "windows": None},
