@@ -20,13 +20,16 @@ from drive_qual.reports.constants import (
 )
 
 ASCII_CONTROL_CHAR_LIMIT = 32
+DEFAULT_IMAGE_DPI = 96.0
 
 
 def _add_embedded_package_to_paragraph(paragraph: Any, artifact: Path, *, width: Any) -> None:
     object_r_id = _relate_to_embedded_package(paragraph.part, artifact)
-    icon_r_id = _relate_to_object_icon(paragraph.part, artifact)
+    icon_r_id, preview_size = _relate_to_object_icon(paragraph.part, artifact)
     shape_id = f"_x0000_i{1000 + _relationship_number(object_r_id)}"
     object_id = f"_{zlib.crc32(f'{artifact.name}:{object_r_id}'.encode()) % 2_000_000_000}"
+    width_pt = _pixels_to_points(preview_size.width, preview_size.dpi_x)
+    height_pt = _pixels_to_points(preview_size.height, preview_size.dpi_y)
     run = paragraph.add_run()
     run_element = run._r
     run_element.append(
@@ -35,7 +38,8 @@ def _add_embedded_package_to_paragraph(paragraph: Any, artifact: Path, *, width:
             icon_r_id=icon_r_id,
             shape_id=shape_id,
             object_id=object_id,
-            width_pt=_points(width),
+            width_pt=width_pt,
+            height_pt=height_pt,
         )
     )
 
@@ -135,30 +139,60 @@ def _normalized_token(value: str) -> str:
     return "".join(character for character in value.casefold() if character.isalnum())
 
 
-def _relate_to_object_icon(part: Any, artifact: Path) -> str:
+@dataclass(frozen=True)
+class _ImageSize:
+    width: int
+    height: int
+    dpi_x: float
+    dpi_y: float
+
+
+@dataclass(frozen=True)
+class _PreviewImage:
+    stream: io.BytesIO
+    size: _ImageSize
+
+
+def _relate_to_object_icon(part: Any, artifact: Path) -> tuple[str, _ImageSize]:
     from docx.opc.constants import RELATIONSHIP_TYPE as RT
 
     package = part.package
-    icon_part = package.get_or_add_image_part(_object_preview_stream(artifact))
-    return cast(str, part.relate_to(icon_part, RT.IMAGE))
+    preview = _object_preview_image(artifact)
+    icon_part = package.get_or_add_image_part(preview.stream)
+    return cast(str, part.relate_to(icon_part, RT.IMAGE)), preview.size
 
 
-def _object_preview_stream(artifact: Path) -> io.BytesIO:
+def _object_preview_image(artifact: Path) -> _PreviewImage:
     from PIL import Image
 
     stream = io.BytesIO()
-    image = Image.open(artifact)
-    image.thumbnail((96, 96))
-    image.save(stream, format="PNG")
+    with Image.open(artifact) as image:
+        dpi = (DEFAULT_IMAGE_DPI, DEFAULT_IMAGE_DPI)
+        image.thumbnail((96, 96))
+        preview_size = _ImageSize(width=image.width, height=image.height, dpi_x=dpi[0], dpi_y=dpi[1])
+        image.save(stream, format="PNG", dpi=dpi)
     stream.seek(0)
     cast(Any, stream).name = f"{artifact.stem}-preview.png"
-    return stream
+    return _PreviewImage(stream=stream, size=preview_size)
 
 
-def _embedded_package_xml(*, object_r_id: str, icon_r_id: str, shape_id: str, object_id: str, width_pt: float) -> Any:
+def _pixels_to_points(pixels: int, dpi: float) -> float:
+    if pixels <= 0 or dpi <= 0:
+        return 1.0
+    return pixels / dpi * 72.0
+
+
+def _embedded_package_xml(
+    *,
+    object_r_id: str,
+    icon_r_id: str,
+    shape_id: str,
+    object_id: str,
+    width_pt: float,
+    height_pt: float,
+) -> Any:
     from docx.oxml import parse_xml
 
-    height_pt = width_pt
     return parse_xml(
         f"""
         <w:object
@@ -197,10 +231,6 @@ def _embedded_package_xml(*, object_r_id: str, icon_r_id: str, shape_id: str, ob
         </w:object>
         """
     )
-
-
-def _points(width: Any) -> float:
-    return int(width) / 12700.0
 
 
 def _ole_package_blob(*, label: str, filename: str, payload: bytes) -> bytes:

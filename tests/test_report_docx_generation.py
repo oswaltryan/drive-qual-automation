@@ -130,6 +130,20 @@ def test_generate_report_docx_embeds_appendix_images_instead_of_paths() -> None:
     assert h._table_column_paragraphs_are_centered(cdi_table, 1)
 
 
+def test_generate_report_docx_preserves_embedded_preview_aspect_ratio() -> None:
+    from PIL import Image
+
+    source_root = Path("tests/.tmp/test_report_generation_embedded_aspect_ratio")
+    windows_dir = h._prepare_report_generation_images_fixture(source_root)
+    image_path = windows_dir / "Padlock DT CrystalDiskMark Performance.png"
+    Image.new("RGB", (200, 100), "white").save(image_path)
+
+    module = importlib.import_module("drive_qual.reports.generate")
+    output_path = module.generate_report_docx(part_number="69-420", source_root=source_root)
+
+    assert "width:72.00pt;height:36.00pt" in h._embedded_object_shape_styles(output_path)
+
+
 def test_generate_report_docx_formats_boolean_compliance_results_as_pass_fail() -> None:
     from docx import Document
 

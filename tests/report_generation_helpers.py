@@ -8,6 +8,11 @@ from pathlib import Path
 from shutil import rmtree
 from typing import Any, cast
 
+from drive_qual.reports.constants import (
+    WINDOWS_PERFORMANCE_BLANK_LINES_BEFORE_FIRST_OBJECT,
+    WINDOWS_PERFORMANCE_BLANK_LINES_BETWEEN_OBJECTS,
+)
+
 EXPECTED_INLINE_IMAGE_COUNT = 0
 EXPECTED_POWER_OBJECT_COUNT = 8
 EXPECTED_MEDIA_FILE_COUNT = 9
@@ -16,8 +21,6 @@ EXPECTED_COMPLIANCE_TABLE_ROW_COUNT = 3
 EXPECTED_TEMPERATURE_TABLE_COLUMN_COUNT = 4
 EXPECTED_TEMPERATURE_TABLE_ROW_COUNT = 12
 EXPECTED_TEMPERATURE_CHART_LEADING_BREAKS = 3
-WINDOWS_PERFORMANCE_BLANK_LINES_BEFORE_FIRST_OBJECT = 5
-WINDOWS_PERFORMANCE_BLANK_LINES_BETWEEN_OBJECTS = 6
 MAX_WORD_OBJECT_ID = 2_000_000_000
 
 
@@ -433,6 +436,10 @@ def _embedded_object_shape_numbers(path: Path) -> list[int]:
 
 def _embedded_object_ids(path: Path) -> list[int]:
     return [int(match.split('"')[1].removeprefix("_")) for match in _embedded_object_xml_matches(path, 'ObjectID="')]
+
+
+def _embedded_object_shape_styles(path: Path) -> list[str]:
+    return [match.split('"')[1] for match in _embedded_object_xml_matches(path, 'style="')]
 
 
 def _embedded_object_xml_matches(path: Path, marker: str) -> list[str]:
