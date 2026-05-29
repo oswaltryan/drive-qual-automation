@@ -22,15 +22,16 @@ from drive_qual.platforms.performance_common import (
 )
 
 DISK_TESTER_EXE = Path("C:/Users/itadmin/Desktop/disk_tester.exe")
+PROJECT_ROOT = Path(__file__).resolve().parents[4]
+PROJECT_LOG = PROJECT_ROOT / "disk_test.log"
 DESKTOP_LOG = Path("C:/Users/itadmin/Desktop/disk_test.log")
-DESKTOP_DIR = Path("C:/Users/itadmin/Desktop")
+LOG_IMPORT_CANDIDATES = (PROJECT_LOG, DESKTOP_LOG)
 
 
 class _ReliabilityPaths:
-    def __init__(self, *, report_path: Path, artifact_log: Path, desktop_reliability_log: Path) -> None:
+    def __init__(self, *, report_path: Path, artifact_log: Path) -> None:
         self.report_path = report_path
         self.artifact_log = artifact_log
-        self.desktop_reliability_log = desktop_reliability_log
 
 
 def run_reliability_step(part_number: str | None = None) -> None:
@@ -42,9 +43,9 @@ def run_reliability_step(part_number: str | None = None) -> None:
     ensure_reliability_section(data)
     save_report(paths.report_path, data)
 
-    _use_desktop_log_if_no_artifact_log(
+    _use_candidate_log_if_no_artifact_log(
         paths.artifact_log,
-        desktop_logs=(paths.desktop_reliability_log, DESKTOP_LOG),
+        candidate_logs=LOG_IMPORT_CANDIDATES,
     )
     existing_result = parse_reliability_log(paths.artifact_log)
     passes_remaining = max(PASSES_REQUIRED - existing_result.passes_completed, 0)
@@ -75,7 +76,6 @@ def _resolve_reliability_paths(part_number: str | None) -> _ReliabilityPaths:
     return _ReliabilityPaths(
         report_path=report_path,
         artifact_log=localize_windows_path(reliability_artifact_log_path(actual_pn)),
-        desktop_reliability_log=DESKTOP_DIR / f"{actual_pn}_reliability.log",
     )
 
 
@@ -84,10 +84,11 @@ def _run_missing_reliability_passes(paths: _ReliabilityPaths, passes_remaining: 
     print(f"Running reliability test for {passes_remaining} pass(es) on {drive_target}.")
     return_code = _run_disk_tester(drive_target, passes_remaining)
     paths.artifact_log.parent.mkdir(parents=True, exist_ok=True)
-    if DESKTOP_LOG.exists():
-        _copy_desktop_log_to_artifact(DESKTOP_LOG, paths.artifact_log)
+    run_log = _first_existing_log(LOG_IMPORT_CANDIDATES)
+    if run_log is not None:
+        _copy_log_to_artifact(run_log, paths.artifact_log)
     else:
-        print(f"Warning: disk_tester log not found at {DESKTOP_LOG}; parsing existing artifact log only.")
+        print("Warning: disk_tester log not found; parsing existing artifact log only.")
     result = parse_reliability_log(
         paths.artifact_log,
         passes_requested_this_run=passes_remaining,
@@ -133,6 +134,7 @@ def _run_disk_tester(drive_target: str, passes: int) -> int:
     ]
     process = subprocess.Popen(
         command,
+        cwd=str(PROJECT_ROOT),
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
         text=True,
@@ -146,27 +148,34 @@ def _run_disk_tester(drive_target: str, passes: int) -> int:
     return process.wait()
 
 
-def _use_desktop_log_if_no_artifact_log(artifact_log: Path, *, desktop_logs: tuple[Path, ...]) -> None:
+def _use_candidate_log_if_no_artifact_log(artifact_log: Path, *, candidate_logs: tuple[Path, ...]) -> None:
     if artifact_log.exists():
         return
-    for desktop_log in desktop_logs:
-        if not desktop_log.exists():
+    for candidate_log in candidate_logs:
+        if not candidate_log.exists():
             continue
-        if _confirm_use_desktop_log(desktop_log):
-            _copy_desktop_log_to_artifact(desktop_log, artifact_log)
+        if _confirm_use_candidate_log(candidate_log):
+            _copy_log_to_artifact(candidate_log, artifact_log)
         return
 
 
-def _confirm_use_desktop_log(desktop_log: Path) -> bool:
-    response = input(f"Found reliability log at {desktop_log}. Use it for this report? [y/N]: ").strip().casefold()
+def _first_existing_log(candidate_logs: tuple[Path, ...]) -> Path | None:
+    for candidate_log in candidate_logs:
+        if candidate_log.exists():
+            return candidate_log
+    return None
+
+
+def _confirm_use_candidate_log(candidate_log: Path) -> bool:
+    response = input(f"Found reliability log at {candidate_log}. Use it for this report? [y/N]: ").strip().casefold()
     return response in {"y", "yes"}
 
 
-def _copy_desktop_log_to_artifact(desktop_log: Path, artifact_log: Path) -> None:
-    if not desktop_log.exists():
-        raise FileNotFoundError(f"disk_tester log not found at {desktop_log}")
+def _copy_log_to_artifact(source_log: Path, artifact_log: Path) -> None:
+    if not source_log.exists():
+        raise FileNotFoundError(f"disk_tester log not found at {source_log}")
     artifact_log.parent.mkdir(parents=True, exist_ok=True)
-    source_text = desktop_log.read_text(encoding="utf-8", errors="replace")
+    source_text = source_log.read_text(encoding="utf-8", errors="replace")
     if artifact_log.exists():
         existing_text = artifact_log.read_text(encoding="utf-8", errors="replace")
         if source_text not in existing_text:
@@ -174,6 +183,6 @@ def _copy_desktop_log_to_artifact(desktop_log: Path, artifact_log: Path) -> None
                 destination.write("\n")
                 destination.write(source_text)
     else:
-        shutil.copy2(desktop_log, artifact_log)
-    desktop_log.unlink()
-    print(f"Copied reliability log to {artifact_log} and removed {desktop_log}.")
+        shutil.copy2(source_log, artifact_log)
+    source_log.unlink()
+    print(f"Copied reliability log to {artifact_log} and removed {source_log}.")

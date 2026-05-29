@@ -261,7 +261,7 @@ The reliability step is Windows-only and is intended to be the final workflow
 step before report generation. It runs:
 
 ```text
-C:\Users\itadmin\Desktop\disk_tester.exe --path <drive_letter> --direct-io --preallocate --passes <missing_passes>
+C:\Users\itadmin\Desktop\disk_tester.exe full-test --path <drive_letter> --direct-io --preallocate --passes <missing_passes>
 ```
 
 Three completed summaries are required. Before launching the tool, the workflow
@@ -269,14 +269,16 @@ checks `Z:\<part_number>\Windows\Reliability\<part_number>_reliability.log`.
 If that log already contains three `--- Full Test Summary ---` blocks, the tool
 is skipped and the log is parsed directly. If it contains one or two summaries,
 only the missing number of passes is requested. If no part-number Reliability
-log exists, the workflow checks the Desktop for an existing reliability log and
-asks whether to use it before importing it into the report folder.
+log exists, the workflow checks for `disk_test.log` in
+`C:\Users\itadmin\Desktop\drive-qual-automation`, then
+`C:\Users\itadmin\Desktop`, and asks whether to use the first one found before
+importing it into the report folder.
 
 During execution, terminal output is streamed live. After the run,
-`C:\Users\itadmin\Desktop\disk_test.log` is copied into the Reliability folder
-as `<part_number>_reliability.log`; if an artifact log already exists, the new
-Desktop log is appended. Once the copy succeeds, the redundant Desktop log is
-removed.
+`disk_test.log` is copied from `C:\Users\itadmin\Desktop\drive-qual-automation`
+first, or `C:\Users\itadmin\Desktop` if needed, into the Reliability folder as
+`<part_number>_reliability.log`. If an artifact log already exists, the new log
+is appended. Once the copy succeeds, the redundant source log is removed.
 
 The report JSON is updated under `reliability.windows`:
 

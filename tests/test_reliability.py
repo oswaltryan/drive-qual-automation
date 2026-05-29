@@ -40,12 +40,13 @@ def _patch_reliability_step_common(
     report_path: Path,
     artifact_log: Path,
     report_payload: dict[str, Any],
-    desktop_paths: tuple[Path, Path],
+    candidate_logs: tuple[Path, Path],
 ) -> None:
-    desktop_log, desktop_dir = desktop_paths
+    project_log, desktop_log = candidate_logs
     monkeypatch.setattr(windows_reliability.sys, "platform", "win32")
+    monkeypatch.setattr(windows_reliability, "PROJECT_LOG", project_log)
     monkeypatch.setattr(windows_reliability, "DESKTOP_LOG", desktop_log)
-    monkeypatch.setattr(windows_reliability, "DESKTOP_DIR", desktop_dir)
+    monkeypatch.setattr(windows_reliability, "LOG_IMPORT_CANDIDATES", (project_log, desktop_log))
     monkeypatch.setattr(windows_reliability, "resolve_folder_name", lambda part_number: "69-420")
     monkeypatch.setattr(windows_reliability, "load_part_number_and_report", lambda folder_name: ("69-420", report_path))
     monkeypatch.setattr(windows_reliability, "load_report", lambda path: report_payload)
@@ -100,9 +101,8 @@ def test_windows_reliability_step_runs_only_missing_passes_and_appends_new_log(
     report_path = tmp_path / "report.json"
     artifact_log = tmp_path / "Reliability" / "69-420_reliability.log"
     desktop_log = tmp_path / "disk_test.log"
-    desktop_dir = tmp_path / "Desktop"
+    project_log = tmp_path / "missing_project_log.log"
     artifact_log.parent.mkdir()
-    desktop_dir.mkdir()
     artifact_log.write_text(SUMMARY_PASS_1 + "\n", encoding="utf-8")
     desktop_log.write_text(f"{SUMMARY_PASS_2}\n{SUMMARY_PASS_1}\n", encoding="utf-8")
     report_payload: dict[str, Any] = {"drive_info": {"apricorn_part_number": "69-420"}, "compliance": {}}
@@ -115,7 +115,7 @@ def test_windows_reliability_step_runs_only_missing_passes_and_appends_new_log(
         report_path=report_path,
         artifact_log=artifact_log,
         report_payload=report_payload,
-        desktop_paths=(desktop_log, desktop_dir),
+        candidate_logs=(project_log, desktop_log),
     )
     monkeypatch.setattr(windows_reliability, "save_report", lambda path, data: saved_payloads.append(data.copy()))
     monkeypatch.setattr(windows_reliability, "_resolve_drive_target", lambda path: "F:")
@@ -137,7 +137,7 @@ def test_windows_reliability_step_runs_only_missing_passes_and_appends_new_log(
     assert "disk_tester_reliability_result" not in saved_payloads[-1]["compliance"]
 
 
-def test_windows_reliability_step_uses_desktop_renamed_log_before_running(
+def test_windows_reliability_step_uses_project_log_before_desktop(
     monkeypatch: MonkeyPatch,
     tmp_path: Path,
 ) -> None:
@@ -145,10 +145,12 @@ def test_windows_reliability_step_uses_desktop_renamed_log_before_running(
 
     report_path = tmp_path / "report.json"
     artifact_log = tmp_path / "Reliability" / "69-420_reliability.log"
-    desktop_dir = tmp_path / "Desktop"
-    desktop_dir.mkdir()
-    desktop_reliability_log = desktop_dir / "69-420_reliability.log"
-    desktop_reliability_log.write_text("\n".join([SUMMARY_PASS_1, SUMMARY_PASS_2, SUMMARY_PASS_1]), encoding="utf-8")
+    project_log = tmp_path / "repo" / "disk_test.log"
+    desktop_log = tmp_path / "Desktop" / "disk_test.log"
+    project_log.parent.mkdir()
+    desktop_log.parent.mkdir()
+    project_log.write_text("\n".join([SUMMARY_PASS_1, SUMMARY_PASS_2, SUMMARY_PASS_1]), encoding="utf-8")
+    desktop_log.write_text(SUMMARY_PASS_1, encoding="utf-8")
     report_payload: dict[str, Any] = {"drive_info": {"apricorn_part_number": "69-420"}, "compliance": {}}
 
     _patch_reliability_step_common(
@@ -157,7 +159,7 @@ def test_windows_reliability_step_uses_desktop_renamed_log_before_running(
         report_path=report_path,
         artifact_log=artifact_log,
         report_payload=report_payload,
-        desktop_paths=(tmp_path / "missing_disk_test.log", desktop_dir),
+        candidate_logs=(project_log, desktop_log),
     )
     monkeypatch.setattr(windows_reliability, "save_report", lambda path, data: None)
     monkeypatch.setattr("builtins.input", lambda prompt: "yes")
@@ -169,13 +171,14 @@ def test_windows_reliability_step_uses_desktop_renamed_log_before_running(
 
     windows_reliability.run_reliability_step(part_number="69-420")
 
-    assert desktop_reliability_log.exists() is False
+    assert project_log.exists() is False
+    assert desktop_log.exists() is True
     assert artifact_log.exists()
     assert report_payload["reliability"]["windows"]["passes_completed"] == EXPECTED_COMPLETED_PASSES
     assert report_payload["reliability"]["windows"]["status"] == "pass"
 
 
-def test_windows_reliability_step_ignores_desktop_log_when_operator_declines(
+def test_windows_reliability_step_ignores_candidate_log_when_operator_declines(
     monkeypatch: MonkeyPatch,
     tmp_path: Path,
 ) -> None:
@@ -183,11 +186,11 @@ def test_windows_reliability_step_ignores_desktop_log_when_operator_declines(
 
     report_path = tmp_path / "report.json"
     artifact_log = tmp_path / "Reliability" / "69-420_reliability.log"
-    desktop_dir = tmp_path / "Desktop"
-    desktop_log = tmp_path / "disk_test.log"
-    desktop_dir.mkdir()
-    desktop_reliability_log = desktop_dir / "69-420_reliability.log"
-    desktop_reliability_log.write_text(SUMMARY_PASS_1, encoding="utf-8")
+    project_log = tmp_path / "repo" / "disk_test.log"
+    desktop_log = tmp_path / "Desktop" / "disk_test.log"
+    project_log.parent.mkdir()
+    desktop_log.parent.mkdir()
+    project_log.write_text(SUMMARY_PASS_1, encoding="utf-8")
     desktop_log.write_text("\n".join([SUMMARY_PASS_1, SUMMARY_PASS_2, SUMMARY_PASS_1]), encoding="utf-8")
     report_payload: dict[str, Any] = {"drive_info": {"apricorn_part_number": "69-420"}, "compliance": {}}
     calls: list[tuple[str, int]] = []
@@ -198,7 +201,7 @@ def test_windows_reliability_step_ignores_desktop_log_when_operator_declines(
         report_path=report_path,
         artifact_log=artifact_log,
         report_payload=report_payload,
-        desktop_paths=(desktop_log, desktop_dir),
+        candidate_logs=(project_log, desktop_log),
     )
     monkeypatch.setattr(windows_reliability, "save_report", lambda path, data: None)
     monkeypatch.setattr(windows_reliability, "_resolve_drive_target", lambda path: "F:")
@@ -206,6 +209,7 @@ def test_windows_reliability_step_ignores_desktop_log_when_operator_declines(
 
     def fake_run_disk_tester(drive_target: str, passes: int) -> int:
         calls.append((drive_target, passes))
+        project_log.write_text("\n".join([SUMMARY_PASS_1, SUMMARY_PASS_2, SUMMARY_PASS_1]), encoding="utf-8")
         return 0
 
     monkeypatch.setattr(windows_reliability, "_run_disk_tester", fake_run_disk_tester)
@@ -213,8 +217,8 @@ def test_windows_reliability_step_ignores_desktop_log_when_operator_declines(
     windows_reliability.run_reliability_step(part_number="69-420")
 
     assert calls == [("F:", 3)]
-    assert desktop_reliability_log.exists() is True
-    assert desktop_log.exists() is False
+    assert project_log.exists() is False
+    assert desktop_log.exists() is True
     assert report_payload["reliability"]["windows"]["passes_requested_this_run"] == EXPECTED_COMPLETED_PASSES
 
 

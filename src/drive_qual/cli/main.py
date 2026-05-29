@@ -74,7 +74,7 @@ Step names and options:
                     --part-number PN
                     Runs disk_tester.exe on Windows until at least 3 passes are recorded.
                     Existing Z:\\PN\\Windows\\Reliability\\PN_reliability.log summaries are reused.
-                    If no report-folder log exists, Desktop logs are offered for import.
+                    If no report-folder log exists, local disk_test.log candidates are offered.
 
 Common options:
   --part-number PN  Select the report/artifact folder.
