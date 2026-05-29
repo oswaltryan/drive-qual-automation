@@ -154,9 +154,8 @@ def test_generate_report_docx_formats_boolean_compliance_results_as_pass_fail() 
     data["compliance"] = {
         "usb_if_msc_iterations": 4,
         "usb_if_msc_result": True,
-        "disk_tester_reliability_iterations": 8,
-        "disk_tester_reliability_result": False,
     }
+    data["reliability"] = {"windows": {"passes_completed": 8, "status": "fail"}}
     report_path.write_text(json.dumps(data), encoding="utf-8")
 
     module = importlib.import_module("drive_qual.reports.generate")

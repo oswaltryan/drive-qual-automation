@@ -10,8 +10,16 @@ from typing import Any
 import pytest
 from _pytest.monkeypatch import MonkeyPatch
 
-EXPECTED_STEP_ORDER = ("drive_info", "equipment", "power_measurements", "performance", "usb_if", "temperature")
-EXPECTED_CORE_PERF_PROFILE = ("drive_info", "equipment", "power_measurements", "performance")
+EXPECTED_STEP_ORDER = (
+    "drive_info",
+    "equipment",
+    "power_measurements",
+    "performance",
+    "usb_if",
+    "temperature",
+    "reliability",
+)
+EXPECTED_CORE_PERF_PROFILE = ("drive_info", "equipment", "power_measurements", "performance", "reliability")
 
 
 def _complete_report_payload() -> dict[str, Any]:
@@ -49,6 +57,13 @@ def _complete_report_payload() -> dict[str, Any]:
                 "macOS": {"Blackmagic Disk Speed Test": {"read": 100.0, "write": 100.0}},
             }
         },
+        "reliability": {
+            "windows": {
+                "passes_required": 3,
+                "passes_completed": 3,
+                "status": "pass",
+            }
+        },
     }
 
 
@@ -70,6 +85,7 @@ def test_report_workflow_import_does_not_import_software_step(monkeypatch: Monke
             "drive_qual.platforms.windows.performance",
             "drive_qual.platforms.windows.power_measurements",
             "drive_qual.platforms.windows.usb_if",
+            "drive_qual.platforms.windows.reliability",
         }:
             raise AssertionError(f"workflows.report imported {name} eagerly")
         return real_import(name, globals, locals, fromlist, level)
@@ -131,6 +147,24 @@ def test_run_report_workflow_imports_usb_if_step_lazily(monkeypatch: MonkeyPatch
     monkeypatch.setitem(sys.modules, "drive_qual.workflows.usb_if", fake_usb_if)
 
     module.run_report_workflow(["usb_if"], part_number="69-420")
+
+    assert calls == ["69-420"]
+
+
+def test_run_report_workflow_imports_reliability_step_lazily(monkeypatch: MonkeyPatch) -> None:
+    sys.modules.pop("drive_qual.workflows.report", None)
+    module = importlib.import_module("drive_qual.workflows.report")
+
+    calls: list[str | None] = []
+
+    class FakeReliabilityModule(ModuleType):
+        def run_reliability_step(self, *, part_number: str | None = None) -> None:
+            calls.append(part_number)
+
+    fake_reliability = FakeReliabilityModule("drive_qual.platforms.windows.reliability")
+    monkeypatch.setitem(sys.modules, "drive_qual.platforms.windows.reliability", fake_reliability)
+
+    module.run_report_workflow(["reliability"], part_number="69-420")
 
     assert calls == ["69-420"]
 

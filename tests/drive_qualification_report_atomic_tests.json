@@ -107,9 +107,20 @@
   "performance": {},
   "compliance": {
     "usb_if_msc_iterations": null,
-    "usb_if_msc_result": null,
-    "disk_tester_reliability_iterations": null,
-    "disk_tester_reliability_result": null
+    "usb_if_msc_result": null
+  },
+  "reliability": {
+    "windows": {
+      "passes_required": 3,
+      "passes_completed": 0,
+      "passes_requested_this_run": 0,
+      "status": "pending",
+      "write_errors": null,
+      "read_errors": null,
+      "mismatches": null,
+      "total_non_fatal_errors": null,
+      "return_code": null
+    }
   },
   "temperature": {}
 }

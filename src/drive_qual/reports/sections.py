@@ -221,7 +221,12 @@ def _add_disk_performance(document: Any, performance: object) -> None:
     _center_table_columns(table, range(1, 7))
 
 
-def _add_compliance(document: Any, compliance: object, shade_cell: Callable[[Any, Status], None]) -> None:
+def _add_compliance(
+    document: Any,
+    compliance: object,
+    reliability: object,
+    shade_cell: Callable[[Any, Status], None],
+) -> None:
     _add_heading(document, "Compliance/Reliability Test", level=2)
     table = _table(document, ["Program", "Iterations/Loops", "Result"])
     _compliance_row(
@@ -235,8 +240,8 @@ def _add_compliance(document: Any, compliance: object, shade_cell: Callable[[Any
         table,
         shade_cell,
         "Reliability Test",
-        _field(compliance, "disk_tester_reliability_iterations"),
-        _raw_field(compliance, "disk_tester_reliability_result"),
+        _reliability_iterations(reliability),
+        _reliability_result(reliability),
     )
     _center_table_columns(table, range(1, 3))
 
@@ -411,6 +416,30 @@ def _raw_field(data: object, key: str) -> object:
     if not isinstance(data, dict):
         return None
     return data.get(key)
+
+
+def _reliability_windows(reliability: object) -> dict[str, Any] | None:
+    if not isinstance(reliability, dict):
+        return None
+    windows = reliability.get("windows")
+    return windows if isinstance(windows, dict) else None
+
+
+def _reliability_iterations(reliability: object) -> str:
+    windows = _reliability_windows(reliability)
+    return _format_value(windows.get("passes_completed")) if windows is not None else ""
+
+
+def _reliability_result(reliability: object) -> object:
+    windows = _reliability_windows(reliability)
+    if windows is None:
+        return None
+    status = str(windows.get("status") or "").casefold()
+    if status == "pass":
+        return True
+    if status == "fail":
+        return False
+    return None
 
 
 def _compliance_row(

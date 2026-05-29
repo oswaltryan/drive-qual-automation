@@ -22,6 +22,10 @@ STEP_ALIASES: dict[str, str] = {
     "usb_if": "usb_if",
     "temp": "temperature",
     "temperature": "temperature",
+    "reliability": "reliability",
+    "reliable": "reliability",
+    "disk-tester": "reliability",
+    "disk_tester": "reliability",
 }
 
 MAN_PAGE = """Drive Qualification Automation
@@ -36,6 +40,7 @@ Technician workflow:
   drive-qual step power --part-number 69-420
   drive-qual step performance --part-number 69-420
   drive-qual step temperature --part-number 69-420
+  drive-qual step reliability --part-number 69-420
   drive-qual report --part-number 69-420
 
 Commands:
@@ -65,6 +70,11 @@ Step names and options:
                     --part-number PN
                     For non-interactive temperature inputs, use:
                     drive-qual temperature --part-number PN --dut NAME --csv PATH [--chart PATH] [--title TEXT]
+  reliability       reliability
+                    --part-number PN
+                    Runs disk_tester.exe on Windows until at least 3 passes are recorded.
+                    Existing Z:\\PN\\Windows\\Reliability\\PN_reliability.log summaries are reused.
+                    If no report-folder log exists, Desktop logs are offered for import.
 
 Common options:
   --part-number PN  Select the report/artifact folder.
@@ -77,6 +87,7 @@ Examples:
   uv run drive-qual resume --profile core_perf_temp_v1 --part-number 69-420
   uv run drive-qual step power --part-number 69-420
   uv run drive-qual step usbif --part-number 69-420
+  uv run drive-qual step reliability --part-number 69-420
   uv run drive-qual report --part-number 69-420
   uv run drive-qual temperature --part-number 69-420 --dut "Padlock DT" --csv matched.csv
 """

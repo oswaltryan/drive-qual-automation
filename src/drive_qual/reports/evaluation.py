@@ -284,7 +284,7 @@ def _build_review_sections(
     if _compatibility_requires_review(data.get("compatibility")):
         sections.append("Compatibility Data")
     sections.extend(_performance_review_sections(data.get("performance")))
-    if _compliance_requires_review(data.get("compliance")):
+    if _compliance_requires_review(data.get("compliance"), data.get("reliability")):
         sections.append("Compliance/Reliability Test")
     if _has_review_status(temperature):
         sections.append("Temperature Data")
@@ -350,14 +350,28 @@ def _cdi_details_require_review(dut_name: str, platforms: dict[str, Any]) -> boo
     return any(not str(cdi_details.get(key) or "").strip() for key, _label in CDI_APPENDIX_FIELDS)
 
 
-def _compliance_requires_review(compliance: object) -> bool:
+def _compliance_requires_review(compliance: object, reliability: object) -> bool:
     if not isinstance(compliance, dict):
         return False
     result_values = (
         compliance.get("usb_if_msc_result"),
-        compliance.get("disk_tester_reliability_result"),
+        _reliability_result(reliability),
     )
     return any(_result_text(value).casefold() != "pass" for value in result_values)
+
+
+def _reliability_result(reliability: object) -> object:
+    if not isinstance(reliability, dict):
+        return None
+    windows = reliability.get("windows")
+    if not isinstance(windows, dict):
+        return None
+    status = str(windows.get("status") or "").casefold()
+    if status == "pass":
+        return True
+    if status == "fail":
+        return False
+    return None
 
 
 def _result_text(value: object) -> str:

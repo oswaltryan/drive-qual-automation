@@ -91,7 +91,7 @@ def write_docx_report(
     _add_power_data(document, data.get("power"), shade_cell)
     _add_compatibility_data(document, data.get("compatibility"), shade_cell)
     _add_disk_performance(document, data.get("performance"))
-    _add_compliance(document, data.get("compliance"), shade_cell)
+    _add_compliance(document, data.get("compliance"), data.get("reliability"), shade_cell)
     _add_temperature_data(document, data.get("temperature"), report_path.parent, shade_cell, Inches)
     document.add_page_break()
     _add_appendix(document, data, report_path.parent, Inches)

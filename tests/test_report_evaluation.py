@@ -79,7 +79,6 @@ def test_report_evaluation_records_review_sections_by_document_heading() -> None
             "temperature": {"Padlock SSD": {"performance": {"20c": {"read_mb_s": None, "write_mb_s": None}}}},
             "compliance": {
                 "usb_if_msc_result": None,
-                "disk_tester_reliability_result": None,
             },
         }
     )
@@ -93,9 +92,8 @@ def test_report_evaluation_treats_true_compliance_results_as_pass() -> None:
             "compliance": {
                 "usb_if_msc_iterations": 4,
                 "usb_if_msc_result": True,
-                "disk_tester_reliability_iterations": 8,
-                "disk_tester_reliability_result": True,
             },
+            "reliability": {"windows": {"passes_completed": 3, "status": "pass"}},
         }
     )
 

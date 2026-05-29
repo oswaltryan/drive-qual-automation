@@ -18,7 +18,15 @@ from drive_qual.workflows.orchestrator import (
     resolve_selected_steps,
 )
 
-STEP_ORDER: tuple[str, ...] = ("drive_info", "equipment", "power_measurements", "performance", "usb_if", "temperature")
+STEP_ORDER: tuple[str, ...] = (
+    "drive_info",
+    "equipment",
+    "power_measurements",
+    "performance",
+    "usb_if",
+    "temperature",
+    "reliability",
+)
 StepRunner = Callable[[], None]
 POWER_OS_KEYS: tuple[str, ...] = ("windows", "linux", "macos")
 PERFORMANCE_HOSTS: tuple[tuple[str, str], ...] = (
@@ -66,6 +74,12 @@ def _run_usb_if_step(part_number: str | None = None) -> None:
     from drive_qual.workflows.usb_if import run_usb_if_step
 
     run_usb_if_step(part_number=part_number)
+
+
+def _run_reliability_step(part_number: str | None = None) -> None:
+    from drive_qual.platforms.windows.reliability import run_reliability_step
+
+    run_reliability_step(part_number=part_number)
 
 
 def _has_value(value: Any) -> bool:
@@ -182,6 +196,16 @@ def _is_performance_complete(data: dict[str, Any]) -> bool:
     return True
 
 
+def _is_reliability_complete(data: dict[str, Any]) -> bool:
+    reliability = data.get("reliability")
+    if not isinstance(reliability, dict):
+        return False
+    windows = reliability.get("windows")
+    if not isinstance(windows, dict):
+        return False
+    return windows.get("status") == "pass" and windows.get("passes_completed", 0) >= windows.get("passes_required", 3)
+
+
 def _resolve_session_folder_name(part_number: str | None) -> str | None:
     if part_number:
         folder_name = sanitize_dir_name(part_number)
@@ -198,7 +222,7 @@ def _clear_current_session_if_workflow_complete(part_number: str | None) -> None
         data = load_report(report_path)
     except Exception:
         return
-    if _is_power_complete(data) and _is_performance_complete(data):
+    if _is_power_complete(data) and _is_performance_complete(data) and _is_reliability_complete(data):
         clear_current_session()
         print(f"Cleared current session marker after completing workflow for {folder_name}.")
 
@@ -223,6 +247,7 @@ def run_report_workflow(
         "performance": lambda: _run_performance_step(part_number=part_number),
         "usb_if": lambda: _run_usb_if_step(part_number=part_number),
         "temperature": lambda: _run_temperature_step(part_number=part_number),
+        "reliability": lambda: _run_reliability_step(part_number=part_number),
     }
     for step in selected:
         if step not in step_runners:
@@ -248,7 +273,7 @@ def run_report_workflow_cli() -> None:
     parser = argparse.ArgumentParser(description="Run drive qualification report workflow steps.")
     parser.add_argument(
         "--steps",
-        help="Comma-separated list of steps to run (default: drive_info,equipment,power_measurements,performance).",
+        help="Comma-separated list of steps to run (default: all workflow steps in order).",
     )
     parser.add_argument(
         "--list-steps",

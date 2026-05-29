@@ -621,7 +621,18 @@ def _report_payload(*, dut_name: str = "Padlock DT") -> dict[str, Any]:
         "compliance": {
             "usb_if_msc_iterations": 3,
             "usb_if_msc_result": "Pass",
-            "disk_tester_reliability_iterations": 3,
-            "disk_tester_reliability_result": "Pass",
+        },
+        "reliability": {
+            "windows": {
+                "passes_required": 3,
+                "passes_completed": 3,
+                "passes_requested_this_run": 3,
+                "status": "pass",
+                "write_errors": 0,
+                "read_errors": 0,
+                "mismatches": 0,
+                "total_non_fatal_errors": 0,
+                "return_code": 0,
+            },
         },
     }

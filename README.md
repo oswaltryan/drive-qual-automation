@@ -41,6 +41,7 @@ uv run drive-qual step equipment --part-number 69-420
 uv run drive-qual step power --part-number 69-420
 uv run drive-qual step performance --part-number 69-420
 uv run drive-qual step temperature --part-number 69-420
+uv run drive-qual step reliability --part-number 69-420
 ```
 
 Generate the Word report:
@@ -82,6 +83,7 @@ Step aliases:
 | `power` | `power_measurements` |
 | `performance` / `perf` | `performance` |
 | `temperature` / `temp` | `temperature` |
+| `reliability` / `disk-tester` | `reliability` |
 
 Examples:
 
@@ -89,6 +91,7 @@ Examples:
 uv run drive-qual run --part-number 69-420
 uv run drive-qual resume --profile core_perf_temp_v1 --part-number 69-420
 uv run drive-qual step power --part-number 69-420
+uv run drive-qual step reliability --part-number 69-420
 uv run drive-qual temperature --part-number 69-420 --dut "Padlock DT" --csv matched.csv
 uv run drive-qual report --part-number 69-420 --output C:\Reports\69-420.docx
 ```
@@ -125,7 +128,11 @@ session scaffolding already exist.
 5. `temperature`
    Post-processes matched temperature/performance rows, generates the
    temperature chart, and writes both into the report folder.
-6. `report`
+6. `reliability`
+   Runs the Windows reliability test with `disk_tester.exe`, reuses completed
+   reliability summaries already captured in the artifact log, and writes the
+   aggregated pass/fail result into the report JSON.
+7. `report`
    Generates `drive_qualification_report.docx` from the completed report folder.
 
 The normal technician sequence is:
@@ -136,6 +143,7 @@ uv run drive-qual step equipment --part-number 69-420
 uv run drive-qual step power --part-number 69-420
 uv run drive-qual step performance --part-number 69-420
 uv run drive-qual step temperature --part-number 69-420
+uv run drive-qual step reliability --part-number 69-420
 uv run drive-qual report --part-number 69-420
 ```
 
@@ -163,6 +171,7 @@ Common paths:
 | Linux performance | `Z:\<part_number>\Linux\Disks\...` |
 | macOS performance | `Z:\<part_number>\macOS\Blackmagic Disk Speed Test\...` |
 | Temperature chart | `Z:\<part_number>\Temperature\<DUT> Temperature Data.png` |
+| Reliability log | `Z:\<part_number>\Windows\Reliability\<part_number>_reliability.log` |
 
 For offline report generation from a copied folder, pass the parent folder with
 `--source-root`:
@@ -192,6 +201,7 @@ Technician workflow requirements vary by step and host:
 - scope-visible artifact share mounted at `Z:\`
 - `fio` available on `PATH` or bundled under `tools`
 - `diskspd.exe` available for Windows paths that use it
+- `C:\Users\itadmin\Desktop\disk_tester.exe` available for the reliability step
 - CrystalDiskInfo installed at its configured Windows path
 - CrystalDiskMark installed at its configured Windows path
 - ATTO Disk Benchmark installed at its configured Windows path
@@ -208,7 +218,7 @@ post-processing, and tests are intended to run on Windows, Linux, and macOS.
 Some technician steps are platform or lab specific:
 
 - Windows: PowerShell disk operations, `pywinauto`, CrystalDiskInfo,
-  CrystalDiskMark, ATTO, and `diskspd`.
+  CrystalDiskMark, ATTO, `diskspd`, and `disk_tester.exe`.
 - Linux: native Disks benchmark wrapper and Linux block-device handling.
 - macOS: Blackmagic Disk Speed Test automation and SMB mount handling.
 
@@ -245,6 +255,45 @@ uv run drive-qual report --part-number 69-420 --source-root C:\Reports
 If a shared command fails on Linux or macOS because it imports a Windows-only
 dependency, treat that as an import-boundary bug.
 
+### Reliability Step
+
+The reliability step is Windows-only and is intended to be the final workflow
+step before report generation. It runs:
+
+```text
+C:\Users\itadmin\Desktop\disk_tester.exe --path <drive_letter> --direct-io --preallocate --passes <missing_passes>
+```
+
+Three completed summaries are required. Before launching the tool, the workflow
+checks `Z:\<part_number>\Windows\Reliability\<part_number>_reliability.log`.
+If that log already contains three `--- Full Test Summary ---` blocks, the tool
+is skipped and the log is parsed directly. If it contains one or two summaries,
+only the missing number of passes is requested. If no part-number Reliability
+log exists, the workflow checks the Desktop for an existing reliability log and
+asks whether to use it before importing it into the report folder.
+
+During execution, terminal output is streamed live. After the run,
+`C:\Users\itadmin\Desktop\disk_test.log` is copied into the Reliability folder
+as `<part_number>_reliability.log`; if an artifact log already exists, the new
+Desktop log is appended. Once the copy succeeds, the redundant Desktop log is
+removed.
+
+The report JSON is updated under `reliability.windows`:
+
+```json
+{
+  "passes_required": 3,
+  "passes_completed": 3,
+  "passes_requested_this_run": 1,
+  "status": "pass",
+  "write_errors": 0,
+  "read_errors": 0,
+  "mismatches": 0,
+  "total_non_fatal_errors": 0,
+  "return_code": 0
+}
+```
+
 ## Development
 
 Install development dependencies:
@@ -277,6 +326,8 @@ Key modules:
 | `drive_qual.platforms.power_measurements` | Platform-neutral power step entrypoint. |
 | `drive_qual.platforms.performance` | Platform-neutral performance dispatcher. |
 | `drive_qual.workflows.temperature` | Temperature post-processing workflow. |
+| `drive_qual.core.reliability` | Reliability log parsing and report contract updates. |
+| `drive_qual.platforms.windows.reliability` | Windows `disk_tester.exe` reliability workflow. |
 | `drive_qual.reports.generate` | Word report generation. |
 | `drive_qual.core.report_session` | Report paths and current-session marker. |
 | `drive_qual.core.storage_paths` | Artifact path construction and localization. |

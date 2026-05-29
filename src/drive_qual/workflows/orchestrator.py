@@ -9,9 +9,23 @@ from drive_qual.core.report_session import current_session_folder_name, sanitize
 from drive_qual.core.storage_paths import SCOPE_ARTIFACT_ROOT, localize_windows_path
 
 WORKFLOW_PROFILES: dict[str, tuple[str, ...]] = {
-    "core_perf_v1": ("drive_info", "equipment", "power_measurements", "performance"),
-    "core_perf_temp_v1": ("drive_info", "equipment", "power_measurements", "performance", "temperature"),
-    "core_perf_usb_if_v1": ("drive_info", "equipment", "power_measurements", "performance", "usb_if"),
+    "core_perf_v1": ("drive_info", "equipment", "power_measurements", "performance", "reliability"),
+    "core_perf_temp_v1": (
+        "drive_info",
+        "equipment",
+        "power_measurements",
+        "performance",
+        "temperature",
+        "reliability",
+    ),
+    "core_perf_usb_if_v1": (
+        "drive_info",
+        "equipment",
+        "power_measurements",
+        "performance",
+        "usb_if",
+        "reliability",
+    ),
 }
 STEP_DEPENDENCIES: dict[str, tuple[str, ...]] = {
     "equipment": ("drive_info",),
@@ -19,6 +33,7 @@ STEP_DEPENDENCIES: dict[str, tuple[str, ...]] = {
     "performance": ("equipment", "power_measurements"),
     "usb_if": ("equipment",),
     "temperature": ("equipment", "performance"),
+    "reliability": ("equipment", "performance"),
 }
 MANIFEST_FILENAME = "workflow_run_manifest.json"
 STATUS_PENDING = "pending"
