@@ -17,6 +17,9 @@ STEP_ALIASES: dict[str, str] = {
     "power_measurements": "power_measurements",
     "perf": "performance",
     "performance": "performance",
+    "usbif": "usb_if",
+    "usb-if": "usb_if",
+    "usb_if": "usb_if",
     "temp": "temperature",
     "temperature": "temperature",
 }
@@ -56,6 +59,8 @@ Step names and options:
                     --part-number PN
   performance       performance
                     --part-number PN
+  usbif            usb_if
+                    --part-number PN
   temperature       temperature
                     --part-number PN
                     For non-interactive temperature inputs, use:
@@ -71,6 +76,7 @@ Examples:
   uv run drive-qual run --part-number 69-420
   uv run drive-qual resume --profile core_perf_temp_v1 --part-number 69-420
   uv run drive-qual step power --part-number 69-420
+  uv run drive-qual step usbif --part-number 69-420
   uv run drive-qual report --part-number 69-420
   uv run drive-qual temperature --part-number 69-420 --dut "Padlock DT" --csv matched.csv
 """

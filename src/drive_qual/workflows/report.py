@@ -18,7 +18,7 @@ from drive_qual.workflows.orchestrator import (
     resolve_selected_steps,
 )
 
-STEP_ORDER: tuple[str, ...] = ("drive_info", "equipment", "power_measurements", "performance", "temperature")
+STEP_ORDER: tuple[str, ...] = ("drive_info", "equipment", "power_measurements", "performance", "usb_if", "temperature")
 StepRunner = Callable[[], None]
 POWER_OS_KEYS: tuple[str, ...] = ("windows", "linux", "macos")
 PERFORMANCE_HOSTS: tuple[tuple[str, str], ...] = (
@@ -60,6 +60,12 @@ def _run_temperature_step(part_number: str | None = None) -> None:
     from drive_qual.workflows.temperature import run_temperature_step
 
     run_temperature_step(part_number=part_number)
+
+
+def _run_usb_if_step(part_number: str | None = None) -> None:
+    from drive_qual.workflows.usb_if import run_usb_if_step
+
+    run_usb_if_step(part_number=part_number)
 
 
 def _has_value(value: Any) -> bool:
@@ -215,6 +221,7 @@ def run_report_workflow(
         "equipment": lambda: _run_equipment_step(part_number=part_number, scope_profile=scope_profile),
         "power_measurements": _run_power_measurements_step,
         "performance": lambda: _run_performance_step(part_number=part_number),
+        "usb_if": lambda: _run_usb_if_step(part_number=part_number),
         "temperature": lambda: _run_temperature_step(part_number=part_number),
     }
     for step in selected:

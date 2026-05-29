@@ -10,7 +10,7 @@ from typing import Any
 import pytest
 from _pytest.monkeypatch import MonkeyPatch
 
-EXPECTED_STEP_ORDER = ("drive_info", "equipment", "power_measurements", "performance", "temperature")
+EXPECTED_STEP_ORDER = ("drive_info", "equipment", "power_measurements", "performance", "usb_if", "temperature")
 EXPECTED_CORE_PERF_PROFILE = ("drive_info", "equipment", "power_measurements", "performance")
 
 
@@ -69,6 +69,7 @@ def test_report_workflow_import_does_not_import_software_step(monkeypatch: Monke
         if name in {
             "drive_qual.platforms.windows.performance",
             "drive_qual.platforms.windows.power_measurements",
+            "drive_qual.platforms.windows.usb_if",
         }:
             raise AssertionError(f"workflows.report imported {name} eagerly")
         return real_import(name, globals, locals, fromlist, level)
@@ -114,6 +115,24 @@ def test_run_report_workflow_imports_power_measurements_step_lazily(monkeypatch:
     module.run_report_workflow(["power_measurements"])
 
     assert calls == ["called"]
+
+
+def test_run_report_workflow_imports_usb_if_step_lazily(monkeypatch: MonkeyPatch) -> None:
+    sys.modules.pop("drive_qual.workflows.report", None)
+    module = importlib.import_module("drive_qual.workflows.report")
+
+    calls: list[str | None] = []
+
+    class FakeUsbIfModule(ModuleType):
+        def run_usb_if_step(self, part_number: str | None = None) -> None:
+            calls.append(part_number)
+
+    fake_usb_if = FakeUsbIfModule("drive_qual.workflows.usb_if")
+    monkeypatch.setitem(sys.modules, "drive_qual.workflows.usb_if", fake_usb_if)
+
+    module.run_report_workflow(["usb_if"], part_number="69-420")
+
+    assert calls == ["69-420"]
 
 
 def test_default_steps_include_all_workflow_steps() -> None:
