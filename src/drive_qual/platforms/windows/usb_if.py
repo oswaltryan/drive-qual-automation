@@ -11,7 +11,7 @@ from contextlib import suppress
 from pathlib import Path
 from typing import Any
 
-from drive_qual.core.usb_if import UsbIfIterationResult, UsbIfMscResult, parse_msc_result_line
+from drive_qual.core.usb_if import UsbIfIterationResult, UsbIfMscResult, parse_msc_result_text
 from drive_qual.integrations.apricorn.usb_cli import (
     ApricornDevice,
     device_identity,
@@ -76,7 +76,7 @@ class UsbIfMscAutomation:
             for iteration in range(1, self.iterations + 1):
                 print(f"-- USB-IF MSC iteration {iteration}/{self.iterations}")
                 self.select_msc_test()
-                self.clear_msc_dialogs()
+                self.clear_msc_dialogs(iteration=iteration)
                 self.collect_latest_msc_report(iteration=iteration)
             self.copy_staged_reports_to_artifacts()
         finally:
@@ -276,7 +276,7 @@ class UsbIfMscAutomation:
         ).click()
         self._select_device_from_popup()
 
-    def clear_msc_dialogs(self) -> None:
+    def clear_msc_dialogs(self, *, iteration: int) -> None:
         dialog_strings = (
             "WARNING: The following test might destroy ALL data on this disk.  To continue with all tests, "
             "click OK.  To abort this test, click ABORT",
@@ -284,13 +284,16 @@ class UsbIfMscAutomation:
         )
         for dialog_text in dialog_strings:
             self._click_dialog_button_containing_text(dialog_text, button_text="Ok")
-        self._click_results_dialog()
+        result_dialog_text = self._click_results_dialog()
         time.sleep(2)
 
-        result = parse_msc_result_line(self.log_window.window_text())
+        result = parse_msc_result_text(result_dialog_text)
+        if result is None:
+            result = parse_msc_result_text(self.log_window.window_text())
         if result is None:
             result = UsbIfIterationResult(tests_run=0, failures=1)
         self.iteration_results.append(result)
+        print(f"USB-IF MSC iteration {iteration}: {result.status}")
 
     def _select_device_from_popup(self) -> None:
         device_dialog, device_list_box = self._find_device_selection_dialog(timeout=30)
@@ -447,7 +450,7 @@ class UsbIfMscAutomation:
                 pass
         raise RuntimeError(f"Could not find button '{button_text}' on dialog '{dialog.window_text()}'.")
 
-    def _click_results_dialog(self, timeout: int = 300) -> None:
+    def _click_results_dialog(self, timeout: int = 300) -> str:
         deadline = time.time() + timeout
         result_markers = ("pass", "fail", "result", "tests run", "failures", "test complete", "test completed")
         while time.time() < deadline:
@@ -462,10 +465,11 @@ class UsbIfMscAutomation:
                         continue
                     title = dialog.window_text()
                     texts = [ctrl.window_text() for ctrl in dialog.descendants() if ctrl.window_text()]
-                    lower_text = " ".join(" ".join([title] + texts).split()).casefold()
+                    dialog_text = " ".join(" ".join([title] + texts).split())
+                    lower_text = dialog_text.casefold()
                     if title == "Results" or any(marker in lower_text for marker in result_markers):
                         self._click_dialog_button(dialog, "Ok")
-                        return
+                        return dialog_text
                 except Exception:
                     pass
             time.sleep(1)
