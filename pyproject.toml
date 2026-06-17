@@ -8,6 +8,7 @@ dependencies = [
     "requests",
     "pyyaml",
     "pymodbus",
+    "pyserial",
     "pywinauto>=0.6.9; sys_platform == 'win32'",
     "pillow>=12.1.1",
     "python-docx>=1.1.2",
