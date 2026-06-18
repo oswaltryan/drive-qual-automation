@@ -5,6 +5,7 @@ src/drive_qual/__main__.py
 src/drive_qual/py.typed
 src/drive_qual/benchmarks/__init__.py
 src/drive_qual/benchmarks/common.py
+src/drive_qual/benchmarks/disk_tester.py
 src/drive_qual/benchmarks/diskspd.py
 src/drive_qual/benchmarks/fio.py
 src/drive_qual/cli/__init__.py
@@ -31,7 +32,6 @@ src/drive_qual/integrations/apricorn/usb_cli.py
 src/drive_qual/integrations/instruments/__init__.py
 src/drive_qual/integrations/instruments/tektronix.py
 src/drive_qual/integrations/instruments/watlow.py
-src/drive_qual/integrations/instruments/watlow_f4t.py
 src/drive_qual/platforms/__init__.py
 src/drive_qual/platforms/performance.py
 src/drive_qual/platforms/performance_common.py

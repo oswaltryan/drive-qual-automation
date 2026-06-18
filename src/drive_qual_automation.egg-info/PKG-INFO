@@ -4,6 +4,9 @@ Version: 0.2.1
 Summary: An end-to-end storage qualification suite
 Requires-Python: >=3.12
 Description-Content-Type: text/markdown
+Requires-Dist: matplotlib
+Requires-Dist: numpy
+Requires-Dist: pandas
 Requires-Dist: requests
 Requires-Dist: pyyaml
 Requires-Dist: pymodbus

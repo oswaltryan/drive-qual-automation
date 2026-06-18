@@ -2,25 +2,21 @@ from __future__ import annotations
 
 import csv
 import re
+import shutil
 import subprocess
 import sys
 import time
 from contextlib import ExitStack
 from dataclasses import dataclass
 from datetime import datetime
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 from typing import Any, TextIO
 
+from drive_qual.core import temperature as temperature_plotter
 from drive_qual.core.dut_selection import select_report_dut_name
+from drive_qual.core.io_utils import mk_dir
 from drive_qual.core.report_session import load_report, report_path_for, resolve_folder_name, save_report
-from drive_qual.core.temperature import (
-    copy_temperature_chart,
-    load_temperature_performance_csv,
-    plot_temperature_chart,
-    temperature_artifact_dir,
-    temperature_chart_path,
-    update_temperature_performance,
-)
+from drive_qual.core.storage_paths import SCOPE_ARTIFACT_ROOT, localize_windows_path
 from drive_qual.integrations.apricorn.usb_cli import ApricornDevice, device_identity
 from drive_qual.integrations.instruments.watlow import DEFAULT_F4T_IP, F4TController
 from drive_qual.platforms.performance_common import (
@@ -33,23 +29,20 @@ LOW_TEMPERATURE_C = 20.000
 HIGH_TEMPERATURE_C = 30.000
 AMBIENT_TEMPERATURE_C = 25.000
 TEMPERATURE_SETPOINTS_C: tuple[float, ...] = (LOW_TEMPERATURE_C, HIGH_TEMPERATURE_C)
-SETPOINT_TOLERANCE_C = 0.1
-SNAPSHOT_INTERVAL_SECONDS = 5.0
-DISK_TESTER_INTERVAL_SECONDS = 60
+SETPOINT_TOLERANCE_C = 0.4
+SETPOINT_SOAK_SECONDS = 60.0
+SNAPSHOT_INTERVAL_SECONDS = 2.0
 DISK_TESTER_STOP_TIMEOUT_SECONDS = 15.0
-DISK_TESTER_SPEED_RE = re.compile(
-    r"^\[(?P<timestamp>\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})\]\s+"
-    r"(?P<category>SEQUENTIAL|RANDOM)\s+(?P<operation>read|write):\s+"
-    r"(?P<speed>\d+(?:\.\d+)?)\s+MiB/s",
-    re.IGNORECASE,
-)
+TEMPERATURE_ARTIFACT_CATEGORY = "Temperature"
+TEMPERATURE_CHART_SUFFIX = "Temperature Data.png"
+TEMPERATURE_PROFILE_CSV_FIELDS: tuple[str, ...] = ("TempRounded", "Operation", "SpeedMiB", "Mode")
+SAFE_FILENAME_RE = re.compile(r"[^A-Za-z0-9_. -]+")
 
 SNAPSHOT_CSV_FIELDS: tuple[str, ...] = (
     "timestamp",
     "temperature_c",
     "temperature_f",
 )
-TEMPERATURE_PERFORMANCE_CSV_FIELDS: tuple[str, ...] = ("TemperatureC", "Operation", "SpeedMiB")
 
 
 @dataclass(frozen=True)
@@ -65,19 +58,6 @@ class TemperatureRunArtifacts:
 class TemperatureTarget:
     drive_target: str
     dut_name: str
-
-
-@dataclass(frozen=True)
-class TemperatureSnapshot:
-    timestamp: datetime
-    temperature_c: float
-
-
-@dataclass(frozen=True)
-class DiskTesterSpeed:
-    timestamp: datetime
-    operation: str
-    speed_mib: float
 
 
 def _part_number_from_report(data: dict[str, Any], fallback: str) -> str:
@@ -101,8 +81,24 @@ def _phase_name(setpoint_c: float) -> str:
     return f"{setpoint_c:g}c"
 
 
+def _safe_filename_component(value: str) -> str:
+    return SAFE_FILENAME_RE.sub("_", value).strip(" ._")
+
+
+def _temperature_artifact_dir(part_number: str) -> Path:
+    path = PureWindowsPath(SCOPE_ARTIFACT_ROOT, part_number, TEMPERATURE_ARTIFACT_CATEGORY)
+    local_path = localize_windows_path(Path(str(path)))
+    mk_dir(local_path)
+    return local_path
+
+
+def _temperature_chart_path(part_number: str, dut_name: str) -> Path:
+    safe_dut = _safe_filename_component(dut_name) or "DUT"
+    return _temperature_artifact_dir(part_number) / f"{safe_dut} {TEMPERATURE_CHART_SUFFIX}"
+
+
 def _temperature_artifacts(part_number: str) -> TemperatureRunArtifacts:
-    artifact_dir = temperature_artifact_dir(part_number)
+    artifact_dir = _temperature_artifact_dir(part_number)
     timestamp = _timestamp_for_filename()
     return TemperatureRunArtifacts(
         snapshot_csv=artifact_dir / f"temperature_snapshots_{timestamp}.csv",
@@ -121,8 +117,6 @@ def _disk_tester_command(target_path: str, log_path: Path) -> list[str]:
         "temp",
         "--path",
         target_path,
-        "--interval",
-        str(DISK_TESTER_INTERVAL_SECONDS),
         "--log",
         str(log_path),
     ]
@@ -245,81 +239,41 @@ def _write_snapshot_and_check_setpoint(
             "temperature_f": f"{snapshot.temperature_f:.3f}",
         }
     )
-    print(
-        "Temperature snapshot: "
-        f"{snapshot.timestamp}, {snapshot.temperature_c:.3f} C, {snapshot.temperature_f:.3f} F"
-    )
+    print(f"Temperature snapshot: {snapshot.timestamp}, {snapshot.temperature_c:.3f} C, {snapshot.temperature_f:.3f} F")
     return _setpoint_reached(measured_c=snapshot.temperature_c, setpoint_c=setpoint_target_c)
 
 
-def _parse_snapshot_timestamp(value: str) -> datetime | None:
-    try:
-        return datetime.fromisoformat(value)
-    except ValueError:
-        return None
+def _update_temperature_report_from_profile(data: dict[str, Any], dut_name: str, profile_csv: Path) -> None:
+    temperature = data.get("temperature")
+    if not isinstance(temperature, dict):
+        raise ValueError("Invalid 'temperature' section; expected object.")
 
+    dut_temperature = temperature.get(dut_name)
+    if not isinstance(dut_temperature, dict):
+        raise ValueError(f"Invalid temperature contract for DUT {dut_name!r}; expected object.")
 
-def _load_temperature_snapshots(path: Path) -> list[TemperatureSnapshot]:
-    snapshots: list[TemperatureSnapshot] = []
-    with path.open("r", newline="", encoding="utf-8-sig") as handle:
+    performance = dut_temperature.get("performance")
+    if not isinstance(performance, dict):
+        raise ValueError(f"Invalid temperature performance contract for DUT {dut_name!r}; expected object.")
+
+    with profile_csv.open("r", newline="", encoding="utf-8-sig") as handle:
         for row in csv.DictReader(handle):
-            timestamp = _parse_snapshot_timestamp(row.get("timestamp", ""))
-            if timestamp is None:
+            mode = (row.get("Mode") or "").strip().casefold()
+            if mode and mode != "sequential":
+                continue
+            operation = (row.get("Operation") or "").strip().casefold()
+            if operation not in {"read", "write"}:
                 continue
             try:
-                temperature_c = float(row.get("temperature_c", ""))
+                temp_c = int(round(float(row.get("TempRounded") or "")))
+                speed_mib = float(row.get("SpeedMiB") or "")
             except ValueError:
                 continue
-            snapshots.append(TemperatureSnapshot(timestamp=timestamp.replace(tzinfo=None), temperature_c=temperature_c))
-    return snapshots
 
-
-def _load_disk_tester_speeds(path: Path) -> list[DiskTesterSpeed]:
-    speeds: list[DiskTesterSpeed] = []
-    for line in path.read_text(encoding="utf-8", errors="replace").splitlines():
-        match = DISK_TESTER_SPEED_RE.match(line.strip())
-        if match is None:
-            continue
-        speeds.append(
-            DiskTesterSpeed(
-                timestamp=datetime.strptime(match.group("timestamp"), "%Y-%m-%d %H:%M:%S"),
-                operation=match.group("operation").casefold(),
-                speed_mib=float(match.group("speed")),
-            )
-        )
-    return speeds
-
-
-def _nearest_snapshot_temperature(snapshots: list[TemperatureSnapshot], timestamp: datetime) -> float | None:
-    if not snapshots:
-        return None
-    return min(snapshots, key=lambda snapshot: abs((snapshot.timestamp - timestamp).total_seconds())).temperature_c
-
-
-def _write_temperature_performance_csv(
-    *,
-    snapshots_csv: Path,
-    disk_tester_log: Path,
-    output_csv: Path,
-) -> Path:
-    snapshots = _load_temperature_snapshots(snapshots_csv)
-    speeds = _load_disk_tester_speeds(disk_tester_log)
-    output_csv.parent.mkdir(parents=True, exist_ok=True)
-    with output_csv.open("w", newline="", encoding="utf-8") as handle:
-        writer = csv.DictWriter(handle, fieldnames=TEMPERATURE_PERFORMANCE_CSV_FIELDS)
-        writer.writeheader()
-        for speed in speeds:
-            temperature_c = _nearest_snapshot_temperature(snapshots, speed.timestamp)
-            if temperature_c is None:
+            entry = performance.get(f"{temp_c}c")
+            if not isinstance(entry, dict):
                 continue
-            writer.writerow(
-                {
-                    "TemperatureC": f"{temperature_c:.3f}",
-                    "Operation": speed.operation,
-                    "SpeedMiB": f"{speed.speed_mib:.2f}",
-                }
-            )
-    return output_csv
+            entry[f"{operation}_mb_s"] = speed_mib
 
 
 def _finalize_temperature_results(
@@ -328,19 +282,20 @@ def _finalize_temperature_results(
     dut_name: str,
     artifacts: TemperatureRunArtifacts,
 ) -> None:
-    performance_csv = _write_temperature_performance_csv(
-        snapshots_csv=artifacts.snapshot_csv,
-        disk_tester_log=artifacts.disk_tester_log,
-        output_csv=artifacts.performance_csv,
+    data = load_report(report_path_for(folder_name))
+    actual_part_number = _part_number_from_report(data, folder_name)
+    chart_path = _temperature_chart_path(actual_part_number, dut_name)
+    profile_df = temperature_plotter.write_snapshot_log_chart_outputs(
+        snapshot_csv=artifacts.snapshot_csv,
+        log_path=artifacts.disk_tester_log,
+        profile_csv=artifacts.performance_csv,
+        chart_png=chart_path,
     )
-    rows = load_temperature_performance_csv(performance_csv)
-    if not rows:
+    if profile_df.empty:
         raise RuntimeError(f"No temperature/performance rows could be derived from {artifacts.disk_tester_log}.")
-    post_process_temperature_data(
-        part_number=folder_name,
-        dut_name=dut_name,
-        performance_csv=performance_csv,
-    )
+    _update_temperature_report_from_profile(data, dut_name, artifacts.performance_csv)
+    save_report(report_path_for(folder_name), data)
+    print(f"Saved temperature chart to: {chart_path}")
 
 
 def _run_snapshot_phase(
@@ -352,6 +307,7 @@ def _run_snapshot_phase(
     setpoint_c: float,
 ) -> None:
     phase = _phase_name(setpoint_c)
+    soak_started_at: float | None = None
     print(f"Setting chamber setpoint to {setpoint_c:g} C.")
     controller.write_setpoint_c(setpoint_c)
 
@@ -364,32 +320,24 @@ def _run_snapshot_phase(
             setpoint_target_c=setpoint_c,
         )
         csv_handle.flush()
+        now = time.monotonic()
         if reached:
-            print(f"Chamber reached {phase} setpoint within {SETPOINT_TOLERANCE_C:g} C.")
-            return
+            if soak_started_at is None:
+                soak_started_at = now
+                if SETPOINT_SOAK_SECONDS > 0:
+                    print(f"Chamber reached {phase}; soaking for {SETPOINT_SOAK_SECONDS:g} seconds.")
+            if now - soak_started_at >= SETPOINT_SOAK_SECONDS:
+                print(f"Chamber completed {phase} soak within {SETPOINT_TOLERANCE_C:g} C.")
+                return
+        elif soak_started_at is not None:
+            print(f"Chamber drifted outside {phase} tolerance; restarting soak timer.")
+            soak_started_at = None
         time.sleep(SNAPSHOT_INTERVAL_SECONDS)
 
 
 def _return_chamber_to_ambient(controller: F4TController) -> None:
     print(f"Returning chamber setpoint to ambient ({AMBIENT_TEMPERATURE_C:g} C).")
     controller.write_setpoint_c(AMBIENT_TEMPERATURE_C)
-
-    while True:
-        try:
-            snapshot = controller.read_snapshot()
-        except Exception as exc:
-            print(f"Warning: could not read Watlow ambient snapshot: {exc}")
-            time.sleep(SNAPSHOT_INTERVAL_SECONDS)
-            continue
-
-        print(
-            "Ambient normalization snapshot: "
-            f"{snapshot.timestamp}, {snapshot.temperature_c:.3f} C, {snapshot.temperature_f:.3f} F"
-        )
-        if _setpoint_reached(measured_c=snapshot.temperature_c, setpoint_c=AMBIENT_TEMPERATURE_C):
-            print(f"Chamber reached ambient within {SETPOINT_TOLERANCE_C:g} C.")
-            return
-        time.sleep(SNAPSHOT_INTERVAL_SECONDS)
 
 
 def run_temperature_step(part_number: str | None = None) -> None:
@@ -453,15 +401,16 @@ def post_process_temperature_data(
     actual_part_number = _part_number_from_report(data, folder_name)
 
     if performance_csv is not None:
-        rows = load_temperature_performance_csv(performance_csv)
-        update_temperature_performance(data, resolved_dut_name, rows)
+        _update_temperature_report_from_profile(data, resolved_dut_name, performance_csv)
         if chart is None:
-            generated_chart = temperature_chart_path(actual_part_number, resolved_dut_name)
-            plot_temperature_chart(rows, generated_chart, title=chart_title)
+            generated_chart = _temperature_chart_path(actual_part_number, resolved_dut_name)
+            temperature_plotter.plot_profile_csv(performance_csv, generated_chart, title=chart_title)
             print(f"Saved temperature chart to: {generated_chart}")
 
     if chart is not None:
-        copied_chart = copy_temperature_chart(chart, part_number=actual_part_number, dut_name=resolved_dut_name)
+        copied_chart = _temperature_chart_path(actual_part_number, resolved_dut_name)
+        copied_chart.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(chart, copied_chart)
         print(f"Saved temperature chart to: {copied_chart}")
 
     save_report(report_path, data)

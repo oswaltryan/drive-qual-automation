@@ -132,7 +132,7 @@ def _run_start(args: list[str]) -> None:
 def _run_workflow(args: list[str], *, resume: bool) -> None:
     parser = _parser("drive-qual resume" if resume else "drive-qual run")
     parser.add_argument("--part-number", help="Apricorn part number for selecting the report folder.")
-    parser.add_argument("--profile", default="core_perf_temp_v1", help="Workflow profile to run.")
+    parser.add_argument("--profile", default="default", help="Workflow profile to run.")
     parser.add_argument("--scope-profile", help="Apply a scope/probe profile during equipment setup.")
     parsed = parser.parse_args(args)
 
