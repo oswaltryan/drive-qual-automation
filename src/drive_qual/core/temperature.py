@@ -341,8 +341,13 @@ def get_time_range(df: pd.DataFrame) -> tuple[pd.Timestamp | None, pd.Timestamp 
     return df["Timestamp"].min(), df["Timestamp"].max()
 
 
-def ranges_overlap(a0, a1, b0, b1) -> bool:
-    if any(x is None for x in (a0, a1, b0, b1)):
+def ranges_overlap(
+    a0: pd.Timestamp | None,
+    a1: pd.Timestamp | None,
+    b0: pd.Timestamp | None,
+    b1: pd.Timestamp | None,
+) -> bool:
+    if a0 is None or a1 is None or b0 is None or b1 is None:
         return False
     return (a0 <= b1) and (b0 <= a1)
 
@@ -387,8 +392,7 @@ def auto_detect_temp_offset_hours(
 
     speed_anchors = (
         speed_df.assign(_MinuteBlock=speed_df["Timestamp"].dt.floor("1min"))
-        .drop_duplicates("_MinuteBlock")
-        ["Timestamp"]
+        .drop_duplicates("_MinuteBlock")["Timestamp"]
         .tolist()
     )
 
@@ -798,16 +802,13 @@ def process_single_log(
     plot_png = out_dir / f"{stem}_temp_speed.png"
 
     merged.to_csv(merged_csv, index=False)
-    summary = (
-        merged.groupby(["Mode", "Operation"])["SpeedMiB"]
-        .mean()
-        .reset_index()
-        .sort_values(["Mode", "Operation"])
-    )
-    quant_parts = [
-        f"{row.Mode[:3]}-{row.Operation[0].upper()} {row.SpeedMiB:.1f}"
-        for row in summary.itertuples(index=False)
-    ]
+    summary = merged.groupby(["Mode", "Operation"])["SpeedMiB"].mean().reset_index().sort_values(["Mode", "Operation"])
+    quant_parts = []
+    for row in summary.itertuples(index=False):
+        mode = str(row.Mode)
+        operation = str(row.Operation)
+        speed_mib = float(str(row.SpeedMiB))
+        quant_parts.append(f"{mode[:3]}-{operation[0].upper()} {speed_mib:.1f}")
     quant_text = " | ".join(quant_parts)
     title = f"{log_path.name} | Capacity: {capacity} | Avg MiB/s: {quant_text}"
     plot_agg(agg, title, plot_png, show=show)

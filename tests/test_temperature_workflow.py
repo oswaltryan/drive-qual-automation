@@ -270,7 +270,12 @@ def test_temperature_resolve_drive_target_formats_when_drive_letter_missing(
     monkeypatch.setattr(temperature, "resolve_report_dut_name", lambda report_path: "Padlock DT")
     monkeypatch.setattr(temperature, "resolve_or_bind_dut_device", lambda *args, **kwargs: initial)
     monkeypatch.setattr(temperature, "refresh_dut_device", lambda *args, **kwargs: refreshed)
-    monkeypatch.setattr(power_measurements, "partition_and_format_drive", lambda dut: formatted.append(dut) or True)
+
+    def fake_partition_and_format_drive(dut: ApricornDevice) -> bool:
+        formatted.append(dut)
+        return True
+
+    monkeypatch.setattr(power_measurements, "partition_and_format_drive", fake_partition_and_format_drive)
 
     assert temperature._resolve_drive_target(Path("report.json")) == "E:"
     assert formatted == [initial]

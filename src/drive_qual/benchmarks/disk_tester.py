@@ -1,28 +1,32 @@
 #!/usr/bin/env python3
+# mypy: ignore-errors
 import argparse
-import sys
+import datetime
+import json
 import os
 import platform
-import subprocess
-import json
-import shutil
-import time
-import datetime
 import re
+import shutil
+import subprocess
+import sys
+import time
+from contextlib import nullcontext
+
 
 def get_platform_ioengine():
     system = platform.system()
-    if system == 'Linux':
-        return 'libaio'
-    elif system == 'Windows':
-        return 'windowsaio'
-    else:
-        return 'posixaio'
+    if system == "Linux":
+        return "libaio"
+    if system == "Windows":
+        return "windowsaio"
+    return "posixaio"
+
 
 def check_fio_installed():
-    if shutil.which('fio') is None:
+    if shutil.which("fio") is None:
         print("Error: 'fio' is not installed or not in PATH.")
         sys.exit(1)
+
 
 def get_fio_version():
     try:
@@ -37,6 +41,7 @@ def get_fio_version():
     output = (result.stdout or result.stderr or "").strip()
     return output or "unknown"
 
+
 def get_test_size(path, percentage=90):
     """
     Calculates the test size.
@@ -50,10 +55,7 @@ def get_test_size(path, percentage=90):
         existing_size = 0
     else:
         check_dir = os.path.dirname(os.path.abspath(path))
-        if os.path.exists(path) and os.path.isfile(path):
-            existing_size = os.path.getsize(path)
-        else:
-            existing_size = 0
+        existing_size = os.path.getsize(path) if os.path.exists(path) and os.path.isfile(path) else 0
 
     if not os.path.exists(check_dir):
         print(f"Error: Directory {check_dir} does not exist.")
@@ -63,15 +65,17 @@ def get_test_size(path, percentage=90):
     total_available_for_test = usage.free + existing_size
     return int(total_available_for_test * (percentage / 100.0))
 
+
 def format_bytes(size):
     power = 2**10
     n = size
-    power_labels = {0 : '', 1: 'K', 2: 'M', 3: 'G', 4: 'T'}
+    power_labels = {0: "", 1: "K", 2: "M", 3: "G", 4: "T"}
     count = 0
     while n > power:
         n /= power
         count += 1
     return f"{n:.2f} {power_labels.get(count, 'P')}B"
+
 
 def parse_size(size_text):
     if size_text is None:
@@ -80,19 +84,20 @@ def parse_size(size_text):
     if not s:
         raise ValueError("size_text is empty")
     multiplier = 1
-    if s.endswith('G'):
+    if s.endswith("G"):
         multiplier = 1024**3
         s = s[:-1]
-    elif s.endswith('M'):
+    elif s.endswith("M"):
         multiplier = 1024**2
         s = s[:-1]
-    elif s.endswith('K'):
+    elif s.endswith("K"):
         multiplier = 1024
         s = s[:-1]
     try:
         return int(float(s) * multiplier)
     except ValueError as exc:
         raise ValueError(f"Invalid size: {size_text}") from exc
+
 
 def _truncate(text, limit=2000):
     if text is None:
@@ -101,6 +106,7 @@ def _truncate(text, limit=2000):
         return text
     return text[:limit] + " ... [truncated]"
 
+
 def _extract_json_block(text):
     if not text:
         return None
@@ -108,7 +114,8 @@ def _extract_json_block(text):
     end = text.rfind("}")
     if start == -1 or end == -1 or end <= start:
         return None
-    return text[start:end + 1]
+    return text[start : end + 1]
+
 
 def _load_fio_json(stdout, stderr):
     candidates = []
@@ -133,15 +140,19 @@ def _load_fio_json(stdout, stderr):
 
     raise ValueError("fio did not return valid JSON on stdout or stderr")
 
+
 def _escape_fio_path(path):
     if platform.system() != "Windows":
         return path
-    if len(path) >= 2 and path[1] == ":" and path[0].isalpha():
+    drive_prefix_length = 2
+    if len(path) >= drive_prefix_length and path[1] == ":" and path[0].isalpha():
         return path[0] + "\\:" + path[2:]
     return path
 
+
 def _now_ts():
     return datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
 
 def _log_line(message, log_handle=None, also_print=True):
     line = f"[{_now_ts()}] {message}"
@@ -150,6 +161,7 @@ def _log_line(message, log_handle=None, also_print=True):
     if log_handle:
         log_handle.write(line + "\n")
         log_handle.flush()
+
 
 def _log_json(label, payload, log_handle=None):
     if not log_handle:
@@ -160,6 +172,7 @@ def _log_json(label, payload, log_handle=None):
         serialized = json.dumps({"error": "unserializable fio json"})
     log_handle.write(f"[{_now_ts()}] {label} {serialized}\n")
     log_handle.flush()
+
 
 def _log_fio_summary(label, fio_json, log_handle=None):
     if not fio_json:
@@ -190,6 +203,7 @@ def _log_fio_summary(label, fio_json, log_handle=None):
                 log_handle,
             )
 
+
 def _resolve_target_path(path):
     normalized = os.path.abspath(path)
     drive, tail = os.path.splitdrive(normalized)
@@ -200,6 +214,7 @@ def _resolve_target_path(path):
     if normalized.endswith(":"):
         return normalized + "\\disk_test.dat"
     return normalized
+
 
 def _ensure_file_size(path, size_bytes, log_handle=None):
     try:
@@ -219,32 +234,27 @@ def _ensure_file_size(path, size_bytes, log_handle=None):
     except Exception as exc:
         _log_line(f"Temp file preallocation failed: {exc}", log_handle)
 
+
 def _is_transient_io_error(err):
     if not err:
         return False
     stderr = (err.get("stderr") or "").lower()
     return "resource temporarily unavailable" in stderr or "error=11" in stderr
 
+
 def _run_temp_burst(label, category, burst_args, rw, bs, log_handle):
     _log_line(f"{label} Burst (5s)", log_handle)
-    res, err = run_fio_job(
-        burst_args + [f"--rw={rw}", f"--bs={bs}"],
-        allow_errors=True
-    )
+    res, err = run_fio_job(burst_args + [f"--rw={rw}", f"--bs={bs}"], allow_errors=True)
     if err and _is_transient_io_error(err):
         _log_line(
             f"{label} burst hit transient I/O error; retrying with sync engine",
             log_handle,
         )
         fallback_args = [
-            arg for arg in burst_args
-            if not arg.startswith("--ioengine=") and not arg.startswith("--direct=")
+            arg for arg in burst_args if not arg.startswith("--ioengine=") and not arg.startswith("--direct=")
         ]
         fallback_args += ["--ioengine=sync", "--direct=0"]
-        res, err = run_fio_job(
-            fallback_args + [f"--rw={rw}", f"--bs={bs}"],
-            allow_errors=True
-        )
+        res, err = run_fio_job(fallback_args + [f"--rw={rw}", f"--bs={bs}"], allow_errors=True)
 
     if res:
         _log_json(f"FIO_JSON {rw}", res, log_handle)
@@ -252,6 +262,7 @@ def _run_temp_burst(label, category, burst_args, rw, bs, log_handle):
     if err:
         _log_json(f"FIO_ERROR {rw}", err, log_handle)
     return res, err
+
 
 def _prompt_failure_action():
     while True:
@@ -261,21 +272,24 @@ def _prompt_failure_action():
         if choice in ("e", "exit"):
             return "exit"
 
+
 def _default_log_path(target_path):
     cleaned = re.sub(r"[^A-Za-z0-9_-]+", "_", str(target_path)).strip("_")
     if not cleaned:
         cleaned = "disk_test"
     return f"{cleaned}_{_timestamp_for_filename()}.log"
 
+
 def _timestamp_for_filename():
     return datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+
 
 def run_fio_job(job_config, verbose=False, allow_errors=False):
     """
     Runs fio with the given configuration (list of arguments).
     Returns the JSON output.
     """
-    cmd = ['fio', '--output-format=json'] + job_config
+    cmd = ["fio", "--output-format=json"] + job_config
 
     if verbose:
         print(f"Running command: {' '.join(cmd)}")
@@ -317,26 +331,24 @@ def run_fio_job(job_config, verbose=False, allow_errors=False):
         print(f"Stderr (truncated): {_truncate(result.stderr)}")
         sys.exit(1)
 
-def main():
+
+def main():  # noqa: PLR0912, PLR0915
     parser = argparse.ArgumentParser(description="Disk Tester (Python/fio)")
-    subparsers = parser.add_subparsers(dest='command', required=True)
+    subparsers = parser.add_subparsers(dest="command", required=True)
 
     parent_parser = argparse.ArgumentParser(add_help=False)
-    parent_parser.add_argument('--path', default='disk_test.dat', help="Target file path (default: disk_test.dat)")
-    parent_parser.add_argument('--direct', action='store_true', default=True, help="Use direct I/O (default: True)")
-    parent_parser.add_argument('--no-direct', dest='direct', action='store_false', help="Disable direct I/O")
-    parent_parser.add_argument('--size', help="Override test size (e.g., 1G, 500M). Default is 90%% of free space.")
+    parent_parser.add_argument("--path", default="disk_test.dat", help="Target file path (default: disk_test.dat)")
+    parent_parser.add_argument("--direct", action="store_true", default=True, help="Use direct I/O (default: True)")
+    parent_parser.add_argument("--no-direct", dest="direct", action="store_false", help="Disable direct I/O")
+    parent_parser.add_argument("--size", help="Override test size (e.g., 1G, 500M). Default is 90%% of free space.")
     parent_parser.add_argument(
-        '--log',
-        default='disk_test.log',
-        help="Log file path (default: derived from target path name)"
+        "--log", default="disk_test.log", help="Log file path (default: derived from target path name)"
     )
-    parent_parser.add_argument('--no-log', dest='log', action='store_const', const=None, help="Disable file logging")
+    parent_parser.add_argument("--no-log", dest="log", action="store_const", const=None, help="Disable file logging")
 
-
-    parser_temp = subparsers.add_parser('temp', parents=[parent_parser], help="Run Temperature Polling Test")
-    parser_temp.add_argument('--interval', type=int, default=60, help="Cycle interval in seconds (default: 60)")
-    parser_temp.add_argument('--duration', type=int, default=0, help="Total duration in seconds (0 = until failure)")
+    parser_temp = subparsers.add_parser("temp", parents=[parent_parser], help="Run Temperature Polling Test")
+    parser_temp.add_argument("--interval", type=int, default=60, help="Cycle interval in seconds (default: 60)")
+    parser_temp.add_argument("--duration", type=int, default=0, help="Total duration in seconds (0 = until failure)")
 
     args = parser.parse_args()
 
@@ -344,43 +356,39 @@ def main():
 
     target_path = _resolve_target_path(args.path)
 
-    log_handle = None
     log_path = args.log
     if log_path == "disk_test.log":
         log_path = _default_log_path(target_path)
-    if log_path:
-        log_handle = open(log_path, "a", encoding="utf-8")
+    with open(log_path, "a", encoding="utf-8") if log_path else nullcontext() as log_handle:
+        _log_line(f"Starting {get_fio_version()}", log_handle)
+        _log_line(
+            f"Platform: {platform.system()} {platform.release()} ({platform.machine()})",
+            log_handle,
+        )
+        _log_line(f"Python: {sys.version.split()[0]}", log_handle)
+        _log_line(f"Target: {target_path}", log_handle)
+        try:
+            capacity_dir = target_path if os.path.isdir(target_path) else os.path.dirname(target_path)
+            if capacity_dir and os.path.exists(capacity_dir):
+                usage = shutil.disk_usage(capacity_dir)
+                _log_line(
+                    f"Capacity: total={format_bytes(usage.total)}, free={format_bytes(usage.free)}",
+                    log_handle,
+                )
+        except Exception as exc:
+            _log_line(f"Capacity probe failed: {exc}", log_handle)
+        fio_target_path = _escape_fio_path(target_path)
 
-    _log_line(f"Starting {get_fio_version()}", log_handle)
-    _log_line(
-        f"Platform: {platform.system()} {platform.release()} ({platform.machine()})",
-        log_handle,
-    )
-    _log_line(f"Python: {sys.version.split()[0]}", log_handle)
-    _log_line(f"Target: {target_path}", log_handle)
-    try:
-        capacity_dir = target_path if os.path.isdir(target_path) else os.path.dirname(target_path)
-        if capacity_dir and os.path.exists(capacity_dir):
-            usage = shutil.disk_usage(capacity_dir)
-            _log_line(
-                f"Capacity: total={format_bytes(usage.total)}, free={format_bytes(usage.free)}",
-                log_handle,
-            )
-    except Exception as exc:
-        _log_line(f"Capacity probe failed: {exc}", log_handle)
-    fio_target_path = _escape_fio_path(target_path)
-
-    if args.size:
-        test_size_bytes = parse_size(args.size)
-        if args.command == "temp":
-            _log_line(
-                f"Test Size: {format_bytes(test_size_bytes)} (User Override, address range only)",
-                log_handle,
-            )
-        else:
-            _log_line(f"Test Size: {format_bytes(test_size_bytes)} (User Override)", log_handle)
-    else:
-        if args.command == "temp":
+        if args.size:
+            test_size_bytes = parse_size(args.size)
+            if args.command == "temp":
+                _log_line(
+                    f"Test Size: {format_bytes(test_size_bytes)} (User Override, address range only)",
+                    log_handle,
+                )
+            else:
+                _log_line(f"Test Size: {format_bytes(test_size_bytes)} (User Override)", log_handle)
+        elif args.command == "temp":
             if os.path.exists(target_path) and os.path.isfile(target_path):
                 test_size_bytes = os.path.getsize(target_path)
                 if test_size_bytes <= 0:
@@ -395,135 +403,132 @@ def main():
             test_size_bytes = get_test_size(target_path)
             _log_line(f"Test Size: {format_bytes(test_size_bytes)} (90% of available)", log_handle)
 
-    ioengine = get_platform_ioengine()
-    common_args = [
-        f"--filename={fio_target_path}",
-        f"--ioengine={ioengine}",
-        f"--direct={1 if args.direct else 0}",
-        f"--size={test_size_bytes}",
-        "--group_reporting",
-        "--name=disk_test"
-    ]
-
-    if args.command == 'bench':
-        _log_line("Running Sequential Read (1M)", log_handle)
-        job = common_args + ["--rw=read", "--bs=1M"]
-        res = run_fio_job(job)
-        bw = res['jobs'][0]['read']['bw'] / 1024
-        iops = res['jobs'][0]['read']['iops']
-        _log_line(f"Seq Read: {bw:.2f} MiB/s, {iops:.0f} IOPS", log_handle)
-
-        _log_line("Running Sequential Write (1M)", log_handle)
-        job = common_args + ["--rw=write", "--bs=1M"]
-        res = run_fio_job(job)
-        bw = res['jobs'][0]['write']['bw'] / 1024
-        iops = res['jobs'][0]['write']['iops']
-        _log_line(f"Seq Write: {bw:.2f} MiB/s, {iops:.0f} IOPS", log_handle)
-
-        _log_line("Running Random Read (4k)", log_handle)
-        job = common_args + ["--rw=randread", "--bs=4k"]
-        res = run_fio_job(job)
-        bw = res['jobs'][0]['read']['bw'] / 1024
-        iops = res['jobs'][0]['read']['iops']
-        _log_line(f"Rand Read: {bw:.2f} MiB/s, {iops:.0f} IOPS", log_handle)
-
-        _log_line("Running Random Write (4k)", log_handle)
-        job = common_args + ["--rw=randwrite", "--bs=4k"]
-        res = run_fio_job(job)
-        bw = res['jobs'][0]['write']['bw'] / 1024
-        iops = res['jobs'][0]['write']['iops']
-        _log_line(f"Rand Write: {bw:.2f} MiB/s, {iops:.0f} IOPS", log_handle)
-
-    elif args.command == 'stress':
-        _log_line("Running Reliability Full Stress Test", log_handle)
-        job = common_args + [
-            "--rw=write",
-            "--bs=1M",
-            "--verify=crc32c",
-            "--do_verify=1",
-            "--verify_dump=1",
-            "--verify_fatal=1"
+        ioengine = get_platform_ioengine()
+        common_args = [
+            f"--filename={fio_target_path}",
+            f"--ioengine={ioengine}",
+            f"--direct={1 if args.direct else 0}",
+            f"--size={test_size_bytes}",
+            "--group_reporting",
+            "--name=disk_test",
         ]
-        _log_line("Writing and Verifying full test area... this may take a while.", log_handle)
-        start_time = time.time()
-        res = run_fio_job(job, verbose=True)
-        duration = time.time() - start_time
 
-        write_bw = res['jobs'][0]['write']['bw'] / 1024
-        errs = res['jobs'][0]['error']
-        _log_line(f"Completed in {duration:.2f}s", log_handle)
-        _log_line(f"Write Speed: {write_bw:.2f} MiB/s", log_handle)
-        _log_line(f"Errors: {errs}", log_handle)
+        if args.command == "bench":
+            _log_line("Running Sequential Read (1M)", log_handle)
+            job = common_args + ["--rw=read", "--bs=1M"]
+            res = run_fio_job(job)
+            bw = res["jobs"][0]["read"]["bw"] / 1024
+            iops = res["jobs"][0]["read"]["iops"]
+            _log_line(f"Seq Read: {bw:.2f} MiB/s, {iops:.0f} IOPS", log_handle)
 
-        if errs == 0:
-            _log_line("Reliability Test Passed: No errors detected.", log_handle)
-        else:
-            _log_line("Reliability Test FAILED.", log_handle)
-            sys.exit(1)
+            _log_line("Running Sequential Write (1M)", log_handle)
+            job = common_args + ["--rw=write", "--bs=1M"]
+            res = run_fio_job(job)
+            bw = res["jobs"][0]["write"]["bw"] / 1024
+            iops = res["jobs"][0]["write"]["iops"]
+            _log_line(f"Seq Write: {bw:.2f} MiB/s, {iops:.0f} IOPS", log_handle)
 
-    elif args.command == 'temp':
-        _log_line("Running Temperature Polling Test", log_handle)
-        if args.duration:
-            _log_line(f"Duration: {args.duration}s, Interval: {args.interval}s", log_handle)
-        else:
-            _log_line(f"Duration: until failure, Interval: {args.interval}s", log_handle)
-        _log_line("Mode: Continuous Random/Sequential read/write bursts.", log_handle)
+            _log_line("Running Random Read (4k)", log_handle)
+            job = common_args + ["--rw=randread", "--bs=4k"]
+            res = run_fio_job(job)
+            bw = res["jobs"][0]["read"]["bw"] / 1024
+            iops = res["jobs"][0]["read"]["iops"]
+            _log_line(f"Rand Read: {bw:.2f} MiB/s, {iops:.0f} IOPS", log_handle)
 
-        _ensure_file_size(target_path, test_size_bytes, log_handle)
+            _log_line("Running Random Write (4k)", log_handle)
+            job = common_args + ["--rw=randwrite", "--bs=4k"]
+            res = run_fio_job(job)
+            bw = res["jobs"][0]["write"]["bw"] / 1024
+            iops = res["jobs"][0]["write"]["iops"]
+            _log_line(f"Rand Write: {bw:.2f} MiB/s, {iops:.0f} IOPS", log_handle)
 
-        end_time = time.time() + args.duration if args.duration else None
-
-        while end_time is None or time.time() < end_time:
-            cycle_start = time.time()
-            _log_line("Starting Load Burst", log_handle)
-
-            burst_args = [
-                f"--filename={fio_target_path}",
-                f"--ioengine={ioengine}",
-                f"--direct={1 if args.direct else 0}",
-                f"--size={test_size_bytes}",
-                "--group_reporting",
-                "--name=temp_burst",
-                "--time_based",
-                "--runtime=5"
+        elif args.command == "stress":
+            _log_line("Running Reliability Full Stress Test", log_handle)
+            job = common_args + [
+                "--rw=write",
+                "--bs=1M",
+                "--verify=crc32c",
+                "--do_verify=1",
+                "--verify_dump=1",
+                "--verify_fatal=1",
             ]
+            _log_line("Writing and Verifying full test area... this may take a while.", log_handle)
+            start_time = time.time()
+            res = run_fio_job(job, verbose=True)
+            duration = time.time() - start_time
 
-            res, err = _run_temp_burst("Sequential Write", "SEQUENTIAL", burst_args, "write", "1M", log_handle)
-            if err:
-                _log_line("Failure detected during seq_write.", log_handle)
-                action = _prompt_failure_action()
-                if action == "retry":
-                    continue
-                break
+            write_bw = res["jobs"][0]["write"]["bw"] / 1024
+            errs = res["jobs"][0]["error"]
+            _log_line(f"Completed in {duration:.2f}s", log_handle)
+            _log_line(f"Write Speed: {write_bw:.2f} MiB/s", log_handle)
+            _log_line(f"Errors: {errs}", log_handle)
 
-            res, err = _run_temp_burst("Sequential Read", "SEQUENTIAL", burst_args, "read", "1M", log_handle)
-            if err:
-                _log_line("Failure detected during seq_read.", log_handle)
-                action = _prompt_failure_action()
-                if action == "retry":
-                    continue
-                break
+            if errs == 0:
+                _log_line("Reliability Test Passed: No errors detected.", log_handle)
+            else:
+                _log_line("Reliability Test FAILED.", log_handle)
+                sys.exit(1)
 
-            res, err = _run_temp_burst("Random Write", "RANDOM", burst_args, "randwrite", "4k", log_handle)
-            if err:
-                _log_line("Failure detected during rand_write.", log_handle)
-                action = _prompt_failure_action()
-                if action == "retry":
-                    continue
-                break
+        elif args.command == "temp":
+            _log_line("Running Temperature Polling Test", log_handle)
+            if args.duration:
+                _log_line(f"Duration: {args.duration}s, Interval: {args.interval}s", log_handle)
+            else:
+                _log_line(f"Duration: until failure, Interval: {args.interval}s", log_handle)
+            _log_line("Mode: Continuous Random/Sequential read/write bursts.", log_handle)
 
-            res, err = _run_temp_burst("Random Read", "RANDOM", burst_args, "randread", "4k", log_handle)
-            if err:
-                _log_line("Failure detected during rand_read.", log_handle)
-                action = _prompt_failure_action()
-                if action == "retry":
-                    continue
-                break
+            _ensure_file_size(target_path, test_size_bytes, log_handle)
 
-    
-    _log_line("Test Complete.", log_handle)
-    if log_handle:
-        log_handle.close()
+            end_time = time.time() + args.duration if args.duration else None
+
+            while end_time is None or time.time() < end_time:
+                _log_line("Starting Load Burst", log_handle)
+
+                burst_args = [
+                    f"--filename={fio_target_path}",
+                    f"--ioengine={ioengine}",
+                    f"--direct={1 if args.direct else 0}",
+                    f"--size={test_size_bytes}",
+                    "--group_reporting",
+                    "--name=temp_burst",
+                    "--time_based",
+                    "--runtime=5",
+                ]
+
+                res, err = _run_temp_burst("Sequential Write", "SEQUENTIAL", burst_args, "write", "1M", log_handle)
+                if err:
+                    _log_line("Failure detected during seq_write.", log_handle)
+                    action = _prompt_failure_action()
+                    if action == "retry":
+                        continue
+                    break
+
+                res, err = _run_temp_burst("Sequential Read", "SEQUENTIAL", burst_args, "read", "1M", log_handle)
+                if err:
+                    _log_line("Failure detected during seq_read.", log_handle)
+                    action = _prompt_failure_action()
+                    if action == "retry":
+                        continue
+                    break
+
+                res, err = _run_temp_burst("Random Write", "RANDOM", burst_args, "randwrite", "4k", log_handle)
+                if err:
+                    _log_line("Failure detected during rand_write.", log_handle)
+                    action = _prompt_failure_action()
+                    if action == "retry":
+                        continue
+                    break
+
+                res, err = _run_temp_burst("Random Read", "RANDOM", burst_args, "randread", "4k", log_handle)
+                if err:
+                    _log_line("Failure detected during rand_read.", log_handle)
+                    action = _prompt_failure_action()
+                    if action == "retry":
+                        continue
+                    break
+
+        _log_line("Test Complete.", log_handle)
+
 
 if __name__ == "__main__":
     main()

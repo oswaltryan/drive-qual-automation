@@ -10,9 +10,9 @@ from contextlib import ExitStack
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path, PureWindowsPath
-from typing import Any, TextIO
+from types import ModuleType
+from typing import Any, Protocol, TextIO
 
-from drive_qual.core import temperature as temperature_plotter
 from drive_qual.core.dut_selection import select_report_dut_name
 from drive_qual.core.io_utils import mk_dir
 from drive_qual.core.report_session import load_report, report_path_for, resolve_folder_name, save_report
@@ -25,18 +25,29 @@ from drive_qual.platforms.performance_common import (
     resolve_report_dut_name,
 )
 
-LOW_TEMPERATURE_C = 20.000
-HIGH_TEMPERATURE_C = 30.000
+LOW_TEMPERATURE_C = -40.000
+HIGH_TEMPERATURE_C = 70.000
 AMBIENT_TEMPERATURE_C = 25.000
 TEMPERATURE_SETPOINTS_C: tuple[float, ...] = (LOW_TEMPERATURE_C, HIGH_TEMPERATURE_C)
 SETPOINT_TOLERANCE_C = 0.4
-SETPOINT_SOAK_SECONDS = 60.0
+SETPOINT_SOAK_SECONDS = 300.0
 SNAPSHOT_INTERVAL_SECONDS = 2.0
 DISK_TESTER_STOP_TIMEOUT_SECONDS = 15.0
 TEMPERATURE_ARTIFACT_CATEGORY = "Temperature"
 TEMPERATURE_CHART_SUFFIX = "Temperature Data.png"
 TEMPERATURE_PROFILE_CSV_FIELDS: tuple[str, ...] = ("TempRounded", "Operation", "SpeedMiB", "Mode")
 SAFE_FILENAME_RE = re.compile(r"[^A-Za-z0-9_. -]+")
+__all__ = [
+    "SNAPSHOT_CSV_FIELDS",
+    "SETPOINT_SOAK_SECONDS",
+    "SNAPSHOT_INTERVAL_SECONDS",
+    "TemperatureRunArtifacts",
+    "post_process_temperature_data",
+    "run_temperature_step",
+    "sys",
+    "temperature_plotter",
+    "time",
+]
 
 SNAPSHOT_CSV_FIELDS: tuple[str, ...] = (
     "timestamp",
@@ -58,6 +69,31 @@ class TemperatureRunArtifacts:
 class TemperatureTarget:
     drive_target: str
     dut_name: str
+
+
+class _TemperaturePlotterProxy:
+    def _module(self) -> ModuleType:
+        from drive_qual.core import temperature
+
+        return temperature
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._module(), name)
+
+
+class TemperatureController(Protocol):
+    def write_setpoint_c(self, setpoint_c: float) -> None: ...
+
+    def read_snapshot(self) -> Any: ...
+
+
+class DiskTesterProcess(Protocol):
+    returncode: Any
+
+    def poll(self) -> int | None: ...
+
+
+temperature_plotter = _TemperaturePlotterProxy()
 
 
 def _part_number_from_report(data: dict[str, Any], fallback: str) -> str:
@@ -144,10 +180,10 @@ def _format_temperature_target(dut: ApricornDevice) -> None:
     if sys.platform != "win32":
         raise RuntimeError(f"usb --json did not include a usable driveLetter for {device_identity(dut)}.")
 
-    from drive_qual.platforms.windows.power_measurements import partition_and_format_drive
+    from drive_qual.platforms.windows import power_measurements
 
     print(f"No usable drive letter found for {device_identity(dut)}; partitioning and formatting DUT.")
-    if not partition_and_format_drive(dut):
+    if not power_measurements.partition_and_format_drive(dut):
         raise RuntimeError(f"Partition/format failed for {device_identity(dut)}.")
 
 
@@ -216,7 +252,7 @@ def _setpoint_reached(*, measured_c: float, setpoint_c: float) -> bool:
 def _write_snapshot_and_check_setpoint(
     writer: csv.DictWriter[str],
     *,
-    controller: F4TController,
+    controller: TemperatureController,
     setpoint_target_c: float,
 ) -> bool:
     try:
@@ -300,10 +336,10 @@ def _finalize_temperature_results(
 
 def _run_snapshot_phase(
     *,
-    controller: F4TController,
+    controller: TemperatureController,
     writer: csv.DictWriter[str],
     csv_handle: TextIO,
-    disk_tester: subprocess.Popen[str],
+    disk_tester: DiskTesterProcess,
     setpoint_c: float,
 ) -> None:
     phase = _phase_name(setpoint_c)
@@ -335,7 +371,7 @@ def _run_snapshot_phase(
         time.sleep(SNAPSHOT_INTERVAL_SECONDS)
 
 
-def _return_chamber_to_ambient(controller: F4TController) -> None:
+def _return_chamber_to_ambient(controller: TemperatureController) -> None:
     print(f"Returning chamber setpoint to ambient ({AMBIENT_TEMPERATURE_C:g} C).")
     controller.write_setpoint_c(AMBIENT_TEMPERATURE_C)
 

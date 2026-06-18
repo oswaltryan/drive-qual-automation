@@ -16,7 +16,14 @@ WORKFLOW_PROFILES: dict[str, tuple[str, ...]] = {
         "performance",
         "usb_if",
         "reliability",
-    )
+    ),
+    "core_perf_v1": (
+        "drive_info",
+        "equipment",
+        "power_measurements",
+        "performance",
+        "reliability",
+    ),
 }
 STEP_DEPENDENCIES: dict[str, tuple[str, ...]] = {
     "equipment": ("drive_info",),

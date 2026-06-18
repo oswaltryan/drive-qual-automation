@@ -44,6 +44,10 @@ repos:
         -   types-PyYAML
         -   types-Pillow
         -   python-docx>=1.1.2
+        -   matplotlib
+        -   numpy
+        -   pandas
+        -   pandas-stubs
         # Add testing deps so mypy can check tests too
         -   pytest==8.2.0
         -   pytest-asyncio
@@ -60,5 +64,8 @@ repos:
         -   pytest-asyncio
         -   pytest-mock
         -   pytest-cov
+        -   matplotlib
+        -   numpy
+        -   pandas
         -   pillow>=12.1.1
         -   python-docx>=1.1.2
