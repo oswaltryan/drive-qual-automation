@@ -15,15 +15,21 @@ from typing import Any, Protocol, TextIO
 
 from drive_qual.core.dut_selection import select_report_dut_name
 from drive_qual.core.io_utils import mk_dir
+from drive_qual.core.product_profiles import normalize_product_name, report_dut_name_candidates
 from drive_qual.core.report_session import load_report, report_path_for, resolve_folder_name, save_report
 from drive_qual.core.storage_paths import SCOPE_ARTIFACT_ROOT, localize_windows_path
-from drive_qual.integrations.apricorn.usb_cli import ApricornDevice, device_identity
-from drive_qual.integrations.instruments.watlow import DEFAULT_F4T_IP, F4TController
-from drive_qual.platforms.performance_common import (
-    refresh_dut_device,
-    resolve_or_bind_dut_device,
-    resolve_report_dut_name,
+from drive_qual.integrations.apricorn.usb_cli import (
+    ApricornDevice,
+    device_identity,
+    get_usb_payload,
+    is_usb_3x,
+    list_apricorn_devices,
+    missing_required_fields,
+    select_apricorn_device,
+    usb_generation_label,
 )
+from drive_qual.integrations.instruments.watlow import DEFAULT_F4T_IP, F4TController
+from drive_qual.platforms.performance_common import resolve_report_dut_name
 
 LOW_TEMPERATURE_C = -40.000
 HIGH_TEMPERATURE_C = 70.000
@@ -187,10 +193,66 @@ def _format_temperature_target(dut: ApricornDevice) -> None:
         raise RuntimeError(f"Partition/format failed for {device_identity(dut)}.")
 
 
+def _current_apricorn_devices_for_temperature() -> list[ApricornDevice]:
+    payload = get_usb_payload()
+    if not isinstance(payload, dict):
+        raise RuntimeError(
+            "Unable to read Apricorn USB inventory from `usb --json`. "
+            "Confirm the Apricorn USB CLI is installed and on PATH, then verify `usb --json` works."
+        )
+    return list_apricorn_devices(payload)
+
+
+def _matches_temperature_product(device: ApricornDevice, dut_name: str) -> bool:
+    product = device.iProduct
+    if not isinstance(product, str) or not product.strip():
+        return False
+    normalized_product = normalize_product_name(product)
+    return any(
+        normalize_product_name(candidate) == normalized_product for candidate in report_dut_name_candidates(dut_name)
+    )
+
+
+def _resolve_temperature_device_by_product(
+    dut_name: str,
+    *,
+    prompt: str,
+    required_fields: tuple[str, ...],
+) -> ApricornDevice:
+    devices = _current_apricorn_devices_for_temperature()
+    product_matches = [device for device in devices if _matches_temperature_product(device, dut_name)]
+    usb_3x_matches = [device for device in product_matches if is_usb_3x(device)]
+
+    if not product_matches:
+        print(prompt)
+        available = ", ".join(device_identity(device) for device in devices) if devices else "<none>"
+        raise RuntimeError(
+            f"No Apricorn device with iProduct matching DUT '{dut_name}' was detected. "
+            f"Detected Apricorn devices: {available}."
+        )
+    if not usb_3x_matches:
+        detected = ", ".join(
+            f"{device_identity(device)} ({usb_generation_label(device)})" for device in product_matches
+        )
+        raise RuntimeError(
+            f"DUT '{dut_name}' was detected by iProduct but is not enumerated as USB 3.x: {detected}. "
+            "Terminate and reconnect as USB 3.x."
+        )
+
+    selected = select_apricorn_device(usb_3x_matches)
+    if selected is None:
+        raise RuntimeError(f"No Apricorn device selected for DUT '{dut_name}'.")
+
+    missing = missing_required_fields(selected, required_fields)
+    if missing:
+        fields = ", ".join(missing)
+        raise RuntimeError(f"DUT '{dut_name}' is missing required usb --json fields for this step: {fields}.")
+    return selected
+
+
 def _resolve_temperature_target(report_path: Path) -> TemperatureTarget:
     dut_name = resolve_report_dut_name(report_path)
-    dut_info = resolve_or_bind_dut_device(
-        report_path,
+    dut_info = _resolve_temperature_device_by_product(
         dut_name,
         prompt="Connect the Apricorn device to continue temperature testing...",
         required_fields=("physicalDriveNum",) if sys.platform == "win32" else (),
@@ -199,8 +261,7 @@ def _resolve_temperature_target(report_path: Path) -> TemperatureTarget:
     drive_letter = _drive_letter_or_none(dut_info)
     if drive_letter is None:
         _format_temperature_target(dut_info)
-        dut_info = refresh_dut_device(
-            report_path,
+        dut_info = _resolve_temperature_device_by_product(
             dut_name,
             prompt="Waiting for DUT to re-enumerate after format...",
             required_fields=("physicalDriveNum", "driveLetter") if sys.platform == "win32" else ("driveLetter",),

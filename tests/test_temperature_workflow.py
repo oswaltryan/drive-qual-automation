@@ -232,11 +232,46 @@ def test_temperature_resolve_drive_target_uses_bound_apricorn_drive_letter(monke
     monkeypatch.setattr(temperature, "resolve_report_dut_name", lambda report_path: "Padlock DT")
     monkeypatch.setattr(
         temperature,
-        "resolve_or_bind_dut_device",
+        "_resolve_temperature_device_by_product",
         lambda *args, **kwargs: SimpleNamespace(driveLetter="d:\\"),
     )
 
     assert temperature._resolve_drive_target(Path("report.json")) == "D:"
+
+
+def test_temperature_resolve_drive_target_ignores_contract_serial_when_product_matches(
+    monkeypatch: MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    from drive_qual.workflows import temperature
+
+    report_path = tmp_path / "report.json"
+    report_path.write_text(
+        json.dumps({"equipment": {"dut": {"Padlock DT": {"serial_number": "OLD-SERIAL"}}}}),
+        encoding="utf-8",
+    )
+    payload = {
+        "devices": [
+            {
+                "usb0": {
+                    "bcdUSB": 3.2,
+                    "iManufacturer": "Apricorn",
+                    "iProduct": "Padlock DT",
+                    "iSerial": "CURRENT-SERIAL",
+                    "physicalDriveNum": 2,
+                    "driveLetter": "E:",
+                }
+            }
+        ]
+    }
+    saved: list[dict[str, Any]] = []
+
+    monkeypatch.setattr(temperature, "resolve_report_dut_name", lambda _report_path: "Padlock DT")
+    monkeypatch.setattr(temperature, "get_usb_payload", lambda: payload)
+    monkeypatch.setattr(temperature, "save_report", lambda _path, data: saved.append(data))
+
+    assert temperature._resolve_drive_target(report_path) == "E:"
+    assert saved == []
 
 
 def test_temperature_resolve_drive_target_falls_back_when_usb_toolkit_unavailable(
@@ -249,7 +284,7 @@ def test_temperature_resolve_drive_target_falls_back_when_usb_toolkit_unavailabl
     def fail_resolve(*args: object, **kwargs: object) -> object:
         raise RuntimeError("Unable to read Apricorn USB inventory from `usb --json`.")
 
-    monkeypatch.setattr(temperature, "resolve_or_bind_dut_device", fail_resolve)
+    monkeypatch.setattr(temperature, "_resolve_temperature_device_by_product", fail_resolve)
 
     with pytest.raises(RuntimeError, match="Unable to read Apricorn USB inventory"):
         temperature._resolve_drive_target(Path("report.json"))
@@ -268,8 +303,8 @@ def test_temperature_resolve_drive_target_formats_when_drive_letter_missing(
 
     monkeypatch.setattr(temperature.sys, "platform", "win32")
     monkeypatch.setattr(temperature, "resolve_report_dut_name", lambda report_path: "Padlock DT")
-    monkeypatch.setattr(temperature, "resolve_or_bind_dut_device", lambda *args, **kwargs: initial)
-    monkeypatch.setattr(temperature, "refresh_dut_device", lambda *args, **kwargs: refreshed)
+    devices = iter([initial, refreshed])
+    monkeypatch.setattr(temperature, "_resolve_temperature_device_by_product", lambda *args, **kwargs: next(devices))
 
     def fake_partition_and_format_drive(dut: ApricornDevice) -> bool:
         formatted.append(dut)
