@@ -5,7 +5,7 @@ import time
 from dataclasses import dataclass
 from datetime import datetime
 
-DEFAULT_F4T_IP = "169.254.79.43"
+DEFAULT_F4T_IP = "10.10.10.7"
 SCPI_PORT = 5025
 DEFAULT_TIMEOUT_S = 3.0
 DEFAULT_WRITE_HOLD_SECONDS = 2.0
