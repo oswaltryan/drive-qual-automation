@@ -154,6 +154,7 @@ def test_run_report_workflow_imports_usb_if_step_lazily(monkeypatch: MonkeyPatch
 def test_run_report_workflow_imports_reliability_step_lazily(monkeypatch: MonkeyPatch) -> None:
     sys.modules.pop("drive_qual.workflows.report", None)
     module = importlib.import_module("drive_qual.workflows.report")
+    monkeypatch.setattr(module.sys, "platform", "win32")
 
     calls: list[str | None] = []
 
@@ -167,6 +168,34 @@ def test_run_report_workflow_imports_reliability_step_lazily(monkeypatch: Monkey
     module.run_report_workflow(["reliability"], part_number="69-420")
 
     assert calls == ["69-420"]
+
+
+def test_run_report_workflow_skips_reliability_on_non_windows_before_windows_import(
+    monkeypatch: MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    sys.modules.pop("drive_qual.workflows.report", None)
+    module = importlib.import_module("drive_qual.workflows.report")
+    monkeypatch.setattr(module.sys, "platform", "darwin")
+
+    real_import = builtins.__import__
+
+    def guarded_import(
+        name: str,
+        globals: dict[str, Any] | None = None,
+        locals: dict[str, Any] | None = None,
+        fromlist: tuple[str, ...] = (),
+        level: int = 0,
+    ) -> Any:
+        if name == "drive_qual.platforms.windows.reliability":
+            raise AssertionError("reliability workflow imported Windows automation on a non-Windows host")
+        return real_import(name, globals, locals, fromlist, level)
+
+    monkeypatch.setattr(builtins, "__import__", guarded_import)
+
+    module.run_report_workflow(["reliability"], part_number="69-420")
+
+    assert capsys.readouterr().out == "Skipping reliability workflow: reliability is Windows-only.\n"
 
 
 def test_default_steps_include_all_workflow_steps() -> None:
