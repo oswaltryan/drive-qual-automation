@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import sys
 from collections.abc import Callable
 from typing import Any
 
@@ -77,6 +78,10 @@ def _run_usb_if_step(part_number: str | None = None) -> None:
 
 
 def _run_reliability_step(part_number: str | None = None) -> None:
+    if sys.platform != "win32":
+        print("Skipping reliability workflow: reliability is Windows-only.")
+        return
+
     from drive_qual.platforms.windows.reliability import run_reliability_step
 
     run_reliability_step(part_number=part_number)

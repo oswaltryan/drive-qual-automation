@@ -43,6 +43,9 @@ def _send_keys(*args: Any, **kwargs: Any) -> None:
 
 
 def run_usb_if_msc(*, part_number: str, artifact_dir: Path, iterations: int = 3) -> UsbIfMscResult:
+    if sys.platform != "win32":
+        raise RuntimeError("USB-IF MSC automation is Windows-only.")
+
     automation = UsbIfMscAutomation(part_number=part_number, artifact_dir=artifact_dir, iterations=iterations)
     return automation.run()
 
