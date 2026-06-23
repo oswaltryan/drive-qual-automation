@@ -4,6 +4,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
+import pytest
 from _pytest.monkeypatch import MonkeyPatch
 
 from drive_qual.core.reliability import (
@@ -277,3 +278,51 @@ def test_resolve_drive_target_uses_bound_apricorn_drive_letter(monkeypatch: Monk
     )
 
     assert windows_reliability._resolve_drive_target(Path("report.json")) == "G:"
+
+
+def test_resolve_drive_target_formats_when_drive_letter_missing(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    from drive_qual.integrations.apricorn.usb_cli import ApricornDevice
+    from drive_qual.platforms.windows import power_measurements
+    from drive_qual.platforms.windows import reliability as windows_reliability
+
+    initial = ApricornDevice(iProduct="Padlock DT", iSerial="ABC123", physicalDriveNum=2)
+    refreshed = ApricornDevice(iProduct="Padlock DT", iSerial="ABC123", physicalDriveNum=2, driveLetter="E:")
+    formatted: list[ApricornDevice] = []
+
+    monkeypatch.setattr(windows_reliability, "resolve_report_dut_name", lambda report_path: "Padlock DT")
+    monkeypatch.setattr(windows_reliability, "resolve_or_bind_dut_device", lambda *args, **kwargs: initial)
+    monkeypatch.setattr(windows_reliability, "refresh_dut_device", lambda *args, **kwargs: refreshed)
+    monkeypatch.setattr("builtins.input", lambda prompt: "yes")
+
+    def fake_partition_and_format_drive(dut: ApricornDevice) -> bool:
+        formatted.append(dut)
+        return True
+
+    monkeypatch.setattr(power_measurements, "partition_and_format_drive", fake_partition_and_format_drive)
+
+    assert windows_reliability._resolve_drive_target(Path("report.json")) == "E:"
+    assert formatted == [initial]
+
+
+def test_resolve_drive_target_does_not_format_when_operator_declines(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    from drive_qual.integrations.apricorn.usb_cli import ApricornDevice
+    from drive_qual.platforms.windows import power_measurements
+    from drive_qual.platforms.windows import reliability as windows_reliability
+
+    initial = ApricornDevice(iProduct="Padlock DT", iSerial="ABC123", physicalDriveNum=2)
+
+    monkeypatch.setattr(windows_reliability, "resolve_report_dut_name", lambda report_path: "Padlock DT")
+    monkeypatch.setattr(windows_reliability, "resolve_or_bind_dut_device", lambda *args, **kwargs: initial)
+    monkeypatch.setattr("builtins.input", lambda prompt: "no")
+    monkeypatch.setattr(
+        power_measurements,
+        "partition_and_format_drive",
+        lambda dut: (_ for _ in ()).throw(AssertionError("format should not run")),
+    )
+
+    with pytest.raises(RuntimeError, match="No usable drive letter"):
+        windows_reliability._resolve_drive_target(Path("report.json"))

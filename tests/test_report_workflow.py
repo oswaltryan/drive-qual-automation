@@ -19,7 +19,7 @@ EXPECTED_STEP_ORDER = (
     "temperature",
     "reliability",
 )
-EXPECTED_CORE_PERF_PROFILE = ("drive_info", "equipment", "power_measurements", "performance", "reliability")
+EXPECTED_DEFAULT_PROFILE = ("drive_info", "equipment", "power_measurements", "performance", "usb_if", "reliability")
 
 
 def _complete_report_payload() -> dict[str, Any]:
@@ -181,7 +181,7 @@ def test_run_report_workflow_rejects_steps_and_profile() -> None:
     module = importlib.import_module("drive_qual.workflows.report")
 
     with pytest.raises(ValueError, match="Use either --steps or --profile"):
-        module.run_report_workflow(["performance"], profile="core_perf_v1")
+        module.run_report_workflow(["performance"], profile="default")
 
 
 def test_run_report_workflow_delegates_profile_execution_to_orchestrator(monkeypatch: MonkeyPatch) -> None:
@@ -208,13 +208,13 @@ def test_run_report_workflow_delegates_profile_execution_to_orchestrator(monkeyp
 
     module.run_report_workflow(
         part_number="69-420",
-        profile="core_perf_v1",
+        profile="default",
         resume=True,
     )
 
-    assert captured["selected_steps"] == EXPECTED_CORE_PERF_PROFILE
+    assert captured["selected_steps"] == EXPECTED_DEFAULT_PROFILE
     assert captured["step_runner_keys"] == EXPECTED_STEP_ORDER
-    assert captured["profile"] == "core_perf_v1"
+    assert captured["profile"] == "default"
     assert captured["part_number"] == "69-420"
     assert captured["resume"] is True
 

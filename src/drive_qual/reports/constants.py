@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import re
 
+from drive_qual.core.temperature_contract import TEMPERATURE_REPORT_POINTS_C
 from drive_qual.reports.evaluation import Status
 
 DEFAULT_OUTPUT_NAME = "drive_qualification_report.docx"
@@ -22,7 +23,7 @@ EXCLUDED_MEASUREMENT_ROWS = {"Meas9"}
 CSV_ENCODING_CANDIDATES = ("utf-8", "utf-8-sig", "cp1252", "latin-1")
 KEY_VALUE_CSV_ROW_WIDTH = 2
 LINUX_DISKS_SUMMARY_COLUMN_COUNT = 3
-TEMPERATURE_TABLE_POINTS_C = tuple(range(-40, 61, 10))
+TEMPERATURE_TABLE_POINTS_C = TEMPERATURE_REPORT_POINTS_C
 EMU_PER_TWIP = 635
 OBJECT_ICON_WIDTH_INCHES = 0.72
 WINDOWS_PERFORMANCE_BLANK_LINES_BEFORE_FIRST_OBJECT = 5

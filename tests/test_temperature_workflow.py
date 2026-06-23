@@ -97,6 +97,74 @@ def test_temperature_profile_rows_do_not_add_report_contract_keys(tmp_path: Path
     assert data["temperature"]["Padlock DT"]["performance"] == {"20c": {"read_mb_s": None, "write_mb_s": None}}
 
 
+def test_temperature_profile_uses_requested_temperature_for_report_contract(tmp_path: Path) -> None:
+    from drive_qual.workflows import temperature
+
+    csv_path = tmp_path / "temperature_rows.csv"
+    csv_path.write_text(
+        "RequestedTemp,TempRounded,Operation,SpeedMiB,Mode\n30,29,read,107.59,SEQUENTIAL\n",
+        encoding="utf-8",
+    )
+    data: dict[str, Any] = {
+        "temperature": {
+            "Padlock DT": {
+                "performance": {
+                    "29c": {"read_mb_s": None, "write_mb_s": None},
+                    "30c": {"read_mb_s": None, "write_mb_s": None},
+                }
+            }
+        }
+    }
+
+    temperature._update_temperature_report_from_profile(data, "Padlock DT", csv_path)
+
+    assert data["temperature"]["Padlock DT"]["performance"]["29c"]["read_mb_s"] is None
+    assert data["temperature"]["Padlock DT"]["performance"]["30c"]["read_mb_s"] == EXPECTED_PROFILE_READ_MB_S
+
+
+def test_temperature_template_matches_supported_report_points() -> None:
+    from drive_qual.workflows import equipment
+
+    assert list(equipment._temperature_template()["performance"]) == [
+        "-40c",
+        "-35c",
+        "-30c",
+        "-20c",
+        "-10c",
+        "0c",
+        "10c",
+        "20c",
+        "30c",
+        "40c",
+        "50c",
+        "60c",
+        "70c",
+    ]
+
+
+def test_temperature_contract_removes_legacy_80c_and_preserves_values() -> None:
+    from drive_qual.workflows import equipment
+
+    data: dict[str, Any] = {
+        "equipment": {},
+        "temperature": {
+            "Padlock DT": {
+                "performance": {
+                    "-40c": {"read_mb_s": EXPECTED_PROFILE_READ_MB_S, "write_mb_s": None},
+                    "80c": {"read_mb_s": 1.0, "write_mb_s": 2.0},
+                }
+            }
+        },
+    }
+
+    equipment._ensure_dut_sections(data, ["Padlock DT"])
+
+    performance = data["temperature"]["Padlock DT"]["performance"]
+    assert "80c" not in performance
+    assert performance["-40c"]["read_mb_s"] == EXPECTED_PROFILE_READ_MB_S
+    assert "70c" in performance
+
+
 def test_post_process_temperature_data_saves_report_and_chart(monkeypatch: MonkeyPatch, tmp_path: Path) -> None:
     from drive_qual.workflows import temperature
 
@@ -529,6 +597,21 @@ def test_temperature_performance_csv_is_derived_from_snapshots_and_disk_log(tmp_
     rows = list(csv.DictReader(StringIO(output.read_text(encoding="utf-8"))))
     assert {row["Operation"] for row in rows} == {"write", "read"}
     assert {row["Mode"] for row in rows} == {"SEQUENTIAL"}
+    assert {int(float(row["RequestedTemp"])) for row in rows} == {
+        -40,
+        -35,
+        -30,
+        -20,
+        -10,
+        0,
+        10,
+        20,
+        30,
+        40,
+        50,
+        60,
+        70,
+    }
     assert chart.exists()
 
 

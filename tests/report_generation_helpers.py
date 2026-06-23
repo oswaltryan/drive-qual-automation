@@ -19,7 +19,7 @@ EXPECTED_MEDIA_FILE_COUNT = 9
 EXPECTED_WINDOWS_PERFORMANCE_OBJECT_COUNT = 2
 EXPECTED_COMPLIANCE_TABLE_ROW_COUNT = 3
 EXPECTED_TEMPERATURE_TABLE_COLUMN_COUNT = 4
-EXPECTED_TEMPERATURE_TABLE_ROW_COUNT = 12
+EXPECTED_TEMPERATURE_TABLE_ROW_COUNT = 14
 EXPECTED_TEMPERATURE_CHART_LEADING_BREAKS = 3
 MAX_WORD_OBJECT_ID = 2_000_000_000
 
@@ -102,6 +102,7 @@ def _assert_temperature_table_shape(table: Any) -> None:
     assert _table_cell_line_break_count(table, 1, 0) == EXPECTED_TEMPERATURE_CHART_LEADING_BREAKS
     assert [row.cells[1].text for row in table.rows[1:]] == [
         "-40°C",
+        "-35°C",
         "-30°C",
         "-20°C",
         "-10°C",
@@ -112,6 +113,7 @@ def _assert_temperature_table_shape(table: Any) -> None:
         "40°C",
         "50°C",
         "60°C",
+        "70°C",
     ]
     assert table.rows[1].cells[2].text == "107.59"
     assert table.rows[1].cells[3].text == "109.31"

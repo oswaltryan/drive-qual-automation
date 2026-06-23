@@ -23,10 +23,10 @@ def test_resolve_selected_steps_uses_profile() -> None:
     selected = orchestrator.resolve_selected_steps(
         explicit_steps=None,
         default_steps=("drive_info",),
-        profile="core_perf_v1",
+        profile="default",
     )
 
-    assert selected == orchestrator.WORKFLOW_PROFILES["core_perf_v1"]
+    assert selected == orchestrator.WORKFLOW_PROFILES["default"]
 
 
 def test_resolve_selected_steps_rejects_steps_and_profile() -> None:
@@ -34,7 +34,7 @@ def test_resolve_selected_steps_rejects_steps_and_profile() -> None:
         orchestrator.resolve_selected_steps(
             explicit_steps=["performance"],
             default_steps=("drive_info",),
-            profile="core_perf_v1",
+            profile="default",
         )
 
 
@@ -60,7 +60,7 @@ def test_execute_orchestrated_workflow_enforces_dependencies(monkeypatch: Monkey
         orchestrator.execute_orchestrated_workflow(
             selected_steps=("performance",),
             step_runners={"performance": lambda: calls.append("performance")},
-            profile="core_perf_v1",
+            profile="default",
             part_number="69-420",
             resume=False,
         )
@@ -74,7 +74,7 @@ def test_execute_orchestrated_workflow_resume_skips_completed_step(monkeypatch: 
         json.dumps(
             {
                 "run_id": "2026-04-09T00:00:00Z",
-                "profile": "core_perf_v1",
+                "profile": "default",
                 "part_number": "69-420",
                 "started_at": "2026-04-09T00:00:00Z",
                 "ended_at": None,
@@ -108,7 +108,7 @@ def test_execute_orchestrated_workflow_resume_skips_completed_step(monkeypatch: 
             "drive_info": lambda: calls.append("drive_info"),
             "equipment": lambda: calls.append("equipment"),
         },
-        profile="core_perf_v1",
+        profile="default",
         part_number="69-420",
         resume=True,
     )

@@ -175,8 +175,15 @@ def _wait_for_serial_as_usb_3x(
             missing = missing_required_fields(device, required_fields)
             if missing:
                 fields = ", ".join(missing)
-                raise RuntimeError(f"DUT '{dut_name}' is missing required usb --json fields for this step: {fields}.")
-            return device
+                if state != "missing_required_fields":
+                    print(
+                        f"DUT '{dut_name}' ({device_identity(device)}) is connected as USB 3.x, "
+                        f"but usb --json is missing fields required for this step: {fields}. "
+                        "Unlock or remount the device, then wait for it to enumerate with the required storage details."
+                    )
+                state = "missing_required_fields"
+            else:
+                return device
 
         poll_count += 1
         if _poll_limit_exceeded(poll_count, max_polls):

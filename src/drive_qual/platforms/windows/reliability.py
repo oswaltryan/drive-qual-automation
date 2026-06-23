@@ -15,8 +15,10 @@ from drive_qual.core.reliability import (
 )
 from drive_qual.core.report_session import load_report, resolve_folder_name, save_report
 from drive_qual.core.storage_paths import localize_windows_path
+from drive_qual.integrations.apricorn.usb_cli import ApricornDevice, device_identity
 from drive_qual.platforms.performance_common import (
     load_part_number_and_report,
+    refresh_dut_device,
     resolve_or_bind_dut_device,
     resolve_report_dut_name,
 )
@@ -103,11 +105,53 @@ def _resolve_drive_target(report_path: Path) -> str:
         report_path,
         dut_name,
         prompt="Connect the Apricorn device to continue reliability testing...",
-        required_fields=("driveLetter",),
+        required_fields=("physicalDriveNum",),
     )
-    if dut_info.driveLetter is None:
-        raise RuntimeError("Could not determine drive letter for the connected device.")
-    return _normalize_drive_target(dut_info.driveLetter)
+    drive_letter = _drive_letter_or_none(dut_info)
+    if drive_letter is None:
+        dut_info = _format_and_refresh_drive_target(report_path, dut_name, dut_info)
+        drive_letter = _drive_letter_or_none(dut_info)
+    if drive_letter is None:
+        raise RuntimeError(f"Could not determine drive letter for {device_identity(dut_info)}.")
+    return drive_letter
+
+
+def _drive_letter_or_none(dut: ApricornDevice) -> str | None:
+    if dut.driveLetter is None:
+        return None
+    try:
+        return _normalize_drive_target(dut.driveLetter)
+    except RuntimeError:
+        return None
+
+
+def _format_and_refresh_drive_target(report_path: Path, dut_name: str, dut_info: ApricornDevice) -> ApricornDevice:
+    if dut_info.physicalDriveNum is None:
+        raise RuntimeError(f"Could not determine Windows disk number for {device_identity(dut_info)}.")
+    if not _confirm_partition_and_format_target(dut_info):
+        raise RuntimeError(f"No usable drive letter found for {device_identity(dut_info)}.")
+
+    from drive_qual.platforms.windows import power_measurements
+
+    print(f"Partitioning and formatting {device_identity(dut_info)} for reliability testing.")
+    if not power_measurements.partition_and_format_drive(dut_info):
+        raise RuntimeError(f"Partition/format failed for {device_identity(dut_info)}.")
+
+    return refresh_dut_device(
+        report_path,
+        dut_name,
+        prompt="Waiting for DUT to re-enumerate after format...",
+        required_fields=("physicalDriveNum", "driveLetter"),
+    )
+
+
+def _confirm_partition_and_format_target(dut_info: ApricornDevice) -> bool:
+    prompt = (
+        f"No drive letter was reported for {device_identity(dut_info)}. "
+        f"Partition and format Windows disk {dut_info.physicalDriveNum}? This will erase the DUT. [y/N]: "
+    )
+    response = input(prompt).strip().casefold()
+    return response in {"y", "yes"}
 
 
 def _normalize_drive_target(raw: str) -> str:

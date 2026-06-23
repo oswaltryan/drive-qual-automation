@@ -25,9 +25,14 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 
+from drive_qual.core.temperature_contract import (
+    HIGH_TEMPERATURE_C,
+    LOW_TEMPERATURE_C,
+    TEMPERATURE_REPORT_POINTS_C,
+)
 
-TEMP_MIN = -30
-TEMP_MAX = 60
+TEMP_MIN = LOW_TEMPERATURE_C
+TEMP_MAX = HIGH_TEMPERATURE_C
 SPEED_MAX = 2000
 AUTO_OFFSET_MAX_HOURS = 6
 LOG_LINE_RE = re.compile(r"^\[(?P<ts>.+?)\]\s+(?P<msg>.*)$")
@@ -654,8 +659,9 @@ def plot_profile_overlay(profile_df: pd.DataFrame, out_png: Path, title: str = "
         part = profile_df[(profile_df["Mode"] == mode) & (profile_df["Operation"] == op)]
         if part.empty:
             continue
+        temperature_column = "RequestedTemp" if "RequestedTemp" in part.columns else "TempRounded"
         plt.plot(
-            part["TempRounded"],
+            part[temperature_column],
             part["SpeedMiB"],
             label=label,
             linewidth=2,
@@ -705,6 +711,7 @@ def build_snapshot_log_profiles(
     snapshot_csv: Path,
     log_path: Path,
     max_temp_gap_sec: int = 120,
+    temperatures: list[float] | list[int] | None = None,
 ) -> pd.DataFrame:
     speed_df, _capacity = parse_log_file(log_path)
     if speed_df.empty:
@@ -725,9 +732,15 @@ def build_snapshot_log_profiles(
         return pd.DataFrame()
 
     profiles = []
+    requested_temperatures = list(TEMPERATURE_REPORT_POINTS_C) if temperatures is None else temperatures
     for mode, op, _label, _color, _style in PROFILE_SERIES:
-        part = select_real_operation_profile(merged, mode=mode, operation=op)
-        if part.empty:
+        part = select_real_operation_profile(
+            merged,
+            mode=mode,
+            operation=op,
+            temperatures=requested_temperatures,
+        )
+        if part.empty or not part["SpeedMiB"].notna().any():
             continue
         part = part.copy()
         part["Mode"] = mode

@@ -5,6 +5,7 @@ from typing import Any
 from drive_qual.core.dut_selection import normalize_dut_bindings
 from drive_qual.core.product_profiles import report_dut_names_for_form_factor
 from drive_qual.core.report_session import load_report, report_path_for, resolve_folder_name, save_report
+from drive_qual.core.temperature_contract import TEMPERATURE_REPORT_POINTS_C
 from drive_qual.platforms.performance_common import BLACKMAGIC_DISK_SPEED_TEST_TOOL_NAME
 
 HOST_DEFAULTS: dict[str, dict[str, Any]] = {
@@ -117,8 +118,22 @@ def _has_scope_profile_data(equipment: dict[str, Any]) -> bool:
 
 
 def _temperature_template() -> dict[str, Any]:
-    temps = ["-40c", "-35c", "-30c", "-20c", "-10c", "0c", "10c", "20c", "30c", "40c", "50c", "60c", "70c", "80c"]
+    temps = [f"{temp_c}c" for temp_c in TEMPERATURE_REPORT_POINTS_C]
     return {"performance": {temp: {"read_mb_s": None, "write_mb_s": None} for temp in temps}}
+
+
+def _ensure_temperature_contract(temperature: dict[str, Any], dut: str) -> None:
+    dut_temperature = temperature.setdefault(dut, {})
+    if not isinstance(dut_temperature, dict):
+        raise ValueError(f"Invalid temperature contract for DUT {dut!r}; expected object.")
+    performance = dut_temperature.setdefault("performance", {})
+    if not isinstance(performance, dict):
+        raise ValueError(f"Invalid temperature performance contract for DUT {dut!r}; expected object.")
+
+    template = _temperature_template()["performance"]
+    for temperature_key, values in template.items():
+        performance.setdefault(temperature_key, values)
+    performance.pop("80c", None)
 
 
 def _ensure_dut_sections(data: dict[str, Any], duts: list[str]) -> None:
@@ -173,7 +188,7 @@ def _ensure_dut_sections(data: dict[str, Any], duts: list[str]) -> None:
                         if sw_name:
                             os_perf.setdefault(sw_name, {"read": None, "write": None})
 
-        temperature.setdefault(dut, _temperature_template())
+        _ensure_temperature_contract(temperature, dut)
 
 
 def run_equipment_prompt(part_number: str | None = None, scope_profile: str | None = None) -> None:

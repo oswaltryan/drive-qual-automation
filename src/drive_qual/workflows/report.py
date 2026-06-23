@@ -282,7 +282,7 @@ def run_report_workflow_cli() -> None:
     )
     parser.add_argument(
         "--profile",
-        help="Run a named workflow profile (for example: core_perf_v1).",
+        help="Run a named workflow profile (for example: default).",
     )
     parser.add_argument(
         "--list-profiles",

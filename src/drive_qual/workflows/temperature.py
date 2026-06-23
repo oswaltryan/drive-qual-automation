@@ -18,6 +18,10 @@ from drive_qual.core.io_utils import mk_dir
 from drive_qual.core.product_profiles import normalize_product_name, report_dut_name_candidates
 from drive_qual.core.report_session import load_report, report_path_for, resolve_folder_name, save_report
 from drive_qual.core.storage_paths import SCOPE_ARTIFACT_ROOT, localize_windows_path
+from drive_qual.core.temperature_contract import (
+    HIGH_TEMPERATURE_C,
+    LOW_TEMPERATURE_C,
+)
 from drive_qual.integrations.apricorn.usb_cli import (
     ApricornDevice,
     device_identity,
@@ -31,10 +35,8 @@ from drive_qual.integrations.apricorn.usb_cli import (
 from drive_qual.integrations.instruments.watlow import DEFAULT_F4T_IP, F4TController
 from drive_qual.platforms.performance_common import resolve_report_dut_name
 
-LOW_TEMPERATURE_C = -40.000
-HIGH_TEMPERATURE_C = 70.000
 AMBIENT_TEMPERATURE_C = 25.000
-TEMPERATURE_SETPOINTS_C: tuple[float, ...] = (LOW_TEMPERATURE_C, HIGH_TEMPERATURE_C)
+TEMPERATURE_SETPOINTS_C: tuple[float, ...] = (float(LOW_TEMPERATURE_C), float(HIGH_TEMPERATURE_C))
 SETPOINT_TOLERANCE_C = 0.4
 SETPOINT_SOAK_SECONDS = 300.0
 SNAPSHOT_INTERVAL_SECONDS = 2.0
@@ -352,6 +354,7 @@ def _update_temperature_report_from_profile(data: dict[str, Any], dut_name: str,
     performance = dut_temperature.get("performance")
     if not isinstance(performance, dict):
         raise ValueError(f"Invalid temperature performance contract for DUT {dut_name!r}; expected object.")
+    performance.pop("80c", None)
 
     with profile_csv.open("r", newline="", encoding="utf-8-sig") as handle:
         for row in csv.DictReader(handle):
@@ -362,7 +365,8 @@ def _update_temperature_report_from_profile(data: dict[str, Any], dut_name: str,
             if operation not in {"read", "write"}:
                 continue
             try:
-                temp_c = int(round(float(row.get("TempRounded") or "")))
+                requested_temp = row.get("RequestedTemp")
+                temp_c = int(round(float(requested_temp or row.get("TempRounded") or "")))
                 speed_mib = float(row.get("SpeedMiB") or "")
             except ValueError:
                 continue
