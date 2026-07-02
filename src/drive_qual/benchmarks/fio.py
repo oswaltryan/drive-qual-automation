@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import asyncio
+import math
 import sys
+from contextlib import suppress
 
 from drive_qual.benchmarks.common import _require_fio, benchmark_directory, benchmark_file_path
 
@@ -10,6 +12,8 @@ RAMP_TIME_SECONDS = 3
 IODEPTH = 32
 RANDOM_GENERATOR = "tausworthe64"
 WORKLOAD_SIZE = "1g"
+PHASE_COUNT = 4
+PROCESS_EXIT_GRACE_SECONDS = 60
 
 
 def _ioengine_for_platform() -> str:
@@ -66,11 +70,40 @@ def _fio_command(target_dir: str, *, runtime_seconds: int) -> tuple[list[str], s
     return cmd, cwd
 
 
-async def run_fio(target_dir: str, *, runtime_seconds: int = DEFAULT_RUNTIME_SECONDS) -> int:
-    """Run the cross-platform fio parity suite (seq/rand write+read) as a single command."""
-    cmd, cwd = _fio_command(target_dir, runtime_seconds=runtime_seconds)
+def _runtime_plan(runtime_seconds: int) -> tuple[int, int]:
+    if runtime_seconds < PHASE_COUNT:
+        raise ValueError(f"fio runtime must be at least {PHASE_COUNT} seconds.")
+    phase_runtime_seconds = math.ceil(runtime_seconds / PHASE_COUNT)
+    expected_runtime_seconds = phase_runtime_seconds * PHASE_COUNT + RAMP_TIME_SECONDS * PHASE_COUNT
+    return phase_runtime_seconds, expected_runtime_seconds + PROCESS_EXIT_GRACE_SECONDS
 
-    print(f"\nStarting fio parity suite ({runtime_seconds}s runtime per phase)")
+
+def _kill_process(process: asyncio.subprocess.Process) -> None:
+    with suppress(ProcessLookupError):
+        process.kill()
+
+
+async def _communicate_with_deadline(process: asyncio.subprocess.Process, timeout_seconds: int) -> tuple[bytes, bytes]:
+    communication = asyncio.create_task(process.communicate())
+    try:
+        return await asyncio.wait_for(asyncio.shield(communication), timeout=timeout_seconds)
+    except TimeoutError as exc:
+        _kill_process(process)
+        await communication
+        raise RuntimeError(f"fio exceeded its {timeout_seconds}s process deadline and was terminated.") from exc
+    except BaseException:
+        if process.returncode is None:
+            _kill_process(process)
+        await communication
+        raise
+
+
+async def run_fio(target_dir: str, *, runtime_seconds: int = DEFAULT_RUNTIME_SECONDS) -> int:
+    """Run the fio parity suite for approximately ``runtime_seconds`` total."""
+    phase_runtime_seconds, timeout_seconds = _runtime_plan(runtime_seconds)
+    cmd, cwd = _fio_command(target_dir, runtime_seconds=phase_runtime_seconds)
+
+    print(f"\nStarting fio parity suite (~{runtime_seconds}s total, {phase_runtime_seconds}s per phase plus ramp time)")
 
     process = await asyncio.create_subprocess_exec(
         *cmd,
@@ -79,7 +112,7 @@ async def run_fio(target_dir: str, *, runtime_seconds: int = DEFAULT_RUNTIME_SEC
         cwd=cwd,
     )
 
-    stdout, stderr = await process.communicate()
+    stdout, stderr = await _communicate_with_deadline(process, timeout_seconds)
 
     if stdout:
         print(stdout.decode().strip())
