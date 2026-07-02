@@ -151,6 +151,28 @@ def test_run_report_workflow_imports_usb_if_step_lazily(monkeypatch: MonkeyPatch
     assert calls == ["69-420"]
 
 
+def test_run_report_workflow_passes_temperature_restart_option(monkeypatch: MonkeyPatch) -> None:
+    sys.modules.pop("drive_qual.workflows.report", None)
+    module = importlib.import_module("drive_qual.workflows.report")
+
+    calls: list[tuple[str | None, bool]] = []
+
+    class FakeTemperatureModule(ModuleType):
+        def run_temperature_step(self, part_number: str | None = None, *, restart: bool = False) -> None:
+            calls.append((part_number, restart))
+
+    fake_temperature = FakeTemperatureModule("drive_qual.workflows.temperature")
+    monkeypatch.setitem(sys.modules, "drive_qual.workflows.temperature", fake_temperature)
+
+    module.run_report_workflow(
+        ["temperature"],
+        part_number="29-0036",
+        restart_temperature=True,
+    )
+
+    assert calls == [("29-0036", True)]
+
+
 def test_run_report_workflow_imports_reliability_step_lazily(monkeypatch: MonkeyPatch) -> None:
     sys.modules.pop("drive_qual.workflows.report", None)
     module = importlib.import_module("drive_qual.workflows.report")

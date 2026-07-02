@@ -21,6 +21,8 @@ from drive_qual.platforms.power_measurements_mixed import (
     _run_max_io_benchmark,
 )
 
+WINDOWS_TEST_DISK_NUMBER = 7
+
 EXPECTED_BENCHMARK_RUNTIME_SECONDS = 300
 
 
@@ -184,6 +186,41 @@ def _setup_non_windows_max_io_benchmark_case(
     )
 
     return report_path, dut, prepare_calls
+
+
+def test_windows_partition_and_format_explicitly_uses_ntfs(monkeypatch: MonkeyPatch) -> None:
+    from drive_qual.integrations.apricorn.usb_cli import ApricornDevice
+    from drive_qual.platforms.windows import power_measurements
+
+    calls: list[dict[str, Any]] = []
+
+    def fake_format_disk(
+        adapter: object,
+        device: object,
+        **kwargs: Any,
+    ) -> bool:
+        calls.append({"adapter": adapter, "device": device, **kwargs})
+        return True
+
+    monkeypatch.setattr(power_measurements, "_format_disk", lambda: fake_format_disk)
+    dut = ApricornDevice(
+        iProduct="Padlock DT",
+        physicalDriveNum=WINDOWS_TEST_DISK_NUMBER,
+        driveLetter="D:",
+    )
+
+    assert power_measurements.partition_and_format_drive(dut) is True
+    assert calls[0]["device"] == WINDOWS_TEST_DISK_NUMBER
+    assert calls[0]["drive_letter"] == "D:"
+    assert calls[0]["filesystem"] == "NTFS"
+
+
+def test_disk_ops_windows_default_filesystem_is_ntfs() -> None:
+    from drive_qual.platforms.windows import power_measurements
+
+    disk_ops = power_measurements._load_disk_ops_module()
+
+    assert disk_ops.FORMAT_DEFAULTS["windows"]["filesystem"] == "NTFS"
 
 
 @pytest.mark.parametrize(("platform_name", "slot"), [("linux", "linux"), ("darwin", "macos")])

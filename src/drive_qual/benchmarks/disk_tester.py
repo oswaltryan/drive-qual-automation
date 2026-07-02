@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-# mypy: ignore-errors
 import argparse
 import datetime
 import json
@@ -10,10 +9,29 @@ import shutil
 import subprocess
 import sys
 import time
-from contextlib import nullcontext
+from collections.abc import Iterator
+from contextlib import contextmanager
+from typing import Any, Literal, Protocol, TextIO, TypedDict, overload
 
 
-def get_platform_ioengine():
+class FioError(TypedDict, total=False):
+    returncode: int
+    stdout: str
+    stderr: str
+    parse_error: str
+
+
+class TempArgs(Protocol):
+    failure_action: Literal["prompt", "retry", "exit"]
+    max_retries: int
+    retry_delay: float
+
+
+TempOperation = tuple[str, str, str, str]
+FioJson = dict[str, Any]
+
+
+def get_platform_ioengine() -> str:
     system = platform.system()
     if system == "Linux":
         return "libaio"
@@ -22,13 +40,13 @@ def get_platform_ioengine():
     return "posixaio"
 
 
-def check_fio_installed():
+def check_fio_installed() -> None:
     if shutil.which("fio") is None:
         print("Error: 'fio' is not installed or not in PATH.")
         sys.exit(1)
 
 
-def get_fio_version():
+def get_fio_version() -> str:
     try:
         result = subprocess.run(
             ["fio", "--version"],
@@ -42,7 +60,7 @@ def get_fio_version():
     return output or "unknown"
 
 
-def get_test_size(path, percentage=90):
+def get_test_size(path: str, percentage: float = 90) -> int:
     """
     Calculates the test size.
     If path is a directory, uses free space.
@@ -66,9 +84,9 @@ def get_test_size(path, percentage=90):
     return int(total_available_for_test * (percentage / 100.0))
 
 
-def format_bytes(size):
+def format_bytes(size: int) -> str:
     power = 2**10
-    n = size
+    n = float(size)
     power_labels = {0: "", 1: "K", 2: "M", 3: "G", 4: "T"}
     count = 0
     while n > power:
@@ -77,7 +95,7 @@ def format_bytes(size):
     return f"{n:.2f} {power_labels.get(count, 'P')}B"
 
 
-def parse_size(size_text):
+def parse_size(size_text: str | None) -> int:
     if size_text is None:
         raise ValueError("size_text is required")
     s = size_text.strip().upper()
@@ -99,7 +117,7 @@ def parse_size(size_text):
         raise ValueError(f"Invalid size: {size_text}") from exc
 
 
-def _truncate(text, limit=2000):
+def _truncate(text: str | None, limit: int = 2000) -> str:
     if text is None:
         return ""
     if len(text) <= limit:
@@ -107,7 +125,7 @@ def _truncate(text, limit=2000):
     return text[:limit] + " ... [truncated]"
 
 
-def _extract_json_block(text):
+def _extract_json_block(text: str | None) -> str | None:
     if not text:
         return None
     start = text.find("{")
@@ -117,7 +135,7 @@ def _extract_json_block(text):
     return text[start : end + 1]
 
 
-def _load_fio_json(stdout, stderr):
+def _load_fio_json(stdout: str | None, stderr: str | None) -> FioJson:
     candidates = []
     if stdout and stdout.strip():
         candidates.append(("stdout", stdout))
@@ -129,19 +147,25 @@ def _load_fio_json(stdout, stderr):
         if not stripped:
             continue
         try:
-            return json.loads(stripped)
+            loaded: object = json.loads(stripped)
+            if not isinstance(loaded, dict):
+                raise ValueError("fio JSON root was not an object")
+            return loaded
         except json.JSONDecodeError:
             json_block = _extract_json_block(stripped)
             if json_block:
                 try:
-                    return json.loads(json_block)
+                    loaded = json.loads(json_block)
+                    if not isinstance(loaded, dict):
+                        raise ValueError("fio JSON root was not an object")
+                    return loaded
                 except json.JSONDecodeError:
                     pass
 
     raise ValueError("fio did not return valid JSON on stdout or stderr")
 
 
-def _escape_fio_path(path):
+def _escape_fio_path(path: str) -> str:
     if platform.system() != "Windows":
         return path
     drive_prefix_length = 2
@@ -150,11 +174,11 @@ def _escape_fio_path(path):
     return path
 
 
-def _now_ts():
+def _now_ts() -> str:
     return datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
 
-def _log_line(message, log_handle=None, also_print=True):
+def _log_line(message: str, log_handle: TextIO | None = None, also_print: bool = True) -> None:
     line = f"[{_now_ts()}] {message}"
     if also_print:
         print(line)
@@ -163,7 +187,7 @@ def _log_line(message, log_handle=None, also_print=True):
         log_handle.flush()
 
 
-def _log_json(label, payload, log_handle=None):
+def _log_json(label: str, payload: object, log_handle: TextIO | None = None) -> None:
     if not log_handle:
         return
     try:
@@ -174,7 +198,7 @@ def _log_json(label, payload, log_handle=None):
     log_handle.flush()
 
 
-def _log_fio_summary(label, fio_json, log_handle=None):
+def _log_fio_summary(label: str, fio_json: FioJson | None, log_handle: TextIO | None = None) -> None:
     if not fio_json:
         return
     try:
@@ -204,7 +228,7 @@ def _log_fio_summary(label, fio_json, log_handle=None):
             )
 
 
-def _resolve_target_path(path):
+def _resolve_target_path(path: str) -> str:
     normalized = os.path.abspath(path)
     drive, tail = os.path.splitdrive(normalized)
     if os.path.isdir(normalized):
@@ -216,7 +240,7 @@ def _resolve_target_path(path):
     return normalized
 
 
-def _ensure_file_size(path, size_bytes, log_handle=None):
+def _ensure_file_size(path: str, size_bytes: int, log_handle: TextIO | None = None) -> None:
     try:
         if os.path.isdir(path):
             path = os.path.join(path, "disk_test.dat")
@@ -235,14 +259,21 @@ def _ensure_file_size(path, size_bytes, log_handle=None):
         _log_line(f"Temp file preallocation failed: {exc}", log_handle)
 
 
-def _is_transient_io_error(err):
+def _is_transient_io_error(err: FioError | None) -> bool:
     if not err:
         return False
     stderr = (err.get("stderr") or "").lower()
     return "resource temporarily unavailable" in stderr or "error=11" in stderr
 
 
-def _run_temp_burst(label, category, burst_args, rw, bs, log_handle):
+def _run_temp_burst(
+    label: str,
+    category: str,
+    burst_args: list[str],
+    rw: str,
+    bs: str,
+    log_handle: TextIO | None,
+) -> tuple[FioJson | None, FioError | None]:
     _log_line(f"{label} Burst (5s)", log_handle)
     res, err = run_fio_job(burst_args + [f"--rw={rw}", f"--bs={bs}"], allow_errors=True)
     if err and _is_transient_io_error(err):
@@ -264,27 +295,87 @@ def _run_temp_burst(label, category, burst_args, rw, bs, log_handle):
     return res, err
 
 
-def _prompt_failure_action():
+def _prompt_failure_action() -> Literal["retry", "exit"]:
     while True:
-        choice = input("Failure detected. [R]etry temp test or [E]xit? ").strip().lower()
+        try:
+            choice = input("Failure detected. [R]etry temp test or [E]xit? ").strip().lower()
+        except EOFError:
+            return "exit"
         if choice in ("r", "retry"):
             return "retry"
         if choice in ("e", "exit"):
             return "exit"
 
 
-def _default_log_path(target_path):
+def _run_temp_operation(
+    operation: TempOperation,
+    burst_args: list[str],
+    log_handle: TextIO | None,
+    args: TempArgs,
+) -> bool:
+    label, category, rw, bs = operation
+    retry_count = 0
+    while True:
+        _, err = _run_temp_burst(label, category, burst_args, rw, bs, log_handle)
+        if not err:
+            return True
+
+        _log_line(f"Failure detected during {rw}.", log_handle)
+        if args.failure_action == "prompt":
+            if _prompt_failure_action() == "retry":
+                continue
+            return False
+        if args.failure_action == "exit":
+            return False
+        if retry_count >= args.max_retries:
+            _log_line(f"Retry limit reached for {rw}; stopping temperature load.", log_handle)
+            return False
+
+        retry_count += 1
+        _log_line(
+            f"Retrying {rw} after I/O failure ({retry_count}/{args.max_retries}) in {args.retry_delay:g} seconds.",
+            log_handle,
+        )
+        time.sleep(args.retry_delay)
+
+
+def _default_log_path(target_path: str) -> str:
     cleaned = re.sub(r"[^A-Za-z0-9_-]+", "_", str(target_path)).strip("_")
     if not cleaned:
         cleaned = "disk_test"
     return f"{cleaned}_{_timestamp_for_filename()}.log"
 
 
-def _timestamp_for_filename():
+def _timestamp_for_filename() -> str:
     return datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
 
 
-def run_fio_job(job_config, verbose=False, allow_errors=False):
+@contextmanager
+def _optional_log_handle(log_path: str | None) -> Iterator[TextIO | None]:
+    if log_path is None:
+        yield None
+        return
+
+    with open(log_path, "a", encoding="utf-8") as log_handle:
+        yield log_handle
+
+
+@overload
+def run_fio_job(job_config: list[str], verbose: bool = False, *, allow_errors: Literal[False] = False) -> FioJson: ...
+
+
+@overload
+def run_fio_job(
+    job_config: list[str], verbose: bool = False, *, allow_errors: Literal[True]
+) -> tuple[FioJson | None, FioError | None]: ...
+
+
+def run_fio_job(
+    job_config: list[str],
+    verbose: bool = False,
+    *,
+    allow_errors: bool = False,
+) -> FioJson | tuple[FioJson | None, FioError | None]:
     """
     Runs fio with the given configuration (list of arguments).
     Returns the JSON output.
@@ -297,7 +388,7 @@ def run_fio_job(job_config, verbose=False, allow_errors=False):
     result = subprocess.run(cmd, capture_output=True, text=True)
     if result.returncode != 0:
         if allow_errors:
-            error_info = {
+            error_info: FioError = {
                 "returncode": result.returncode,
                 "stdout": _truncate(result.stdout),
                 "stderr": _truncate(result.stderr),
@@ -332,7 +423,7 @@ def run_fio_job(job_config, verbose=False, allow_errors=False):
         sys.exit(1)
 
 
-def main():  # noqa: PLR0912, PLR0915
+def main() -> int:  # noqa: PLR0912, PLR0915
     parser = argparse.ArgumentParser(description="Disk Tester (Python/fio)")
     subparsers = parser.add_subparsers(dest="command", required=True)
 
@@ -349,6 +440,24 @@ def main():  # noqa: PLR0912, PLR0915
     parser_temp = subparsers.add_parser("temp", parents=[parent_parser], help="Run Temperature Polling Test")
     parser_temp.add_argument("--interval", type=int, default=60, help="Cycle interval in seconds (default: 60)")
     parser_temp.add_argument("--duration", type=int, default=0, help="Total duration in seconds (0 = until failure)")
+    parser_temp.add_argument(
+        "--failure-action",
+        choices=("prompt", "retry", "exit"),
+        default="prompt",
+        help="Action after a fio failure (default: prompt).",
+    )
+    parser_temp.add_argument(
+        "--max-retries",
+        type=int,
+        default=3,
+        help="Retry count when --failure-action=retry (default: 3).",
+    )
+    parser_temp.add_argument(
+        "--retry-delay",
+        type=float,
+        default=5.0,
+        help="Seconds between retries (default: 5).",
+    )
 
     args = parser.parse_args()
 
@@ -359,7 +468,7 @@ def main():  # noqa: PLR0912, PLR0915
     log_path = args.log
     if log_path == "disk_test.log":
         log_path = _default_log_path(target_path)
-    with open(log_path, "a", encoding="utf-8") if log_path else nullcontext() as log_handle:
+    with _optional_log_handle(log_path) as log_handle:
         _log_line(f"Starting {get_fio_version()}", log_handle)
         _log_line(
             f"Platform: {platform.system()} {platform.release()} ({platform.machine()})",
@@ -470,6 +579,10 @@ def main():  # noqa: PLR0912, PLR0915
                 sys.exit(1)
 
         elif args.command == "temp":
+            if args.max_retries < 0:
+                parser.error("--max-retries must be non-negative")
+            if args.retry_delay < 0:
+                parser.error("--retry-delay must be non-negative")
             _log_line("Running Temperature Polling Test", log_handle)
             if args.duration:
                 _log_line(f"Duration: {args.duration}s, Interval: {args.interval}s", log_handle)
@@ -494,41 +607,19 @@ def main():  # noqa: PLR0912, PLR0915
                     "--time_based",
                     "--runtime=5",
                 ]
-
-                res, err = _run_temp_burst("Sequential Write", "SEQUENTIAL", burst_args, "write", "1M", log_handle)
-                if err:
-                    _log_line("Failure detected during seq_write.", log_handle)
-                    action = _prompt_failure_action()
-                    if action == "retry":
-                        continue
-                    break
-
-                res, err = _run_temp_burst("Sequential Read", "SEQUENTIAL", burst_args, "read", "1M", log_handle)
-                if err:
-                    _log_line("Failure detected during seq_read.", log_handle)
-                    action = _prompt_failure_action()
-                    if action == "retry":
-                        continue
-                    break
-
-                res, err = _run_temp_burst("Random Write", "RANDOM", burst_args, "randwrite", "4k", log_handle)
-                if err:
-                    _log_line("Failure detected during rand_write.", log_handle)
-                    action = _prompt_failure_action()
-                    if action == "retry":
-                        continue
-                    break
-
-                res, err = _run_temp_burst("Random Read", "RANDOM", burst_args, "randread", "4k", log_handle)
-                if err:
-                    _log_line("Failure detected during rand_read.", log_handle)
-                    action = _prompt_failure_action()
-                    if action == "retry":
-                        continue
-                    break
+                operations = (
+                    ("Sequential Write", "SEQUENTIAL", "write", "1M"),
+                    ("Sequential Read", "SEQUENTIAL", "read", "1M"),
+                    ("Random Write", "RANDOM", "randwrite", "4k"),
+                    ("Random Read", "RANDOM", "randread", "4k"),
+                )
+                for operation in operations:
+                    if not _run_temp_operation(operation, burst_args, log_handle, args):
+                        return 1
 
         _log_line("Test Complete.", log_handle)
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

@@ -18,7 +18,7 @@ LINUX_FILESYSTEMS = ("EXT4", "NTFS", "VFAT", "EXFAT")
 LINUX_PARTITION_SCHEMES = ("GPT", "MBR")
 
 FORMAT_DEFAULTS: dict[str, dict[str, str]] = {
-    "windows": {"filesystem": "EXFAT", "partition_scheme": "GPT"},
+    "windows": {"filesystem": "NTFS", "partition_scheme": "GPT"},
     "macos": {"filesystem": "EXFAT", "partition_scheme": "GUID"},
     "linux": {"filesystem": "EXT4", "partition_scheme": "GPT"},
 }

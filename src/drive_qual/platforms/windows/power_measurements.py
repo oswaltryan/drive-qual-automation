@@ -88,6 +88,7 @@ def partition_and_format_drive(dut: ApricornDevice) -> bool:
             dut.physicalDriveNum,
             label="DUT",
             drive_letter=drive_letter,
+            filesystem="NTFS",
         )
     )
 

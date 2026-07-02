@@ -134,16 +134,30 @@ def _run_workflow(args: list[str], *, resume: bool) -> None:
     parser.add_argument("--part-number", help="Apricorn part number for selecting the report folder.")
     parser.add_argument("--profile", default="default", help="Workflow profile to run.")
     parser.add_argument("--scope-profile", help="Apply a scope/probe profile during equipment setup.")
+    parser.add_argument(
+        "--restart-temperature",
+        action="store_true",
+        help="Ignore incomplete temperature artifacts and start a new temperature run.",
+    )
     parsed = parser.parse_args(args)
 
     from drive_qual.workflows.report import run_report_workflow
 
-    run_report_workflow(
-        part_number=parsed.part_number,
-        profile=parsed.profile,
-        resume=resume,
-        scope_profile=parsed.scope_profile,
-    )
+    if parsed.restart_temperature:
+        run_report_workflow(
+            part_number=parsed.part_number,
+            profile=parsed.profile,
+            resume=resume,
+            scope_profile=parsed.scope_profile,
+            restart_temperature=True,
+        )
+    else:
+        run_report_workflow(
+            part_number=parsed.part_number,
+            profile=parsed.profile,
+            resume=resume,
+            scope_profile=parsed.scope_profile,
+        )
 
 
 def _run_step(args: list[str]) -> None:
@@ -151,6 +165,11 @@ def _run_step(args: list[str]) -> None:
     parser.add_argument("name", help="Step name or alias.")
     parser.add_argument("--part-number", help="Apricorn part number for selecting the report folder.")
     parser.add_argument("--scope-profile", help="Apply a scope/probe profile during equipment setup.")
+    parser.add_argument(
+        "--restart-temperature",
+        action="store_true",
+        help="Ignore incomplete temperature artifacts and start a new temperature run.",
+    )
     parsed = parser.parse_args(args)
 
     step_name = STEP_ALIASES.get(parsed.name.casefold())
@@ -159,11 +178,19 @@ def _run_step(args: list[str]) -> None:
 
     from drive_qual.workflows.report import run_report_workflow
 
-    run_report_workflow(
-        [step_name],
-        part_number=parsed.part_number,
-        scope_profile=parsed.scope_profile,
-    )
+    if parsed.restart_temperature:
+        run_report_workflow(
+            [step_name],
+            part_number=parsed.part_number,
+            scope_profile=parsed.scope_profile,
+            restart_temperature=True,
+        )
+    else:
+        run_report_workflow(
+            [step_name],
+            part_number=parsed.part_number,
+            scope_profile=parsed.scope_profile,
+        )
 
 
 def _run_report(args: list[str]) -> None:

@@ -65,10 +65,10 @@ def _run_performance_step(part_number: str | None = None) -> None:
     run_software_step(part_number=part_number)
 
 
-def _run_temperature_step(part_number: str | None = None) -> None:
+def _run_temperature_step(part_number: str | None = None, *, restart: bool = False) -> None:
     from drive_qual.workflows.temperature import run_temperature_step
 
-    run_temperature_step(part_number=part_number)
+    run_temperature_step(part_number=part_number, restart=restart)
 
 
 def _run_usb_if_step(part_number: str | None = None) -> None:
@@ -239,6 +239,7 @@ def run_report_workflow(
     scope_profile: str | None = None,
     profile: str | None = None,
     resume: bool = False,
+    restart_temperature: bool = False,
 ) -> None:
     selected = resolve_selected_steps(
         explicit_steps=steps,
@@ -251,7 +252,7 @@ def run_report_workflow(
         "power_measurements": _run_power_measurements_step,
         "performance": lambda: _run_performance_step(part_number=part_number),
         "usb_if": lambda: _run_usb_if_step(part_number=part_number),
-        "temperature": lambda: _run_temperature_step(part_number=part_number),
+        "temperature": lambda: _run_temperature_step(part_number=part_number, restart=restart_temperature),
         "reliability": lambda: _run_reliability_step(part_number=part_number),
     }
     for step in selected:
@@ -301,6 +302,11 @@ def run_report_workflow_cli() -> None:
     )
     parser.add_argument("--part-number", help="Apricorn part number for selecting the report folder.")
     parser.add_argument("--scope-profile", help="Apply a scope/probe profile (e.g., tektronix, rigol).")
+    parser.add_argument(
+        "--restart-temperature",
+        action="store_true",
+        help="Ignore incomplete temperature artifacts and start a new temperature run.",
+    )
     args = parser.parse_args()
 
     if args.list_steps:
@@ -322,6 +328,7 @@ def run_report_workflow_cli() -> None:
         scope_profile=args.scope_profile,
         profile=args.profile,
         resume=args.resume,
+        restart_temperature=args.restart_temperature,
     )
 
 

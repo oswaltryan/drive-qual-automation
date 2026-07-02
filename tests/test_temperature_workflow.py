@@ -2,15 +2,18 @@ from __future__ import annotations
 
 import csv
 import json
+import subprocess
+from datetime import UTC, datetime, timedelta
 from io import StringIO
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any
+from typing import Any, cast
 
 import pytest
 from _pytest.monkeypatch import MonkeyPatch
 
 EXPECTED_PROFILE_READ_MB_S = 107.59
+EXPECTED_PUBLICATION_ATTEMPTS = 2
 
 
 def test_temperature_csv_rows_update_report_contract(tmp_path: Path) -> None:
@@ -701,7 +704,276 @@ def test_temperature_disk_tester_command_uses_temp_subcommand_and_log_path(tmp_p
     command = temperature._disk_tester_command("D:", log_path)
 
     assert command[1:5] == ["-m", "drive_qual.benchmarks.disk_tester", "temp", "--path"]
-    assert command[5:] == ["D:", "--log", str(log_path)]
+    assert command[5:] == [
+        "D:",
+        "--log",
+        str(log_path),
+        "--failure-action",
+        "retry",
+        "--max-retries",
+        "3",
+        "--retry-delay",
+        "5.0",
+    ]
+
+
+def test_temperature_periodic_publication_failure_does_not_abort(
+    monkeypatch: MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    from drive_qual.workflows import temperature
+
+    source = temperature._artifacts_in(tmp_path / "local", "20260623_120000")
+    destination = temperature._artifacts_in(tmp_path / "remote", "20260623_120000")
+    source.snapshot_csv.parent.mkdir(parents=True)
+    source.snapshot_csv.write_text("timestamp,temperature_c,temperature_f\n", encoding="utf-8")
+    attempts: list[int] = []
+
+    def fail_publish(*_args: object) -> None:
+        attempts.append(1)
+        raise FileNotFoundError("share unavailable")
+
+    monotonic_values = iter([0.0, 61.0])
+    monkeypatch.setattr(temperature, "_publish_temperature_artifacts", fail_publish)
+    monkeypatch.setattr(temperature.time, "monotonic", lambda: next(monotonic_values))
+
+    publish = temperature._periodic_artifact_publisher(source, destination)
+    publish(False)
+    publish(False)
+
+    assert len(attempts) == EXPECTED_PUBLICATION_ATTEMPTS
+    assert "Local recovery files remain at" in capsys.readouterr().out
+
+
+def test_temperature_resume_uses_completed_phases_from_progress_log(tmp_path: Path) -> None:
+    from drive_qual.workflows import temperature
+
+    artifacts = temperature._artifacts_in(tmp_path, "20260623_120000")
+    assert artifacts.progress_log is not None
+    artifacts.snapshot_csv.write_text("timestamp,temperature_c,temperature_f\n", encoding="utf-8")
+    artifacts.progress_log.write_text(
+        json.dumps(
+            {
+                "event": "phase_completed",
+                "dut_name": "Padlock DT",
+                "part_number": "29-0036",
+                "setpoint_c": -40,
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    completed, run_completed = temperature._completed_setpoints_from_progress(
+        artifacts.progress_log,
+        "Padlock DT",
+    )
+
+    assert completed == frozenset({-40.0})
+    assert run_completed is False
+
+
+def test_temperature_legacy_snapshots_require_continuous_full_soak(tmp_path: Path) -> None:
+    from drive_qual.workflows import temperature
+
+    snapshot_csv = tmp_path / "temperature_snapshots_20260623_120000.csv"
+    started = datetime(2026, 6, 23, 12, 0, tzinfo=UTC)
+    rows = ["timestamp,temperature_c,temperature_f"]
+    for seconds in (0, 150, 300):
+        timestamp = (started + timedelta(seconds=seconds)).isoformat()
+        rows.append(f"{timestamp},-40.0,-40.0")
+    snapshot_csv.write_text("\n".join(rows) + "\n", encoding="utf-8")
+
+    completed = temperature._completed_setpoints_from_snapshots(snapshot_csv)
+
+    assert completed == frozenset({-40.0})
+
+
+def test_temperature_legacy_snapshots_do_not_accept_interrupted_soak(tmp_path: Path) -> None:
+    from drive_qual.workflows import temperature
+
+    snapshot_csv = tmp_path / "temperature_snapshots_20260623_120000.csv"
+    started = datetime(2026, 6, 23, 12, 0, tzinfo=UTC)
+    rows = ["timestamp,temperature_c,temperature_f"]
+    for seconds, temperature_c in ((0, -40.0), (200, -39.0), (300, -40.0), (500, -40.0)):
+        timestamp = (started + timedelta(seconds=seconds)).isoformat()
+        rows.append(f"{timestamp},{temperature_c},0.0")
+    snapshot_csv.write_text("\n".join(rows) + "\n", encoding="utf-8")
+
+    completed = temperature._completed_setpoints_from_snapshots(snapshot_csv)
+
+    assert completed == frozenset()
+
+
+def test_temperature_resume_state_selects_newest_incomplete_run(monkeypatch: MonkeyPatch, tmp_path: Path) -> None:
+    from drive_qual.workflows import temperature
+
+    older = temperature._artifacts_in(tmp_path / "older", "20260623_120000")
+    newer = temperature._artifacts_in(tmp_path / "newer", "20260623_130000")
+    for artifacts in (older, newer):
+        artifacts.snapshot_csv.parent.mkdir(parents=True)
+        artifacts.snapshot_csv.write_text("timestamp,temperature_c,temperature_f\n", encoding="utf-8")
+    assert newer.progress_log is not None
+    newer.progress_log.write_text(
+        json.dumps({"event": "phase_completed", "dut_name": "Padlock DT", "setpoint_c": -40}) + "\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        temperature,
+        "_temperature_run_candidates",
+        lambda _part_number: [
+            ("20260623_130000", newer),
+            ("20260623_120000", older),
+        ],
+    )
+
+    state = temperature._resolve_temperature_resume_state("29-0036", "Padlock DT", restart=False)
+
+    assert state.timestamp == "20260623_130000"
+    assert state.source_artifacts == newer
+    assert state.completed_setpoints == frozenset({-40.0})
+
+
+def test_temperature_resume_prefers_run_with_most_completed_phases(
+    monkeypatch: MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    from drive_qual.workflows import temperature
+
+    older = temperature._artifacts_in(tmp_path / "older", "20260623_120000")
+    newer = temperature._artifacts_in(tmp_path / "newer", "20260623_130000")
+    for artifacts in (older, newer):
+        artifacts.snapshot_csv.parent.mkdir(parents=True)
+        artifacts.snapshot_csv.write_text("timestamp,temperature_c,temperature_f\n", encoding="utf-8")
+    assert older.progress_log is not None
+    older.progress_log.write_text(
+        json.dumps({"event": "phase_completed", "dut_name": "Padlock DT", "setpoint_c": -40}) + "\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        temperature,
+        "_temperature_run_candidates",
+        lambda _part_number: [
+            ("20260623_130000", newer),
+            ("20260623_120000", older),
+        ],
+    )
+
+    state = temperature._resolve_temperature_resume_state("29-0036", "Padlock DT", restart=False)
+
+    assert state.source_artifacts == older
+    assert state.completed_setpoints == frozenset({-40.0})
+
+
+def test_temperature_restart_ignores_existing_runs(monkeypatch: MonkeyPatch) -> None:
+    from drive_qual.workflows import temperature
+
+    monkeypatch.setattr(
+        temperature,
+        "_temperature_run_candidates",
+        lambda _part_number: (_ for _ in ()).throw(AssertionError("restart must not inspect prior runs")),
+    )
+    monkeypatch.setattr(temperature, "_timestamp_for_filename", lambda: "20260623_140000")
+
+    state = temperature._resolve_temperature_resume_state("29-0036", "Padlock DT", restart=True)
+
+    assert state == temperature.TemperatureResumeState("20260623_140000", None, frozenset())
+
+
+def test_temperature_collection_skips_completed_setpoints(monkeypatch: MonkeyPatch, tmp_path: Path) -> None:
+    from drive_qual.workflows import temperature
+
+    artifacts = temperature._artifacts_in(tmp_path, "20260623_120000")
+    target = temperature.TemperatureTarget(drive_target="D:", dut_name="Padlock DT")
+    phases: list[float] = []
+    process = SimpleNamespace()
+
+    monkeypatch.setattr(temperature, "_start_disk_tester", lambda **_kwargs: process)
+    monkeypatch.setattr(temperature, "_stop_process", lambda _process: None)
+    monkeypatch.setattr(
+        temperature,
+        "_run_snapshot_phase",
+        lambda **kwargs: phases.append(kwargs["setpoint_c"]),
+    )
+
+    def publish_artifacts(_force: bool = False) -> None:
+        return None
+
+    temperature._collect_temperature_data(
+        part_number="29-0036",
+        controller=SimpleNamespace(),
+        target=target,
+        artifacts=artifacts,
+        publish_artifacts=publish_artifacts,
+        completed_setpoints=frozenset({temperature.TEMPERATURE_SETPOINTS_C[0]}),
+    )
+
+    assert phases == [temperature.TEMPERATURE_SETPOINTS_C[1]]
+
+
+def test_temperature_step_returns_chamber_to_ambient_after_collection_failure(
+    monkeypatch: MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    from drive_qual.workflows import temperature
+
+    controller = SimpleNamespace(setpoints=[])
+    controller.write_setpoint_c = controller.setpoints.append
+    target = temperature.TemperatureTarget(drive_target="D:", dut_name="Padlock DT")
+    local_artifacts = temperature._artifacts_in(tmp_path / "local", "20260623_120000")
+
+    monkeypatch.setattr(temperature, "resolve_folder_name", lambda _part_number: "29-0036")
+    monkeypatch.setattr(temperature, "report_path_for", lambda _folder_name: tmp_path / "report.json")
+    monkeypatch.setattr(temperature, "_timestamp_for_filename", lambda: "20260623_120000")
+    monkeypatch.setattr(temperature, "_local_temperature_artifacts", lambda *_args: local_artifacts)
+    monkeypatch.setattr(temperature, "_temperature_artifact_dir", lambda *_args, **_kwargs: tmp_path / "remote")
+    monkeypatch.setattr(temperature, "_resolve_temperature_target", lambda _path: target)
+    monkeypatch.setattr(
+        temperature,
+        "_resolve_temperature_resume_state",
+        lambda *_args, **_kwargs: temperature.TemperatureResumeState("20260623_120000", None, frozenset()),
+    )
+    monkeypatch.setattr(temperature, "F4TController", lambda **_kwargs: controller)
+    monkeypatch.setattr(
+        temperature,
+        "_collect_temperature_data",
+        lambda **_kwargs: (_ for _ in ()).throw(RuntimeError("collection failed")),
+    )
+
+    with pytest.raises(RuntimeError, match="collection failed"):
+        temperature.run_temperature_step("29-0036")
+
+    assert controller.setpoints == [temperature.AMBIENT_TEMPERATURE_C]
+
+
+def test_temperature_stop_process_terminates_windows_process_tree(monkeypatch: MonkeyPatch) -> None:
+    from drive_qual.workflows import temperature
+
+    class FakeProcess:
+        pid = 1234
+
+        def poll(self) -> None:
+            return None
+
+        def wait(self, timeout: float) -> int:
+            return 0
+
+        def kill(self) -> None:
+            raise AssertionError("kill fallback should not be needed")
+
+    commands: list[list[str]] = []
+
+    def fake_run(command: list[str], **_kwargs: object) -> SimpleNamespace:
+        commands.append(command)
+        return SimpleNamespace(returncode=0, stderr="")
+
+    monkeypatch.setattr(temperature.sys, "platform", "win32")
+    monkeypatch.setattr(subprocess, "run", fake_run)
+
+    temperature._stop_process(cast(Any, FakeProcess()))
+
+    assert commands == [["taskkill", "/PID", "1234", "/T", "/F"]]
 
 
 def _write_temperature_csv(tmp_path: Path, lines: list[str]) -> Path:
