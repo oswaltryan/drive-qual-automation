@@ -111,9 +111,14 @@ New technician instructions should use `drive-qual`.
 The report is enriched step by step. Later steps assume the earlier report and
 session scaffolding already exist.
 
+Pressing `Ctrl+C` at any point in an installed workflow command cancels the
+operation without a Python traceback, prints `Cancelled by operator.`, and
+returns exit status 130. Interrupts still unwind normally first so step-level
+cleanup in `finally` blocks can run.
+
 1. `drive_info`
    Creates the report folder, collects core drive metadata, writes the initial
-   report JSON, and sets the current session marker.
+   report JSON, and adds the drive to the current-session registry.
 2. `equipment`
    Records host, scope, probe, and DUT metadata. It also ensures the report has
    `power`, `performance`, and `temperature` sections.
@@ -145,6 +150,37 @@ uv run drive-qual step performance --part-number 69-420
 uv run drive-qual step temperature --part-number 69-420
 uv run drive-qual step reliability --part-number 69-420
 uv run drive-qual report --part-number 69-420
+```
+
+### Running multiple drives in separate terminals
+
+The shared `Z:\.current` file is a registry of active report folders. Each
+terminal selects one registry entry for the lifetime of its command, so later
+workflow steps in that terminal continue to use the same report.
+
+- With one registered drive, commands that omit `--part-number` select it
+  automatically.
+- With multiple registered drives, commands that omit `--part-number` show a
+  numbered selection menu once at startup.
+- Commands that include `--part-number` bypass the menu and bind that report
+  folder directly.
+- Starting `drive_info` offers the existing sessions plus **Create a new
+  drive**. Saving the new drive adds it to the registry without replacing the
+  other entries.
+- Completing all required workflow data removes only that drive from the
+  registry. The `.current` file is removed after the last entry is completed.
+
+Use a separate part-number/report folder for every concurrently tested drive.
+The session registry does not coordinate access to an attached drive, scope,
+or other shared lab hardware, and two terminals must not write the same report
+at the same time.
+
+For example, these commands can run in different terminals and will update
+different report folders:
+
+```bash
+uv run drive-qual step performance --part-number 69-420
+uv run drive-qual step performance --part-number 29-0031
 ```
 
 For an orchestrated run with resume support:
@@ -331,7 +367,7 @@ Key modules:
 | `drive_qual.core.reliability` | Reliability log parsing and report contract updates. |
 | `drive_qual.platforms.windows.reliability` | Windows `disk_tester.exe` reliability workflow. |
 | `drive_qual.reports.generate` | Word report generation. |
-| `drive_qual.core.report_session` | Report paths and current-session marker. |
+| `drive_qual.core.report_session` | Report paths, multi-session registry, and terminal-local selection. |
 | `drive_qual.core.storage_paths` | Artifact path construction and localization. |
 
 The tests cover path/report logic, import boundaries, report generation, and

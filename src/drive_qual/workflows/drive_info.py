@@ -39,7 +39,7 @@ def _string_value(value: Any) -> str:
 
 
 def _load_seed_data(template_path: Path) -> dict[str, Any]:
-    current_folder = current_session_folder_name()
+    current_folder = current_session_folder_name(allow_new=True)
     if current_folder is not None:
         current_report_path = report_path_for(current_folder)
         try:

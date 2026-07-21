@@ -22,11 +22,11 @@ from drive_qual.core.power_measurements import extract_power_values_from_csv, up
 from drive_qual.core.product_profiles import power_rails_for_dut
 from drive_qual.core.report_session import (
     load_report,
+    replace_current_session,
     report_path_for,
     resolve_folder_name,
     sanitize_dir_name,
     save_report,
-    set_current_session,
 )
 from drive_qual.core.storage_paths import artifact_dir, artifact_file, localize_windows_path
 from drive_qual.integrations.apricorn.usb_cli import (
@@ -400,7 +400,7 @@ def _load_part_number_and_report(folder_name: str) -> tuple[str, Path]:
     canonical_report_path = report_path_for(report_folder)
     if canonical_report_path != report_path:
         save_report(canonical_report_path, data)
-        set_current_session(report_folder)
+        replace_current_session(folder_name, report_folder)
         report_path = canonical_report_path
 
     return part_number, report_path

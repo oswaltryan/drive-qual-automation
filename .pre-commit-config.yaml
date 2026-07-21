@@ -43,6 +43,7 @@ repos:
         -   types-requests
         -   types-PyYAML
         -   types-Pillow
+        -   filelock>=3.20.3
         -   python-docx>=1.1.2
         -   matplotlib
         -   numpy
@@ -64,6 +65,7 @@ repos:
         -   pytest-asyncio
         -   pytest-mock
         -   pytest-cov
+        -   filelock>=3.20.3
         -   matplotlib
         -   numpy
         -   pandas

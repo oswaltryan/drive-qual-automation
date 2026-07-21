@@ -4,6 +4,7 @@ import json
 from pathlib import Path, PureWindowsPath
 from typing import Any
 
+import pytest
 from _pytest.monkeypatch import MonkeyPatch
 
 from drive_qual.core import report_session
@@ -19,6 +20,13 @@ DRIVE_INFO_VALUES = {
     "interface": "USB 3.2",
     "technology": "SSD",
 }
+
+
+@pytest.fixture(autouse=True)
+def _reset_session_selection() -> Any:
+    report_session.reset_current_session_selection()
+    yield
+    report_session.reset_current_session_selection()
 
 
 def _write_json(path: Path, payload: dict[str, Any]) -> None:
@@ -109,16 +117,22 @@ def test_drive_info_reuses_current_report_from_localized_path_without_prompting(
         lambda folder_name, product_name=None: saved_sessions.append((folder_name, product_name)),
     )
 
-    def unexpected_input(prompt: str) -> str:
-        raise AssertionError(f"drive_info prompted unexpectedly: {prompt}")
+    prompts: list[str] = []
 
-    monkeypatch.setattr("builtins.input", unexpected_input)
+    def select_existing_session(prompt: str) -> str:
+        prompts.append(prompt)
+        if prompt.startswith("Select a drive session"):
+            return "1"
+        raise AssertionError(f"drive_info prompted for metadata unexpectedly: {prompt}")
+
+    monkeypatch.setattr("builtins.input", select_existing_session)
 
     drive_info.run_drive_info_prompt()
 
     updated = json.loads(local_report_path.read_text(encoding="utf-8"))
     assert updated["drive_info"] == DRIVE_INFO_VALUES
     assert saved_sessions == [("69-420", "Apricorn")]
+    assert prompts == ["Select a drive session [1-2]: "]
 
 
 def test_drive_info_reuses_current_report_without_prompting(monkeypatch: MonkeyPatch, tmp_path: Path) -> None:
@@ -130,7 +144,7 @@ def test_drive_info_reuses_current_report_without_prompting(monkeypatch: MonkeyP
     saved_sessions: list[tuple[str, str | None]] = []
 
     monkeypatch.setattr(drive_info, "DEFAULT_TEMPLATE", template_path)
-    monkeypatch.setattr(drive_info, "current_session_folder_name", lambda: "69-420")
+    monkeypatch.setattr(drive_info, "current_session_folder_name", lambda *, allow_new=False: "69-420")
     monkeypatch.setattr(drive_info, "report_path_for", lambda folder_name: report_path)
     monkeypatch.setattr(
         drive_info,
@@ -159,7 +173,7 @@ def test_drive_info_only_prompts_for_missing_fields(monkeypatch: MonkeyPatch, tm
     prompts: list[str] = []
 
     monkeypatch.setattr(drive_info, "DEFAULT_TEMPLATE", template_path)
-    monkeypatch.setattr(drive_info, "current_session_folder_name", lambda: "69-420")
+    monkeypatch.setattr(drive_info, "current_session_folder_name", lambda *, allow_new=False: "69-420")
     monkeypatch.setattr(drive_info, "report_path_for", lambda folder_name: report_path)
     monkeypatch.setattr(drive_info, "set_current_session", lambda folder_name, product_name=None: None)
 
@@ -183,7 +197,7 @@ def test_drive_info_does_not_prompt_for_cdi_fields(monkeypatch: MonkeyPatch, tmp
     _write_json(report_path, _report_with_drive_info(firmware=None, interface=None))
 
     monkeypatch.setattr(drive_info, "DEFAULT_TEMPLATE", template_path)
-    monkeypatch.setattr(drive_info, "current_session_folder_name", lambda: "69-420")
+    monkeypatch.setattr(drive_info, "current_session_folder_name", lambda *, allow_new=False: "69-420")
     monkeypatch.setattr(drive_info, "report_path_for", lambda folder_name: report_path)
     monkeypatch.setattr(drive_info, "set_current_session", lambda folder_name, product_name=None: None)
 

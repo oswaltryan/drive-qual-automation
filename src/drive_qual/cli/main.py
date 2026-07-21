@@ -6,6 +6,8 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import NoReturn
 
+from drive_qual.cli.interrupts import run_cli_with_interrupt_handling
+
 STEP_ALIASES: dict[str, str] = {
     "info": "drive_info",
     "drive-info": "drive_info",
@@ -93,7 +95,11 @@ Examples:
 """
 
 
-def main(argv: list[str] | None = None) -> None:
+def main(argv: list[str] | None = None) -> int:
+    return run_cli_with_interrupt_handling(lambda: _main(argv))
+
+
+def _main(argv: list[str] | None = None) -> None:
     args = list(sys.argv[1:] if argv is None else argv)
     if not args or any(arg in {"-h", "--help"} for arg in args):
         print(MAN_PAGE)
@@ -288,4 +294,4 @@ def _die(message: str) -> NoReturn:
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

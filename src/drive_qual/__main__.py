@@ -1,8 +1,8 @@
-def main() -> None:
+def main() -> int:
     from drive_qual.cli.main import main as cli_main
 
-    cli_main()
+    return cli_main()
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

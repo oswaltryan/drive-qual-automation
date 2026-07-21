@@ -5,6 +5,7 @@ import json
 from pathlib import Path
 from typing import Any
 
+from drive_qual.cli.interrupts import run_cli_with_interrupt_handling
 from drive_qual.core.report_session import TEMPLATE_NAME, report_path_for, resolve_folder_name
 from drive_qual.core.storage_paths import localize_windows_path
 from drive_qual.reports.appendix import _add_appendix
@@ -100,7 +101,11 @@ def write_docx_report(
     document.save(output_path)
 
 
-def run_report_generate_cli() -> None:
+def run_report_generate_cli() -> int:
+    return run_cli_with_interrupt_handling(_run_report_generate_cli)
+
+
+def _run_report_generate_cli() -> None:
     parser = argparse.ArgumentParser(description="Generate a Word drive qualification report.")
     parser.add_argument("--part-number", help="Apricorn part number for selecting the report folder.")
     parser.add_argument(
@@ -120,4 +125,4 @@ def run_report_generate_cli() -> None:
 
 
 if __name__ == "__main__":
-    run_report_generate_cli()
+    raise SystemExit(run_report_generate_cli())

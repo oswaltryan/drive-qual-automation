@@ -3,10 +3,15 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
+from drive_qual.cli.interrupts import run_cli_with_interrupt_handling
 from drive_qual.workflows.temperature import post_process_temperature_data
 
 
-def run_temperature_post_process_cli() -> None:
+def run_temperature_post_process_cli() -> int:
+    return run_cli_with_interrupt_handling(_run_temperature_post_process_cli)
+
+
+def _run_temperature_post_process_cli() -> None:
     parser = argparse.ArgumentParser(description="Update report JSON and artifacts with temperature test data.")
     parser.add_argument("--part-number", help="Apricorn part number for selecting the report folder.")
     parser.add_argument("--dut", help="Report DUT name to update. If omitted, the report DUT selector is used.")
@@ -36,4 +41,4 @@ def run_temperature_post_process_cli() -> None:
 
 
 if __name__ == "__main__":
-    run_temperature_post_process_cli()
+    raise SystemExit(run_temperature_post_process_cli())

@@ -128,7 +128,7 @@ def test_run_report_workflow_imports_power_measurements_step_lazily(monkeypatch:
     fake_power_measurements = FakePowerMeasurementsModule("drive_qual.platforms.power_measurements")
     monkeypatch.setitem(sys.modules, "drive_qual.platforms.power_measurements", fake_power_measurements)
 
-    module.run_report_workflow(["power_measurements"])
+    module.run_report_workflow(["power_measurements"], part_number="69-420")
 
     assert calls == ["called"]
 
@@ -278,11 +278,11 @@ def test_run_report_workflow_clears_current_marker_when_report_is_complete(monke
     monkeypatch.setattr(module, "execute_orchestrated_workflow", lambda **kwargs: None)
     monkeypatch.setattr(module, "report_path_for", lambda folder_name: Path(f"Z:/{folder_name}/report.json"))
     monkeypatch.setattr(module, "load_report", lambda report_path: _complete_report_payload())
-    monkeypatch.setattr(module, "clear_current_session", lambda: cleared.append("cleared"))
+    monkeypatch.setattr(module, "clear_current_session", lambda folder_name: cleared.append(folder_name))
 
     module.run_report_workflow(["drive_info"], part_number="69-420")
 
-    assert cleared == ["cleared"]
+    assert cleared == ["69-420"]
 
 
 def test_run_report_workflow_keeps_current_marker_when_report_is_incomplete(monkeypatch: MonkeyPatch) -> None:
@@ -295,7 +295,7 @@ def test_run_report_workflow_keeps_current_marker_when_report_is_incomplete(monk
     monkeypatch.setattr(module, "execute_orchestrated_workflow", lambda **kwargs: None)
     monkeypatch.setattr(module, "report_path_for", lambda folder_name: Path(f"Z:/{folder_name}/report.json"))
     monkeypatch.setattr(module, "load_report", lambda report_path: payload)
-    monkeypatch.setattr(module, "clear_current_session", lambda: cleared.append("cleared"))
+    monkeypatch.setattr(module, "clear_current_session", lambda folder_name: cleared.append(folder_name))
 
     module.run_report_workflow(["drive_info"], part_number="69-420")
 

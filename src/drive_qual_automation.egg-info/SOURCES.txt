@@ -9,6 +9,7 @@ src/drive_qual/benchmarks/disk_tester.py
 src/drive_qual/benchmarks/diskspd.py
 src/drive_qual/benchmarks/fio.py
 src/drive_qual/cli/__init__.py
+src/drive_qual/cli/interrupts.py
 src/drive_qual/cli/legacy.py
 src/drive_qual/cli/main.py
 src/drive_qual/cli/post_process_measurements.py
@@ -25,6 +26,7 @@ src/drive_qual/core/reliability.py
 src/drive_qual/core/report_session.py
 src/drive_qual/core/storage_paths.py
 src/drive_qual/core/temperature.py
+src/drive_qual/core/temperature_contract.py
 src/drive_qual/core/usb_if.py
 src/drive_qual/integrations/__init__.py
 src/drive_qual/integrations/apricorn/__init__.py
@@ -72,7 +74,9 @@ src/drive_qual_automation.egg-info/requires.txt
 src/drive_qual_automation.egg-info/top_level.txt
 tests/test_apricorn_usb_cli.py
 tests/test_benchmark_paths.py
+tests/test_cli_interrupts.py
 tests/test_config.py
+tests/test_disk_tester_temperature_retry.py
 tests/test_dut_selection.py
 tests/test_fio.py
 tests/test_linux_disks_chart.py
@@ -87,9 +91,11 @@ tests/test_reliability.py
 tests/test_report_docx_generation.py
 tests/test_report_evaluation.py
 tests/test_report_generation_core.py
+tests/test_report_session_registry.py
 tests/test_report_workflow.py
 tests/test_smoke.py
 tests/test_temperature_workflow.py
 tests/test_usb_if.py
+tests/test_usb_if_workflow.py
 tests/test_workflow_metadata_reuse.py
 tests/test_workflow_orchestrator.py

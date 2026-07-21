@@ -5,13 +5,16 @@ import sys
 from collections.abc import Callable
 from typing import Any
 
+from drive_qual.cli.interrupts import run_cli_with_interrupt_handling
 from drive_qual.core.product_profiles import required_power_fields_for_dut
 from drive_qual.core.report_session import (
     clear_current_session,
     current_session_folder_name,
     load_report,
     report_path_for,
+    reset_current_session_selection,
     sanitize_dir_name,
+    select_current_session,
 )
 from drive_qual.workflows.orchestrator import (
     WORKFLOW_PROFILES,
@@ -228,8 +231,8 @@ def _clear_current_session_if_workflow_complete(part_number: str | None) -> None
     except Exception:
         return
     if _is_power_complete(data) and _is_performance_complete(data) and _is_reliability_complete(data):
-        clear_current_session()
-        print(f"Cleared current session marker after completing workflow for {folder_name}.")
+        clear_current_session(folder_name)
+        print(f"Removed completed session {folder_name} from the current-session registry.")
 
 
 def run_report_workflow(
@@ -241,6 +244,7 @@ def run_report_workflow(
     resume: bool = False,
     restart_temperature: bool = False,
 ) -> None:
+    reset_current_session_selection()
     selected = resolve_selected_steps(
         explicit_steps=steps,
         default_steps=_default_steps(),
@@ -258,6 +262,10 @@ def run_report_workflow(
     for step in selected:
         if step not in step_runners:
             raise ValueError(f"Unknown workflow step: {step}")
+    select_current_session(
+        preferred_folder=part_number,
+        allow_new="drive_info" in selected,
+    )
     execute_orchestrated_workflow(
         selected_steps=selected,
         step_runners=step_runners,
@@ -275,7 +283,11 @@ def _parse_steps(raw: str) -> list[str]:
     return steps
 
 
-def run_report_workflow_cli() -> None:
+def run_report_workflow_cli() -> int:
+    return run_cli_with_interrupt_handling(_run_report_workflow_cli)
+
+
+def _run_report_workflow_cli() -> None:
     parser = argparse.ArgumentParser(description="Run drive qualification report workflow steps.")
     parser.add_argument(
         "--steps",
@@ -333,4 +345,4 @@ def run_report_workflow_cli() -> None:
 
 
 if __name__ == "__main__":
-    run_report_workflow_cli()
+    raise SystemExit(run_report_workflow_cli())

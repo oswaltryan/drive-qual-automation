@@ -668,7 +668,7 @@ def test_load_part_number_and_report_uses_canonical_part_number_report_path(monk
     source_report = Path("/tmp/legacy-folder.json")
     canonical_report = Path("/tmp/69-420.json")
     saved: list[tuple[Path, dict[str, Any]]] = []
-    sessions: list[tuple[str, str | None]] = []
+    session_replacements: list[tuple[str, str]] = []
 
     monkeypatch.setattr(
         "drive_qual.platforms.power_measurements_mixed.report_path_for",
@@ -683,8 +683,10 @@ def test_load_part_number_and_report_uses_canonical_part_number_report_path(monk
         lambda report_path, data: saved.append((report_path, data)),
     )
     monkeypatch.setattr(
-        "drive_qual.platforms.power_measurements_mixed.set_current_session",
-        lambda folder_name, product_name=None: sessions.append((folder_name, product_name)),
+        "drive_qual.platforms.power_measurements_mixed.replace_current_session",
+        lambda folder_name, replacement_folder_name: session_replacements.append(
+            (folder_name, replacement_folder_name)
+        ),
     )
 
     part_number, report_path = _load_part_number_and_report("legacy-folder")
@@ -692,4 +694,4 @@ def test_load_part_number_and_report_uses_canonical_part_number_report_path(monk
     assert part_number == "69-420"
     assert report_path == canonical_report
     assert saved == [(canonical_report, {"drive_info": {"apricorn_part_number": "69-420"}})]
-    assert sessions == [("69-420", None)]
+    assert session_replacements == [("legacy-folder", "69-420")]
