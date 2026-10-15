@@ -11,6 +11,7 @@ from typing import Any
 import pytest
 from _pytest.monkeypatch import MonkeyPatch
 
+from drive_qual.core.storage_paths import artifact_file
 from drive_qual.integrations.apricorn.usb_cli import ApricornDevice
 from drive_qual.platforms import power_measurements as power_measurements_dispatch
 from drive_qual.platforms import power_measurements_mixed
@@ -24,6 +25,22 @@ from drive_qual.platforms.power_measurements_mixed import (
 WINDOWS_TEST_DISK_NUMBER = 7
 
 EXPECTED_BENCHMARK_RUNTIME_SECONDS = 300
+
+
+def test_power_capture_label_does_not_create_a_serial_subdirectory() -> None:
+    dut = ApricornDevice(iProduct=r"PADLOCK SSD\7", iSerial="7")
+    label = power_measurements_mixed._dut_label(dut)
+
+    assert label == "PADLOCK SSD"
+    assert artifact_file("33-0001", "Windows", "In Rush Current", f"{label}.csv") == (
+        r"Z:\33-0001\Windows\In Rush Current\PADLOCK SSD.csv"
+    )
+
+
+def test_power_capture_label_sanitizes_other_path_separators() -> None:
+    dut = ApricornDevice(iProduct="PADLOCK/SSD", iSerial="7")
+
+    assert power_measurements_mixed._dut_label(dut) == "PADLOCK_SSD"
 
 
 def _write_report(report_path: Path) -> None:

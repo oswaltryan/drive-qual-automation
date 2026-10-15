@@ -13,8 +13,8 @@ from drive_qual.reports.constants import (
     WINDOWS_PERFORMANCE_BLANK_LINES_BETWEEN_OBJECTS,
 )
 
-EXPECTED_INLINE_IMAGE_COUNT = 0
-EXPECTED_POWER_OBJECT_COUNT = 8
+EXPECTED_INLINE_IMAGE_COUNT = 8
+EXPECTED_POWER_OBJECT_COUNT = 0
 EXPECTED_MEDIA_FILE_COUNT = 9
 EXPECTED_WINDOWS_PERFORMANCE_OBJECT_COUNT = 2
 EXPECTED_COMPLIANCE_TABLE_ROW_COUNT = 3
@@ -28,22 +28,19 @@ def _assert_appendix_object_layout(document: Any, output_path: Path) -> None:
     assert len(document.inline_shapes) == EXPECTED_INLINE_IMAGE_COUNT
     assert _embedded_object_count(output_path) == EXPECTED_POWER_OBJECT_COUNT
     assert _media_file_count(output_path) == EXPECTED_MEDIA_FILE_COUNT
-    _assert_appendix_object_cells(document)
-    _assert_appendix_spacing(document)
-    _assert_embedded_object_payloads(output_path)
+    _assert_appendix_image_cells(document)
+    _assert_footer_text(output_path)
 
 
-def _assert_appendix_object_cells(document: Any) -> None:
-    assert _table_cell_object_count(document.tables[6], 1, 0) == 1
-    assert _table_cell_object_count(document.tables[6], 2, 0) == 1
-    assert _table_cell_object_count(document.tables[6], 3, 0) == EXPECTED_WINDOWS_PERFORMANCE_OBJECT_COUNT
-    assert _table_cell_object_count(document.tables[6], 4, 0) == 1
-    assert _table_cell_object_count(document.tables[7], 3, 0) == 1
-    assert _table_cell_object_count(document.tables[8], 3, 0) == 1
-    assert _table_cell_object_count(document.tables[6], 1, 1) == 0
-    assert _table_cell_object_count(document.tables[6], 2, 1) == 0
-    assert _table_cell_object_count(document.tables[6], 3, 1) == 0
-    assert _table_cell_object_count(document.tables[6], 4, 1) == 0
+def _assert_appendix_image_cells(document: Any) -> None:
+    assert _table_cell_drawing_count(document.tables[6], 1, 1) == 1
+    assert _table_cell_drawing_count(document.tables[6], 2, 1) == 1
+    assert _table_cell_drawing_count(document.tables[6], 3, 1) == EXPECTED_WINDOWS_PERFORMANCE_OBJECT_COUNT
+    assert _table_cell_drawing_count(document.tables[6], 4, 1) == 1
+    assert _table_cell_drawing_count(document.tables[7], 3, 1) == 1
+    assert _table_cell_drawing_count(document.tables[8], 3, 1) == 1
+    for table in document.tables[6:9]:
+        assert not table._tbl.xpath(".//w:object")
 
 
 def _assert_appendix_spacing(document: Any) -> None:
@@ -97,8 +94,8 @@ def _assert_temperature_table_shape(table: Any) -> None:
     assert len(table.rows) == EXPECTED_TEMPERATURE_TABLE_ROW_COUNT
     assert [cell.text for cell in table.rows[0].cells] == ["Chart", "Temperature", "Read MB/s", "Write MB/s"]
     assert _table_columns_are_centered(table, range(EXPECTED_TEMPERATURE_TABLE_COLUMN_COUNT))
-    assert _table_cell_drawing_count(table, 1, 0) == 0
-    assert _table_cell_object_count(table, 1, 0) == 1
+    assert _table_cell_drawing_count(table, 1, 0) == 1
+    assert _table_cell_object_count(table, 1, 0) == 0
     assert _table_cell_line_break_count(table, 1, 0) == EXPECTED_TEMPERATURE_CHART_LEADING_BREAKS
     assert [row.cells[1].text for row in table.rows[1:]] == [
         "-40°C",

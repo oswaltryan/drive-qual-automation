@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import re
 import sys
 import time
 from datetime import datetime
@@ -280,6 +281,10 @@ def _device_type_for_scope(dut: ApricornDevice) -> str:
 
 def _dut_label(dut: ApricornDevice) -> str:
     label = (dut.iProduct or "").strip()
+    serial = (dut.iSerial or "").strip()
+    if serial and label.endswith((f"\\{serial}", f"/{serial}")):
+        label = label[: -(len(serial) + 1)].strip()
+    label = re.sub(r'[<>:"/\\|?*\x00-\x1f]', "_", label).strip(" .")
     return label or "unknown_device"
 
 

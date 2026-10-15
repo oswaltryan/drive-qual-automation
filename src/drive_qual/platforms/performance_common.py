@@ -34,6 +34,9 @@ def software_entries_for_host(equipment: dict[str, Any], host_key: str) -> list[
 def find_report_dut_key(performance: dict[str, Any], dut_name: str) -> str | None:
     dut_cf = dut_name.casefold()
     for key in performance:
+        if key.casefold() == dut_cf:
+            return key
+    for key in performance:
         key_cf = key.casefold()
         if key_cf in dut_cf or dut_cf in key_cf:
             return key

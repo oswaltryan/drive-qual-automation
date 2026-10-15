@@ -108,6 +108,37 @@ New technician instructions should use `drive-qual`.
 
 ## Qualification Workflow
 
+### Fortress L2 runs from the L3 archive
+
+`drive-qual-report` can prepare a fresh Fortress L2 report from a project in
+`Z:\Done\L3`. It copies drive and equipment metadata only. New reports and
+captures are written to `Z:\Done\L2\<part-number>`.
+
+The same power and performance commands use the configured shared-drive mount
+on each host: `Z:\` on Windows, `/mnt/QUAL_DATA` on Linux, and
+`/Volumes/test-lab-drive-` on macOS by default. Source lookup uses `Done/L3`
+under that mount and L2 output uses `Done/L2`. Completion checks use the current
+host's results, and Fortress L2 profile resume state is recorded separately for
+Windows, Linux, and macOS. The share must be mounted at the location configured
+in `[paths]` in `drive_qual.toml` on each host.
+
+```powershell
+uv run drive-qual-report --list-l2-projects
+uv run drive-qual step power --part-number 28-0017
+uv run drive-qual step performance --part-number 28-0017
+uv run drive-qual step temperature --part-number 28-0017
+```
+
+For projects present in `Z:\Done\L3`, these normal step commands select the
+Fortress L2 destination automatically. The first command creates the L2 report
+and equipment section. To run all three captures in one session, use
+`uv run drive-qual-report --profile fortress-l2 --part-number 28-0017`.
+Use `--resume` with that profile after an interrupted run. Project `28-0056`
+has no source JSON, so its first run asks for missing drive metadata. The first
+runs for `28-0042` and `29-00XX` ask for a real drive model in place of the
+placeholder in their source reports.
+
+
 The report is enriched step by step. Later steps assume the earlier report and
 session scaffolding already exist.
 

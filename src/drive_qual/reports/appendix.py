@@ -20,17 +20,13 @@ from drive_qual.reports.constants import (
     KEY_VALUE_CSV_ROW_WIDTH,
     LINUX_DISKS_SUMMARY_COLUMN_COUNT,
     MEASUREMENT_LABELS,
-    OBJECT_ICON_WIDTH_INCHES,
     PERFORMANCE_LABEL,
-    WINDOWS_PERFORMANCE_BLANK_LINES_BEFORE_FIRST_OBJECT,
-    WINDOWS_PERFORMANCE_BLANK_LINES_BETWEEN_OBJECTS,
 )
 from drive_qual.reports.docx_shared import (
     _add_heading,
     _add_minimized_empty_paragraph,
     _add_nested_table,
     _add_picture_to_paragraph,
-    _center_cell_paragraphs,
     _center_table_column,
     _center_table_columns,
     _minimize_empty_cell_paragraphs,
@@ -42,7 +38,6 @@ from drive_qual.reports.docx_shared import (
     _shade_cell,
     _table,
 )
-from drive_qual.reports.embedded import _add_embedded_package_to_paragraph
 from drive_qual.reports.evaluation import Status
 
 ATTO_EXCLUDED_IO_SIZE_BYTES = {32 * 1024, 128 * 1024, 512 * 1024, 2 * 1024 * 1024}
@@ -99,7 +94,13 @@ def _add_matching_artifacts_to_cell(
     if image_artifacts:
         measurement_csvs = _measurement_csvs(artifacts) if label in MEASUREMENT_LABELS else []
         if label in MEASUREMENT_LABELS:
-            _add_embedded_image_objects_to_cell(cell, image_artifacts, inches)
+            _add_artifact_images_to_cell(
+                cell,
+                image_artifacts,
+                measurement_csvs,
+                width=inches(APPENDIX_IMAGE_WIDTH_INCHES),
+                measurement_table_width=inches(APPENDIX_OS_ARTIFACT_WIDTH_INCHES),
+            )
         else:
             _add_artifact_images_to_cell(
                 cell,
@@ -120,7 +121,6 @@ def _add_measurement_artifacts_to_row(
     label: str,
     inches: Any,
 ) -> None:
-    label_cell = row_cells[0]
     artifact_cell = row_cells[1]
     artifacts = _matching_artifacts(part_root, dut_name, os_name, label)
     image_artifacts = _image_artifacts(artifacts)
@@ -128,14 +128,13 @@ def _add_measurement_artifacts_to_row(
     if not image_artifacts:
         artifact_cell.text = _artifact_names(part_root, artifacts)
         return
-    _add_embedded_image_objects_to_cell(label_cell, image_artifacts, inches, blank_before_first=1)
-    _center_cell_paragraphs(label_cell)
     _add_measurement_summaries_to_cell(
         artifact_cell,
         image_artifacts,
         measurement_csvs,
         measurement_table_width=inches(APPENDIX_OS_ARTIFACT_WIDTH_INCHES),
     )
+    _add_inline_images_to_cell(artifact_cell, image_artifacts, width=inches(APPENDIX_IMAGE_WIDTH_INCHES))
 
 
 def _add_performance_artifacts_to_row(
@@ -146,7 +145,6 @@ def _add_performance_artifacts_to_row(
     label: str,
     inches: Any,
 ) -> None:
-    label_cell = row_cells[0]
     artifact_cell = row_cells[1]
     artifacts = _matching_artifacts(part_root, dut_name, os_name, label)
     image_artifacts = _image_artifacts(artifacts)
@@ -155,22 +153,13 @@ def _add_performance_artifacts_to_row(
         artifact_cell.text = _artifact_names(part_root, artifacts)
         return
     sorted_images = _sorted_performance_images(image_artifacts) if os_name == "Windows" else image_artifacts
-    if os_name == "Windows":
-        _add_embedded_image_objects_to_cell(
-            label_cell,
-            sorted_images,
-            inches,
-            blank_before_first=WINDOWS_PERFORMANCE_BLANK_LINES_BEFORE_FIRST_OBJECT,
-            blank_between=WINDOWS_PERFORMANCE_BLANK_LINES_BETWEEN_OBJECTS,
-        )
-    else:
-        _add_embedded_image_objects_to_cell(label_cell, sorted_images, inches, blank_before_first=1)
     _add_csv_tables_to_cell(
         artifact_cell,
         sorted_images,
         performance_csvs,
         table_width=inches(APPENDIX_OS_ARTIFACT_WIDTH_INCHES),
     )
+    _add_inline_images_to_cell(artifact_cell, sorted_images, width=inches(APPENDIX_IMAGE_WIDTH_INCHES))
 
 
 def _add_drive_information_artifacts_to_row(
@@ -181,14 +170,12 @@ def _add_drive_information_artifacts_to_row(
     os_name: str,
     inches: Any,
 ) -> None:
-    label_cell = row_cells[0]
     artifact_cell = row_cells[1]
     artifacts = _matching_artifacts(part_root, dut_name, os_name, "Drive Information")
     image_artifacts = _image_artifacts(artifacts)
-    if image_artifacts:
-        _add_embedded_image_objects_to_cell(label_cell, image_artifacts, inches, blank_before_first=1)
     artifact_cell.text = ""
     _add_cdi_details_table_to_cell(artifact_cell, _cdi_details(data, dut_name), inches)
+    _add_inline_images_to_cell(artifact_cell, image_artifacts, width=inches(APPENDIX_IMAGE_WIDTH_INCHES))
 
 
 def _add_cdi_details_table_to_cell(cell: Any, cdi_details: dict[str, Any], inches: Any) -> None:
@@ -272,20 +259,18 @@ def _add_measurement_summary_for_image(
     return True
 
 
-def _add_embedded_image_objects_to_cell(
+def _add_inline_images_to_cell(
     cell: Any,
     image_artifacts: Iterable[Path],
-    inches: Any,
     *,
-    blank_before_first: int = 0,
-    blank_between: int = 1,
+    width: Any,
 ) -> None:
-    for index, artifact in enumerate(image_artifacts):
-        blank_count = blank_before_first if index == 0 else blank_between
-        for _ in range(blank_count):
-            cell.add_paragraph()
-        object_paragraph = cell.add_paragraph()
-        _add_embedded_package_to_paragraph(object_paragraph, artifact, width=inches(OBJECT_ICON_WIDTH_INCHES))
+    from docx.enum.text import WD_ALIGN_PARAGRAPH
+
+    for artifact in image_artifacts:
+        image_paragraph = cell.add_paragraph()
+        image_paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        _add_picture_to_paragraph(image_paragraph, artifact, width=width)
 
 
 def _center_performance_summary_columns(table: Any, utility_label: str) -> None:

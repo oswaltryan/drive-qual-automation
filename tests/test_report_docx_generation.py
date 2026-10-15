@@ -66,7 +66,7 @@ def test_generate_report_docx_matches_reference_section_shape() -> None:
     assert h._first_column_is_narrower_than_artifact_column(document.tables[6])
 
 
-def test_generate_report_docx_embeds_appendix_images_instead_of_paths() -> None:
+def test_generate_report_docx_displays_appendix_images_inline_instead_of_paths() -> None:
     from docx import Document
 
     source_root = Path("tests/.tmp/test_report_generation_images")
@@ -130,7 +130,9 @@ def test_generate_report_docx_embeds_appendix_images_instead_of_paths() -> None:
     assert h._table_column_paragraphs_are_centered(cdi_table, 1)
 
 
-def test_generate_report_docx_preserves_embedded_preview_aspect_ratio() -> None:
+def test_generate_report_docx_preserves_inline_image_aspect_ratio() -> None:
+    from docx import Document
+    from docx.shared import Inches
     from PIL import Image
 
     source_root = Path("tests/.tmp/test_report_generation_embedded_aspect_ratio")
@@ -140,8 +142,9 @@ def test_generate_report_docx_preserves_embedded_preview_aspect_ratio() -> None:
 
     module = importlib.import_module("drive_qual.reports.generate")
     output_path = module.generate_report_docx(part_number="69-420", source_root=source_root)
+    document = Document(output_path)
 
-    assert "width:72.00pt;height:36.00pt" in h._embedded_object_shape_styles(output_path)
+    assert any(shape.width == Inches(5.7) and shape.height == Inches(2.85) for shape in document.inline_shapes)
 
 
 def test_generate_report_docx_formats_boolean_compliance_results_as_pass_fail() -> None:

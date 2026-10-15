@@ -63,7 +63,11 @@ def _dut_from_form_factor(data: dict[str, Any]) -> dict[str, dict[str, str | Non
         if isinstance(value, str):
             form_factor = value.strip().lower()
 
-    dut_names = report_dut_names_for_form_factor(form_factor)
+    dut_names = (
+        ("Fortress L2",)
+        if data.get("qualification_product") == "Fortress L2"
+        else report_dut_names_for_form_factor(form_factor)
+    )
     if not dut_names:
         raise ValueError(f"Unknown form factor: {form_factor or '<missing>'}")
 

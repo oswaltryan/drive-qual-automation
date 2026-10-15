@@ -1,12 +1,41 @@
 from __future__ import annotations
 
 import argparse
+import json
+import os
 import sys
 from collections.abc import Callable
 from pathlib import Path
-from typing import NoReturn
+from typing import Any, NoReturn
 
 from drive_qual.cli.interrupts import run_cli_with_interrupt_handling
+from drive_qual.core.config import local_storage_root
+
+L3_SOURCE_ROOT = local_storage_root() / "Done" / "L3"
+L2_OUTPUT_ROOT = "Z:/Done/L2"
+L2_CAPTURE_STEPS = frozenset({"power_measurements", "performance", "temperature"})
+
+
+def _archived_l3_part_number(selection: str) -> str | None:
+    """Return the archived project's part number before report paths are imported."""
+    if not L3_SOURCE_ROOT.is_dir():
+        return None
+    key = selection.strip().casefold()
+    for folder in L3_SOURCE_ROOT.iterdir():
+        if not folder.is_dir():
+            continue
+        report_path = folder / "drive_qualification_report_atomic_tests.json"
+        part_number = folder.name.split("(", maxsplit=1)[0].strip()
+        if report_path.is_file():
+            report = json.loads(report_path.read_text(encoding="utf-8"))
+            info = report.get("drive_info", {}) if isinstance(report, dict) else {}
+            candidate = info.get("apricorn_part_number") if isinstance(info, dict) else None
+            if isinstance(candidate, str) and candidate.strip():
+                part_number = candidate.strip()
+        if key in {part_number.casefold(), folder.name.casefold()}:
+            return part_number
+    return None
+
 
 STEP_ALIASES: dict[str, str] = {
     "info": "drive_info",
@@ -81,6 +110,10 @@ Step names and options:
 Common options:
   --part-number PN  Select the report/artifact folder.
   --profile NAME    Select an orchestrated workflow profile.
+
+Archived L3 projects:
+  Power, performance, and temperature steps for projects in Z:\\Done\\L3
+  automatically capture Fortress L2 data under Z:\\Done\\L2.
 
 Examples:
   uv run drive-qual
@@ -182,21 +215,24 @@ def _run_step(args: list[str]) -> None:
     if step_name is None:
         _die(f"Unknown step: {parsed.name}")
 
+    l2_part_number = (
+        _archived_l3_part_number(parsed.part_number) if parsed.part_number and step_name in L2_CAPTURE_STEPS else None
+    )
+    if l2_part_number is not None:
+        os.environ["DRIVE_QUAL_OUTPUT_ROOT"] = L2_OUTPUT_ROOT
+        print(f"Using Fortress L2 project {l2_part_number}; captures will be saved under {L2_OUTPUT_ROOT}.")
+
     from drive_qual.workflows.report import run_report_workflow
 
+    options: dict[str, Any] = {
+        "part_number": l2_part_number or parsed.part_number,
+        "scope_profile": parsed.scope_profile,
+    }
     if parsed.restart_temperature:
-        run_report_workflow(
-            [step_name],
-            part_number=parsed.part_number,
-            scope_profile=parsed.scope_profile,
-            restart_temperature=True,
-        )
-    else:
-        run_report_workflow(
-            [step_name],
-            part_number=parsed.part_number,
-            scope_profile=parsed.scope_profile,
-        )
+        options["restart_temperature"] = True
+    if l2_part_number is not None:
+        options["l2"] = True
+    run_report_workflow([step_name], **options)
 
 
 def _run_report(args: list[str]) -> None:

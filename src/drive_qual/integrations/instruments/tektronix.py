@@ -157,19 +157,21 @@ def _mkdir_scope(path: str) -> None:
 
 
 def _parts_from_scope_file(path: str) -> tuple[str, str, str, str] | None:
-    parts = PureWindowsPath(path.replace("/", "\\")).parts
-    if len(parts) < SCOPE_FILE_PARTS_MIN:
+    try:
+        parts = PureWindowsPath(path).relative_to(PureWindowsPath(SCOPE_ARTIFACT_ROOT)).parts
+    except ValueError:
         return None
-    return parts[1], parts[2], parts[3], parts[-1]
+    if len(parts) < SCOPE_FILE_PARTS_MIN - 1:
+        return None
+    return parts[0], parts[1], parts[2], parts[-1]
 
 
 def _ensure_share_structure(part_number: str, category: str) -> None:
-    root = _validate_scope_path(SCOPE_ARTIFACT_ROOT)
-    _mkdir_scope(f"{root}{part_number}")
-    _mkdir_scope(f"{root}{part_number}/linux")
-    _mkdir_scope(f"{root}{part_number}/macOS")
-    _mkdir_scope(f"{root}{part_number}/windows")
-    _mkdir_scope(f"{root}{part_number}/windows/{category}")
+    root = PureWindowsPath(_validate_scope_path(SCOPE_ARTIFACT_ROOT), part_number)
+    _mkdir_scope(root.as_posix())
+    for os_name in ("Windows", "Linux", "macOS"):
+        _mkdir_scope((root / os_name).as_posix())
+        _mkdir_scope((root / os_name / category).as_posix())
 
 
 def tektronix_list_dir(remote_path: str = "") -> str | None:

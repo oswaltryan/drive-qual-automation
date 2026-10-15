@@ -6,6 +6,7 @@ from collections.abc import Callable
 from typing import Any
 
 from drive_qual.cli.interrupts import run_cli_with_interrupt_handling
+from drive_qual.core.config import platform_key
 from drive_qual.core.product_profiles import required_power_fields_for_dut
 from drive_qual.core.report_session import (
     clear_current_session,
@@ -68,6 +69,29 @@ def _run_performance_step(part_number: str | None = None) -> None:
     run_software_step(part_number=part_number)
 
 
+def _run_l2_power_step(part_number: str) -> None:
+    _run_power_measurements_step()
+    _validate_l2_power_capture(part_number)
+
+
+def _run_l2_performance_step(part_number: str) -> None:
+    _run_performance_step(part_number=part_number)
+    _validate_l2_performance_capture(part_number)
+
+
+def _l2_step_runners(part_number: str) -> dict[str, StepRunner]:
+    def setup() -> None:
+        from drive_qual.workflows.fortress_l2 import run_l2_setup
+
+        run_l2_setup(part_number)
+
+    return {
+        "drive_info": setup,
+        "power_measurements": lambda: _run_l2_power_step(part_number),
+        "performance": lambda: _run_l2_performance_step(part_number),
+    }
+
+
 def _run_temperature_step(part_number: str | None = None, *, restart: bool = False) -> None:
     from drive_qual.workflows.temperature import run_temperature_step
 
@@ -88,6 +112,36 @@ def _run_reliability_step(part_number: str | None = None) -> None:
     from drive_qual.platforms.windows.reliability import run_reliability_step
 
     run_reliability_step(part_number=part_number)
+
+
+def _validate_l2_power_capture(part_number: str) -> None:
+    report = load_report(report_path_for(sanitize_dir_name(part_number)))
+    fields = report.get("power", {}).get("Fortress L2", {})
+    host = platform_key()
+    missing = [
+        field
+        for field in required_power_fields_for_dut("Fortress L2")
+        if not isinstance(fields.get(field), dict) or not _has_value(fields[field].get(host))
+    ]
+    if missing:
+        raise RuntimeError(f"Fortress L2 {host} power capture is incomplete: {', '.join(missing)}.")
+
+
+def _validate_l2_performance_capture(part_number: str) -> None:
+    report = load_report(report_path_for(sanitize_dir_name(part_number)))
+    equipment = report.get("equipment", {})
+    host_key = f"{platform_key()}_host"
+    os_name = dict(PERFORMANCE_HOSTS)[host_key]
+    results = report.get("performance", {}).get("Fortress L2", {}).get(os_name, {})
+    missing = [
+        name
+        for software in _software_entries_for_host(equipment, host_key)
+        if isinstance(name := software.get("name"), str)
+        and name.strip()
+        and not _is_performance_measurement_complete(name, results.get(name))
+    ]
+    if missing:
+        raise RuntimeError(f"Fortress L2 {os_name} performance capture is incomplete: {', '.join(missing)}.")
 
 
 def _has_value(value: Any) -> bool:
@@ -235,7 +289,7 @@ def _clear_current_session_if_workflow_complete(part_number: str | None) -> None
         print(f"Removed completed session {folder_name} from the current-session registry.")
 
 
-def run_report_workflow(
+def run_report_workflow(  # noqa: PLR0913
     steps: list[str] | None = None,
     *,
     part_number: str | None = None,
@@ -243,11 +297,22 @@ def run_report_workflow(
     profile: str | None = None,
     resume: bool = False,
     restart_temperature: bool = False,
+    l2: bool = False,
 ) -> None:
     reset_current_session_selection()
+    l2_mode = l2 or profile == "fortress-l2"
+    if l2_mode:
+        if profile not in (None, "fortress-l2"):
+            raise ValueError("--l2 cannot be combined with another workflow profile.")
+        if part_number is None:
+            raise ValueError("Fortress L2 runs require --part-number. Use --list-l2-projects to see choices.")
+        from drive_qual.workflows.fortress_l2 import resolve_source_project, run_l2_setup
+
+        part_number = resolve_source_project(part_number)[0]
+
     selected = resolve_selected_steps(
         explicit_steps=steps,
-        default_steps=_default_steps(),
+        default_steps=("power_measurements", "performance", "temperature") if l2_mode else _default_steps(),
         profile=profile,
     )
     step_runners: dict[str, StepRunner] = {
@@ -259,6 +324,15 @@ def run_report_workflow(
         "temperature": lambda: _run_temperature_step(part_number=part_number, restart=restart_temperature),
         "reliability": lambda: _run_reliability_step(part_number=part_number),
     }
+    if l2_mode and part_number is not None:
+        if profile is None:
+            # Individual L2 steps prepare metadata without a separate setup command.
+            run_l2_setup(part_number)
+            report = load_report(report_path_for(sanitize_dir_name(part_number)))
+            duts = report.get("equipment", {}).get("dut")
+            if not isinstance(duts, dict) or set(duts) != {"Fortress L2"}:
+                _run_equipment_step(part_number=part_number, scope_profile=scope_profile)
+        step_runners.update(_l2_step_runners(part_number))
     for step in selected:
         if step not in step_runners:
             raise ValueError(f"Unknown workflow step: {step}")
@@ -313,6 +387,8 @@ def _run_report_workflow_cli() -> None:
         help="Resume a prior profiled run from workflow_run_manifest.json.",
     )
     parser.add_argument("--part-number", help="Apricorn part number for selecting the report folder.")
+    parser.add_argument("--l2", action="store_true", help="Capture Fortress L2 data for an L3 archive project.")
+    parser.add_argument("--list-l2-projects", action="store_true", help="List projects available for Fortress L2 runs.")
     parser.add_argument("--scope-profile", help="Apply a scope/probe profile (e.g., tektronix, rigol).")
     parser.add_argument(
         "--restart-temperature",
@@ -333,6 +409,12 @@ def _run_report_workflow_cli() -> None:
             print(f"  - {profile_name}")
         return
 
+    if args.list_l2_projects:
+        from drive_qual.workflows.fortress_l2 import list_l2_projects
+
+        list_l2_projects()
+        return
+
     steps = _parse_steps(args.steps) if args.steps else None
     run_report_workflow(
         steps,
@@ -341,6 +423,7 @@ def _run_report_workflow_cli() -> None:
         profile=args.profile,
         resume=args.resume,
         restart_temperature=args.restart_temperature,
+        l2=args.l2,
     )
 
 

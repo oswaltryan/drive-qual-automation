@@ -8,6 +8,7 @@ from pathlib import Path, PureWindowsPath
 from typing import Any
 
 CONFIG_ENV_VAR = "DRIVE_QUAL_CONFIG"
+OUTPUT_ROOT_ENV_VAR = "DRIVE_QUAL_OUTPUT_ROOT"
 DEFAULT_CONFIG_PATH = Path(__file__).resolve().parents[3] / "drive_qual.toml"
 PLATFORM_KEYS: dict[str, str] = {
     "win32": "windows",
@@ -82,6 +83,9 @@ def platform_key(platform_name: str | None = None) -> str:
 
 
 def windows_share_root() -> str:
+    override = os.environ.get(OUTPUT_ROOT_ENV_VAR)
+    if override:
+        return PureWindowsPath(override).as_posix()
     return PureWindowsPath(_string("paths", "windows")).as_posix()
 
 

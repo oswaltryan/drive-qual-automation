@@ -5,10 +5,18 @@ import time
 from pathlib import Path, PureWindowsPath
 from typing import Any
 
+from drive_qual.core.config import platform_key
 from drive_qual.core.report_session import current_session_folder_name, sanitize_dir_name
 from drive_qual.core.storage_paths import SCOPE_ARTIFACT_ROOT, localize_windows_path
 
 WORKFLOW_PROFILES: dict[str, tuple[str, ...]] = {
+    "fortress-l2": (
+        "drive_info",
+        "equipment",
+        "power_measurements",
+        "performance",
+        "temperature",
+    ),
     "default": (
         "drive_info",
         "equipment",
@@ -163,7 +171,12 @@ def _initialize_manifest(
         raise ValueError("Orchestrated runs require --part-number or an active session marker.")
 
     manifest_path = _manifest_path_for_folder(folder_name)
+    legacy_manifest_path = manifest_path
+    if effective_profile == "fortress-l2":
+        manifest_path = manifest_path.with_name(f"workflow_run_manifest_{platform_key()}.json")
     manifest = _load_manifest(manifest_path) if resume else {}
+    if resume and not manifest and effective_profile == "fortress-l2" and platform_key() == "windows":
+        manifest = _load_manifest(legacy_manifest_path)
     if not manifest:
         manifest = _new_manifest(profile=effective_profile, part_number=part_number, selected_steps=selected_steps)
         return manifest_path, manifest

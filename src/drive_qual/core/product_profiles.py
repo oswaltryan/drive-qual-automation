@@ -38,6 +38,12 @@ class ProductProfile:
 
 PRODUCT_PROFILES: tuple[ProductProfile, ...] = (
     ProductProfile("fortress", "Fortress", form_factors=("2.5",), case_material="plastic"),
+    ProductProfile(
+        "fortress_l2",
+        "Fortress L2",
+        artifact_aliases=("Fortress", "Aegis Fortress"),
+        case_material="plastic",
+    ),
     ProductProfile("fortress_l3", "Fortress L3", form_factors=("2.5",), case_material="aluminum"),
     ProductProfile("padlock_3_0", "Padlock 3.0", form_factors=("2.5",), case_material="plastic"),
     ProductProfile(

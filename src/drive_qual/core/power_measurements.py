@@ -309,9 +309,13 @@ def _resolve_csv_root(data: dict[str, Any], folder_name: str, requested_part_num
 
 def _report_power_data(csv_path: str) -> tuple[Path, Path, dict[str, Any], dict[str, Any]] | None:
     win_path = PureWindowsPath(csv_path)
-    if len(win_path.parts) < PATH_PARTS_MIN:
+    try:
+        relative_path = win_path.relative_to(PureWindowsPath(SCOPE_ARTIFACT_ROOT))
+    except ValueError:
         return None
-    part_number = win_path.parts[DUT_PATH_PART_NUMBER_INDEX]
+    if len(relative_path.parts) < PATH_PARTS_MIN - 1:
+        return None
+    part_number = relative_path.parts[0]
     folder_name = sanitize_dir_name(part_number)
     if not folder_name:
         return None
